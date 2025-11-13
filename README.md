@@ -1,0 +1,2 @@
+# rus
+Rust URL Shortener
