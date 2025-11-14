@@ -1,6 +1,6 @@
 [package]
 name = "rus"
-version = "0.1.0"
+version = "0.2.1"
 edition = "2021"
 
 [dependencies]
@@ -15,3 +15,4 @@ bcrypt = "0.15"
 jsonwebtoken = "9.2"
 chrono = { version = "0.4", features = ["serde"] }
 actix-web-httpauth = "0.8"
+dotenvy = "0.15"
