@@ -4,14 +4,14 @@ use actix_web_httpauth::middleware::HttpAuthentication;
 use serde::{Deserialize, Serialize};
 use rusqlite::{Connection, params};
 use std::sync::Mutex;
+use std::env;
 use rand::Rng;
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
 use chrono::{Utc, Duration};
 
-// JWT Secret - In production, use environment variable
-const JWT_SECRET: &str = "your-secret-key-change-this-in-production";
 const TOKEN_EXPIRY_HOURS: i64 = 24;
+const HOST: &str = "0.0.0.0";
 
 // Data structures
 #[derive(Serialize, Deserialize)]
@@ -86,6 +86,14 @@ fn generate_short_code() -> String {
         .collect()
 }
 
+// Helper function to get JWT secret from environment
+fn get_jwt_secret() -> String {
+    env::var("JWT_SECRET").unwrap_or_else(|_| {
+        eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
+        "your-secret-key-change-this-in-production".to_string()
+    })
+}
+
 // JWT helper functions
 fn create_jwt(username: &str, user_id: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = Utc::now()
@@ -99,17 +107,19 @@ fn create_jwt(username: &str, user_id: i64) -> Result<String, jsonwebtoken::erro
         exp: expiration as usize,
     };
 
+    let secret = get_jwt_secret();
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(JWT_SECRET.as_ref()),
+        &EncodingKey::from_secret(secret.as_ref()),
     )
 }
 
 fn decode_jwt(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+    let secret = get_jwt_secret();
     let token_data = decode::<Claims>(
         token,
-        &DecodingKey::from_secret(JWT_SECRET.as_ref()),
+        &DecodingKey::from_secret(secret.as_ref()),
         &Validation::default(),
     )?;
     Ok(token_data.claims)
@@ -429,6 +439,45 @@ async fn get_user_urls(
     Ok(HttpResponse::Ok().json(urls))
 }
 
+// Protected endpoint to delete a URL
+async fn delete_url(
+    data: web::Data<AppState>,
+    code: web::Path<String>,
+    http_req: HttpRequest,
+) -> Result<HttpResponse> {
+    let claims = match get_claims(&http_req) {
+        Some(c) => c,
+        None => {
+            return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Unauthorized"
+            })));
+        }
+    };
+
+    let db = data.db.lock().unwrap();
+
+    // Delete the URL only if it belongs to the current user
+    match db.execute(
+        "DELETE FROM urls WHERE short_code = ?1 AND user_id = ?2",
+        params![code.as_str(), claims.user_id],
+    ) {
+        Ok(rows_affected) => {
+            if rows_affected > 0 {
+                Ok(HttpResponse::Ok().json(serde_json::json!({
+                    "message": "URL deleted successfully"
+                })))
+            } else {
+                Ok(HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "Short URL not found or not owned by you"
+                })))
+            }
+        }
+        Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": "Failed to delete URL"
+        }))),
+    }
+}
+
 // Serve static HTML pages
 async fn index() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
@@ -468,7 +517,10 @@ async fn serve_auth_js() -> Result<HttpResponse> {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("🚀 Starting Rust URL Shortener with Authentication on http://localhost:8080");
+    // Load environment variables from .env file
+    dotenvy::dotenv().ok();
+
+    println!("🚀 Starting Rust URL Shortener with Authentication on {}:8080", HOST);
 
     // Initialize database connection
     let db_path = "./data/rus.db";
@@ -502,9 +554,10 @@ async fn main() -> std::io::Result<()> {
                     .route("/shorten", web::post().to(shorten_url))
                     .route("/stats/{code}", web::get().to(get_stats))
                     .route("/urls", web::get().to(get_user_urls))
+                    .route("/urls/{code}", web::delete().to(delete_url))
             )
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind((HOST, 8080))?
     .run()
     .await
 }
