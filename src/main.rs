@@ -30,6 +30,7 @@ struct ShortenResponse {
 struct UrlEntry {
     original_url: String,
     short_code: String,
+    name: Option<String>,
     clicks: u64,
 }
 
@@ -49,6 +50,11 @@ struct LoginRequest {
 struct AuthResponse {
     token: String,
     username: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct UpdateUrlNameRequest {
+    name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -386,13 +392,14 @@ async fn get_stats(
 
     // Get URL entry for this user
     let result: rusqlite::Result<UrlEntry> = db.query_row(
-        "SELECT original_url, short_code, clicks FROM urls WHERE short_code = ?1 AND user_id = ?2",
+        "SELECT original_url, short_code, name, clicks FROM urls WHERE short_code = ?1 AND user_id = ?2",
         params![code.as_str(), claims.user_id],
         |row| {
             Ok(UrlEntry {
                 original_url: row.get(0)?,
                 short_code: row.get(1)?,
-                clicks: row.get(2)?,
+                name: row.get(2)?,
+                clicks: row.get(3)?,
             })
         },
     );
@@ -422,14 +429,15 @@ async fn get_user_urls(
     let db = data.db.lock().unwrap();
 
     let mut stmt = db.prepare(
-        "SELECT original_url, short_code, clicks FROM urls WHERE user_id = ?1 ORDER BY created_at DESC"
+        "SELECT original_url, short_code, name, clicks FROM urls WHERE user_id = ?1 ORDER BY created_at DESC"
     ).map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 
     let urls: Vec<UrlEntry> = stmt.query_map(params![claims.user_id], |row| {
         Ok(UrlEntry {
             original_url: row.get(0)?,
             short_code: row.get(1)?,
-            clicks: row.get(2)?,
+            name: row.get(2)?,
+            clicks: row.get(3)?,
         })
     })
     .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?
@@ -474,6 +482,46 @@ async fn delete_url(
         }
         Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
             "error": "Failed to delete URL"
+        }))),
+    }
+}
+
+// Protected endpoint to update URL name
+async fn update_url_name(
+    data: web::Data<AppState>,
+    code: web::Path<String>,
+    req_payload: web::Json<UpdateUrlNameRequest>,
+    http_req: HttpRequest,
+) -> Result<HttpResponse> {
+    let claims = match get_claims(&http_req) {
+        Some(c) => c,
+        None => {
+            return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Unauthorized"
+            })));
+        }
+    };
+
+    let db = data.db.lock().unwrap();
+
+    // Update the URL name only if it belongs to the current user
+    match db.execute(
+        "UPDATE urls SET name = ?1 WHERE short_code = ?2 AND user_id = ?3",
+        params![req_payload.name.as_deref(), code.as_str(), claims.user_id],
+    ) {
+        Ok(rows_affected) => {
+            if rows_affected > 0 {
+                Ok(HttpResponse::Ok().json(serde_json::json!({
+                    "message": "URL name updated successfully"
+                })))
+            } else {
+                Ok(HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "Short URL not found or not owned by you"
+                })))
+            }
+        }
+        Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": "Failed to update URL name"
         }))),
     }
 }
@@ -555,6 +603,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/stats/{code}", web::get().to(get_stats))
                     .route("/urls", web::get().to(get_user_urls))
                     .route("/urls/{code}", web::delete().to(delete_url))
+                    .route("/urls/{code}/name", web::patch().to(update_url_name))
             )
     })
     .bind((HOST, 8080))?
