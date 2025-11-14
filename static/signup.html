@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up - Rust URL Shortener</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-content">
+            <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="login.html">Log In</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="auth-card">
+            <h1>Create Account</h1>
+            <p class="subtitle">Sign up to start shortening your URLs</p>
+
+            <form id="signupForm">
+                <div class="input-group">
+                    <label for="username">Username</label>
+                    <input
+                        type="text"
+                        id="username"
+                        placeholder="Choose a username (min 3 characters)"
+                        required
+                        autocomplete="username"
+                        minlength="3"
+                    />
+                    <small class="input-hint">At least 3 characters</small>
+                </div>
+
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input
+                        type="password"
+                        id="password"
+                        placeholder="Choose a password (min 6 characters)"
+                        required
+                        autocomplete="new-password"
+                        minlength="6"
+                    />
+                    <small class="input-hint">At least 6 characters</small>
+                </div>
+
+                <div class="input-group">
+                    <label for="confirmPassword">Confirm Password</label>
+                    <input
+                        type="password"
+                        id="confirmPassword"
+                        placeholder="Confirm your password"
+                        required
+                        autocomplete="new-password"
+                        minlength="6"
+                    />
+                </div>
+
+                <div class="error" id="error"></div>
+
+                <button type="submit" id="signupBtn">Create Account</button>
+            </form>
+
+            <p class="auth-switch">
+                Already have an account? <a href="login.html">Log in here</a>
+            </p>
+        </div>
+    </div>
+
+    <script src="auth.js"></script>
+    <script>
+        const form = document.getElementById('signupForm');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const confirmPasswordInput = document.getElementById('confirmPassword');
+        const signupBtn = document.getElementById('signupBtn');
+        const errorDiv = document.getElementById('error');
+
+        // Check if already logged in
+        if (getToken()) {
+            window.location.href = 'dashboard.html';
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+            const confirmPassword = confirmPasswordInput.value;
+
+            // Validation
+            if (username.length < 3) {
+                showError('Username must be at least 3 characters');
+                return;
+            }
+
+            if (password.length < 6) {
+                showError('Password must be at least 6 characters');
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                showError('Passwords do not match');
+                return;
+            }
+
+            errorDiv.classList.remove('show');
+            signupBtn.disabled = true;
+            signupBtn.textContent = 'Creating account...';
+
+            try {
+                const response = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Registration failed');
+                }
+
+                // Save token and username
+                saveAuth(data.token, data.username);
+
+                // Redirect to dashboard
+                window.location.href = 'dashboard.html';
+            } catch (error) {
+                showError(error.message);
+                signupBtn.disabled = false;
+                signupBtn.textContent = 'Create Account';
+            }
+        });
+
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+        }
+    </script>
+</body>
+</html>

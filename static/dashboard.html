@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Rust URL Shortener</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-content">
+            <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
+            <div class="nav-links">
+                <span class="user-info">👤 <span id="username"></span></span>
+                <button id="logoutBtn" class="logout-btn">Log Out</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container dashboard">
+        <div class="dashboard-header">
+            <h1>My Dashboard</h1>
+            <p class="subtitle">Manage your shortened URLs</p>
+        </div>
+
+        <div class="create-section">
+            <h2>Create New Short URL</h2>
+            <form id="createForm">
+                <div class="input-group">
+                    <label for="urlInput">Enter your long URL:</label>
+                    <input
+                        type="url"
+                        id="urlInput"
+                        placeholder="https://example.com/very/long/url"
+                        required
+                    />
+                </div>
+                <button type="submit" id="createBtn">Shorten URL</button>
+            </form>
+            <div class="error" id="error"></div>
+            <div class="success" id="success"></div>
+        </div>
+
+        <div class="urls-section">
+            <div class="section-header">
+                <h2>Your URLs</h2>
+                <button id="refreshBtn" class="refresh-btn">🔄 Refresh</button>
+            </div>
+
+            <div id="loading" class="loading">Loading your URLs...</div>
+            <div id="emptyState" class="empty-state" style="display: none;">
+                <div class="empty-icon">📎</div>
+                <h3>No URLs yet</h3>
+                <p>Create your first shortened URL using the form above!</p>
+            </div>
+
+            <div id="urlsList" class="urls-list"></div>
+        </div>
+    </div>
+
+    <script src="auth.js"></script>
+    <script>
+        // Check authentication
+        const token = getToken();
+        const username = getUsername();
+
+        if (!token) {
+            window.location.href = 'login.html';
+        }
+
+        // Display username
+        document.getElementById('username').textContent = username;
+
+        // Elements
+        const createForm = document.getElementById('createForm');
+        const urlInput = document.getElementById('urlInput');
+        const createBtn = document.getElementById('createBtn');
+        const errorDiv = document.getElementById('error');
+        const successDiv = document.getElementById('success');
+        const urlsList = document.getElementById('urlsList');
+        const loading = document.getElementById('loading');
+        const emptyState = document.getElementById('emptyState');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const refreshBtn = document.getElementById('refreshBtn');
+
+        // Logout handler
+        logoutBtn.addEventListener('click', () => {
+            logout();
+            window.location.href = 'login.html';
+        });
+
+        // Create URL handler
+        createForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const url = urlInput.value.trim();
+            if (!url) return;
+
+            errorDiv.classList.remove('show');
+            successDiv.classList.remove('show');
+            createBtn.disabled = true;
+            createBtn.textContent = 'Shortening...';
+
+            try {
+                const response = await fetch('/api/shorten', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ url }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        logout();
+                        window.location.href = 'login.html';
+                        return;
+                    }
+                    throw new Error(data.error || 'Failed to shorten URL');
+                }
+
+                // Show success message
+                successDiv.innerHTML = `
+                    <strong>✓ URL shortened successfully!</strong><br>
+                    Short URL: <a href="/${data.short_code}" target="_blank">${data.short_url}</a>
+                `;
+                successDiv.classList.add('show');
+
+                // Clear form
+                urlInput.value = '';
+
+                // Reload URLs list
+                await loadUrls();
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                createBtn.disabled = false;
+                createBtn.textContent = 'Shorten URL';
+            }
+        });
+
+        // Load URLs
+        async function loadUrls() {
+            loading.style.display = 'block';
+            urlsList.innerHTML = '';
+            emptyState.style.display = 'none';
+            errorDiv.classList.remove('show');
+
+            try {
+                const response = await fetch('/api/urls', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        logout();
+                        window.location.href = 'login.html';
+                        return;
+                    }
+                    throw new Error('Failed to load URLs');
+                }
+
+                const urls = await response.json();
+
+                loading.style.display = 'none';
+
+                if (urls.length === 0) {
+                    emptyState.style.display = 'block';
+                    return;
+                }
+
+                urls.forEach(urlEntry => {
+                    const urlCard = createUrlCard(urlEntry);
+                    urlsList.appendChild(urlCard);
+                });
+            } catch (error) {
+                loading.style.display = 'none';
+                showError('Failed to load URLs: ' + error.message);
+            }
+        }
+
+        // Create URL card element
+        function createUrlCard(urlEntry) {
+            const card = document.createElement('div');
+            card.className = 'url-card';
+
+            const shortUrl = `http://localhost:8080/${urlEntry.short_code}`;
+
+            card.innerHTML = `
+                <div class="url-card-header">
+                    <div class="url-info">
+                        <div class="short-code">/${urlEntry.short_code}</div>
+                        <div class="original-url">${urlEntry.original_url}</div>
+                    </div>
+                    <div class="url-stats">
+                        <div class="stat">
+                            <span class="stat-value">${urlEntry.clicks}</span>
+                            <span class="stat-label">Clicks</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="url-card-actions">
+                    <input type="text" value="${shortUrl}" readonly class="url-display">
+                    <button class="copy-btn" onclick="copyToClipboard('${shortUrl}', this)">Copy</button>
+                    <a href="/${urlEntry.short_code}" target="_blank" class="visit-btn">Visit</a>
+                </div>
+            `;
+
+            return card;
+        }
+
+        // Copy to clipboard
+        window.copyToClipboard = async function(text, button) {
+            try {
+                await navigator.clipboard.writeText(text);
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('copied');
+
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('copied');
+                }, 2000);
+            } catch (error) {
+                alert('Failed to copy to clipboard');
+            }
+        };
+
+        // Refresh button
+        refreshBtn.addEventListener('click', loadUrls);
+
+        // Show error
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+        }
+
+        // Initial load
+        loadUrls();
+    </script>
+</body>
+</html>

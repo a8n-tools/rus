@@ -1,0 +1,489 @@
+/* Global Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding-bottom: 40px;
+}
+
+/* Navigation Bar */
+.navbar {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    padding: 15px 0;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+}
+
+.nav-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-brand {
+    font-size: 1.5em;
+    font-weight: 700;
+    color: #667eea;
+    text-decoration: none;
+    transition: opacity 0.3s;
+}
+
+.nav-brand:hover {
+    opacity: 0.8;
+}
+
+.nav-links {
+    display: flex;
+    gap: 20px;
+    align-items: center;
+}
+
+.nav-links a {
+    color: #333;
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.3s;
+}
+
+.nav-links a:hover {
+    color: #667eea;
+}
+
+.user-info {
+    color: #555;
+    font-weight: 500;
+}
+
+.logout-btn {
+    background: #ef4444;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.3s;
+}
+
+.logout-btn:hover {
+    background: #dc2626;
+}
+
+/* Container */
+.container {
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 20px;
+}
+
+.container.dashboard {
+    max-width: 1200px;
+}
+
+/* Auth Card (Login/Signup) */
+.auth-card {
+    background: white;
+    border-radius: 20px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    padding: 40px;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.auth-card h1 {
+    color: #333;
+    margin-bottom: 10px;
+    font-size: 2em;
+    text-align: center;
+}
+
+.subtitle {
+    color: #666;
+    text-align: center;
+    margin-bottom: 30px;
+    font-size: 1.1em;
+}
+
+/* Form Styles */
+.input-group {
+    margin-bottom: 20px;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    color: #555;
+    font-weight: 500;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="url"] {
+    width: 100%;
+    padding: 15px;
+    border: 2px solid #e0e0e0;
+    border-radius: 10px;
+    font-size: 16px;
+    transition: border-color 0.3s;
+}
+
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="url"]:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+input[readonly] {
+    background: #f5f5f5;
+}
+
+.input-hint {
+    display: block;
+    margin-top: 5px;
+    color: #888;
+    font-size: 0.9em;
+}
+
+button[type="submit"] {
+    width: 100%;
+    padding: 15px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+button[type="submit"]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+}
+
+button[type="submit"]:active {
+    transform: translateY(0);
+}
+
+button[type="submit"]:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Error and Success Messages */
+.error {
+    color: #ef4444;
+    margin-top: 10px;
+    padding: 12px;
+    background: #fee;
+    border-radius: 8px;
+    display: none;
+    border-left: 4px solid #ef4444;
+}
+
+.error.show {
+    display: block;
+    animation: slideIn 0.3s ease-out;
+}
+
+.success {
+    color: #10b981;
+    margin-top: 20px;
+    padding: 12px;
+    background: #d1fae5;
+    border-radius: 8px;
+    display: none;
+    border-left: 4px solid #10b981;
+}
+
+.success.show {
+    display: block;
+    animation: slideIn 0.3s ease-out;
+}
+
+.success a {
+    color: #059669;
+    font-weight: 600;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Auth Switch Link */
+.auth-switch {
+    text-align: center;
+    margin-top: 20px;
+    color: #666;
+}
+
+.auth-switch a {
+    color: #667eea;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.auth-switch a:hover {
+    text-decoration: underline;
+}
+
+/* Dashboard Styles */
+.dashboard-header {
+    background: white;
+    border-radius: 20px;
+    padding: 30px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard-header h1 {
+    color: #333;
+    font-size: 2.5em;
+}
+
+.create-section {
+    background: white;
+    border-radius: 20px;
+    padding: 30px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.create-section h2 {
+    color: #333;
+    margin-bottom: 20px;
+    font-size: 1.5em;
+}
+
+.urls-section {
+    background: white;
+    border-radius: 20px;
+    padding: 30px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.section-header h2 {
+    color: #333;
+    font-size: 1.5em;
+}
+
+.refresh-btn {
+    background: #667eea;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.3s;
+}
+
+.refresh-btn:hover {
+    background: #5568d3;
+}
+
+/* Loading State */
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: #666;
+    font-size: 1.1em;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.empty-icon {
+    font-size: 4em;
+    margin-bottom: 20px;
+}
+
+.empty-state h3 {
+    color: #333;
+    margin-bottom: 10px;
+}
+
+.empty-state p {
+    color: #666;
+}
+
+/* URL Card */
+.urls-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.url-card {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 20px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.url-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.url-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 15px;
+    gap: 20px;
+}
+
+.url-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.short-code {
+    font-size: 1.2em;
+    font-weight: 700;
+    color: #667eea;
+    margin-bottom: 5px;
+    font-family: 'Courier New', monospace;
+}
+
+.original-url {
+    color: #666;
+    font-size: 0.9em;
+    word-break: break-all;
+}
+
+.url-stats {
+    display: flex;
+    gap: 20px;
+}
+
+.stat {
+    text-align: center;
+    background: white;
+    padding: 10px 20px;
+    border-radius: 8px;
+}
+
+.stat-value {
+    display: block;
+    font-size: 1.5em;
+    font-weight: 700;
+    color: #667eea;
+}
+
+.stat-label {
+    display: block;
+    font-size: 0.8em;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.url-card-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.url-display {
+    flex: 1;
+    padding: 10px;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    font-size: 14px;
+    background: white;
+}
+
+.copy-btn,
+.visit-btn {
+    padding: 10px 20px;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background 0.3s;
+    white-space: nowrap;
+}
+
+.copy-btn:hover,
+.visit-btn:hover {
+    background: #5568d3;
+}
+
+.copy-btn.copied {
+    background: #10b981;
+}
+
+.visit-btn {
+    background: #10b981;
+}
+
+.visit-btn:hover {
+    background: #059669;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .nav-content {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .url-card-header {
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .url-card-actions {
+        flex-direction: column;
+    }
+
+    .url-display {
+        width: 100%;
+    }
+
+    .copy-btn,
+    .visit-btn {
+        width: 100%;
+    }
+
+    .auth-card {
+        padding: 30px 20px;
+    }
+}
