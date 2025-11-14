@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Rust URL Shortener</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-content">
+            <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="signup.html">Sign Up</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="auth-card">
+            <h1>Welcome Back</h1>
+            <p class="subtitle">Log in to manage your shortened URLs</p>
+
+            <form id="loginForm">
+                <div class="input-group">
+                    <label for="username">Username</label>
+                    <input
+                        type="text"
+                        id="username"
+                        placeholder="Enter your username"
+                        required
+                        autocomplete="username"
+                    />
+                </div>
+
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input
+                        type="password"
+                        id="password"
+                        placeholder="Enter your password"
+                        required
+                        autocomplete="current-password"
+                    />
+                </div>
+
+                <div class="error" id="error"></div>
+
+                <button type="submit" id="loginBtn">Log In</button>
+            </form>
+
+            <p class="auth-switch">
+                Don't have an account? <a href="signup.html">Sign up here</a>
+            </p>
+        </div>
+    </div>
+
+    <script src="auth.js"></script>
+    <script>
+        const form = document.getElementById('loginForm');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const loginBtn = document.getElementById('loginBtn');
+        const errorDiv = document.getElementById('error');
+
+        // Check if already logged in
+        if (getToken()) {
+            window.location.href = 'dashboard.html';
+        }
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!username || !password) {
+                showError('Please enter both username and password');
+                return;
+            }
+
+            errorDiv.classList.remove('show');
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Logging in...';
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, password }),
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Login failed');
+                }
+
+                // Save token and username
+                saveAuth(data.token, data.username);
+
+                // Redirect to dashboard
+                window.location.href = 'dashboard.html';
+            } catch (error) {
+                showError(error.message);
+                loginBtn.disabled = false;
+                loginBtn.textContent = 'Log In';
+            }
+        });
+
+        function showError(message) {
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+        }
+    </script>
+</body>
+</html>

@@ -429,11 +429,41 @@ async fn get_user_urls(
     Ok(HttpResponse::Ok().json(urls))
 }
 
-// Serve the main HTML page
+// Serve static HTML pages
 async fn index() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(include_str!("../static/index.html")))
+}
+
+async fn login_page() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../static/login.html")))
+}
+
+async fn signup_page() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../static/signup.html")))
+}
+
+async fn dashboard_page() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../static/dashboard.html")))
+}
+
+async fn serve_css() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/css; charset=utf-8")
+        .body(include_str!("../static/styles.css")))
+}
+
+async fn serve_auth_js() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("application/javascript; charset=utf-8")
+        .body(include_str!("../static/auth.js")))
 }
 
 #[actix_web::main]
@@ -457,6 +487,11 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::Logger::default())
             // Public routes
             .route("/", web::get().to(index))
+            .route("/login.html", web::get().to(login_page))
+            .route("/signup.html", web::get().to(signup_page))
+            .route("/dashboard.html", web::get().to(dashboard_page))
+            .route("/styles.css", web::get().to(serve_css))
+            .route("/auth.js", web::get().to(serve_auth_js))
             .route("/api/register", web::post().to(register))
             .route("/api/login", web::post().to(login))
             .route("/{code}", web::get().to(redirect_url))
