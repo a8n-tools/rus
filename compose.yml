@@ -1,0 +1,12 @@
+services:
+  sqlite:
+    image: nouchka/sqlite3:latest
+    volumes:
+      - sqlite_data:/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: sh -c "sqlite3 /data/rus.db < /docker-entrypoint-initdb.d/init.sql && tail -f /dev/null"
+    restart: unless-stopped
+
+volumes:
+  sqlite_data:
+    driver: local
