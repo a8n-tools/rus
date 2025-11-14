@@ -1,0 +1,11 @@
+services:
+  # Meant to be ran one time to create the database
+  # docker compose -f compose-sqlite.yml run sqlite
+  sqlite:
+      image: keinos/sqlite3:latest
+      volumes:
+        - ./data:/data
+        - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      user: 1000:1000
+      command: sh -c "touch /data/rus.db && sqlite3 /data/rus.db < /docker-entrypoint-initdb.d/init.sql && chmod 664 /data/rus.db && tail -f /dev/null"
+      restart: unless-stopped
