@@ -10,8 +10,101 @@ use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
 use chrono::{Utc, Duration};
 
+// Configuration structure
+#[derive(Clone, Debug)]
+struct Config {
+    jwt_secret: String,
+    jwt_expiry_hours: i64,
+    refresh_token_expiry_days: i64,
+    max_url_length: usize,
+    account_lockout_attempts: i32,
+    account_lockout_duration_minutes: i64,
+    click_retention_days: i64,
+    host_url: String,
+    db_path: String,
+    host: String,
+    port: u16,
+}
+
+impl Config {
+    fn from_env() -> Self {
+        let jwt_secret = env::var("JWT_SECRET").unwrap_or_else(|_| {
+            eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
+            "your-secret-key-change-this-in-production".to_string()
+        });
+
+        let jwt_expiry_hours = env::var("JWT_EXPIRY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1);
+
+        let refresh_token_expiry_days = env::var("REFRESH_TOKEN_EXPIRY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(7);
+
+        let max_url_length = env::var("MAX_URL_LENGTH")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2048);
+
+        let account_lockout_attempts = env::var("ACCOUNT_LOCKOUT_ATTEMPTS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5);
+
+        let account_lockout_duration_minutes = env::var("ACCOUNT_LOCKOUT_DURATION")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+
+        let click_retention_days = env::var("CLICK_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+
+        let host_url = env::var("HOST_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+
+        let db_path = env::var("DB_PATH")
+            .unwrap_or_else(|_| "./data/rus.db".to_string());
+
+        let host = env::var("HOST")
+            .unwrap_or_else(|_| "0.0.0.0".to_string());
+
+        let port = env::var("PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8080);
+
+        Config {
+            jwt_secret,
+            jwt_expiry_hours,
+            refresh_token_expiry_days,
+            max_url_length,
+            account_lockout_attempts,
+            account_lockout_duration_minutes,
+            click_retention_days,
+            host_url,
+            db_path,
+            host,
+            port,
+        }
+    }
+}
+
+// DEPRECATED: These will be removed when JWT functions are updated to use Config
+// Temporary backward compatibility for create_jwt() and decode_jwt()
 const TOKEN_EXPIRY_HOURS: i64 = 24;
-const HOST: &str = "0.0.0.0";
+
+// DEPRECATED: Helper function to get JWT secret from environment
+// This will be replaced by Config.jwt_secret when JWT functions are updated
+fn get_jwt_secret() -> String {
+    env::var("JWT_SECRET").unwrap_or_else(|_| {
+        eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
+        "your-secret-key-change-this-in-production".to_string()
+    })
+}
 
 // Data structures
 #[derive(Serialize, Deserialize)]
@@ -67,13 +160,15 @@ struct Claims {
 // Application state
 struct AppState {
     db: Mutex<Connection>,
+    config: Config,
 }
 
 impl AppState {
-    fn new(db_path: &str) -> rusqlite::Result<Self> {
-        let conn = Connection::open(db_path)?;
+    fn new(config: Config) -> rusqlite::Result<Self> {
+        let conn = Connection::open(&config.db_path)?;
         Ok(AppState {
             db: Mutex::new(conn),
+            config,
         })
     }
 }
@@ -596,16 +691,36 @@ async fn main() -> std::io::Result<()> {
     // Load environment variables from .env file
     dotenvy::dotenv().ok();
 
-    println!("🚀 Starting Rust URL Shortener with Authentication on {}:8080", HOST);
+    // Load configuration from environment
+    let config = Config::from_env();
+
+    // Print startup banner with configuration
+    println!("========================================");
+    println!("  Rust URL Shortener - Configuration");
+    println!("========================================");
+    println!("Host: {}", config.host);
+    println!("Port: {}", config.port);
+    println!("Host URL: {}", config.host_url);
+    println!("Database Path: {}", config.db_path);
+    println!("JWT Expiry: {} hours", config.jwt_expiry_hours);
+    println!("Refresh Token Expiry: {} days", config.refresh_token_expiry_days);
+    println!("Max URL Length: {}", config.max_url_length);
+    println!("Account Lockout Attempts: {}", config.account_lockout_attempts);
+    println!("Account Lockout Duration: {} minutes", config.account_lockout_duration_minutes);
+    println!("Click Retention: {} days", config.click_retention_days);
+    println!("========================================");
+
+    let bind_host = config.host.clone();
+    let bind_port = config.port;
 
     // Initialize database connection
-    let db_path = "./data/rus.db";
     let app_state = web::Data::new(
-        AppState::new(db_path)
+        AppState::new(config)
             .expect("Failed to connect to database. Make sure the SQLite container is running and ./data/rus.db exists.")
     );
 
-    println!("✓ Connected to database at {}", db_path);
+    println!("✓ Database connection established");
+    println!("🚀 Starting server on {}:{}", bind_host, bind_port);
 
     HttpServer::new(move || {
         let auth = HttpAuthentication::bearer(jwt_validator);
@@ -634,7 +749,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/urls/{code}/name", web::patch().to(update_url_name))
             )
     })
-    .bind((HOST, 8080))?
+    .bind((bind_host.as_str(), bind_port))?
     .run()
     .await
 }
