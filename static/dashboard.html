@@ -190,7 +190,7 @@
             card.className = 'url-card';
             card.setAttribute('data-short-code', urlEntry.short_code);
 
-            const shortUrl = `http://localhost:8080/${urlEntry.short_code}`;
+            const shortUrl = `${window.location.origin}/${urlEntry.short_code}`;
             const displayName = urlEntry.name || 'Unnamed URL';
 
             card.innerHTML = `
