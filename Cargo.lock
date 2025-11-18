@@ -1850,7 +1850,7 @@ dependencies = [
 
 [[package]]
 name = "rus"
-version = "1.0.0"
+version = "0.10.5"
 dependencies = [
  "actix-files",
  "actix-rt",
