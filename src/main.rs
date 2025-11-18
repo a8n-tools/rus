@@ -9,6 +9,7 @@ use rand::Rng;
 use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
 use chrono::{Utc, Duration};
+use url::Url;
 
 // Configuration structure
 #[derive(Clone, Debug)]
@@ -229,6 +230,38 @@ fn record_login_attempt(db: &Connection, username: &str, success: bool) {
         "INSERT INTO login_attempts (username, success) VALUES (?1, ?2)",
         params![username, success as i32],
     );
+}
+
+// Validate URL for shortening
+fn validate_url(url_str: &str, max_length: usize) -> Result<(), String> {
+    if url_str.len() > max_length {
+        return Err(format!("URL exceeds maximum length of {} characters", max_length));
+    }
+
+    let parsed = Url::parse(url_str).map_err(|_| "Invalid URL format".to_string())?;
+
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err("Only http:// and https:// URLs are allowed".to_string());
+    }
+
+    // Block dangerous patterns
+    let dangerous_patterns = [
+        "javascript:",
+        "data:",
+        "file:",
+        "vbscript:",
+        "about:",
+    ];
+
+    let url_lower = url_str.to_lowercase();
+    for pattern in &dangerous_patterns {
+        if url_lower.contains(pattern) {
+            return Err(format!("URL contains blocked pattern: {}", pattern));
+        }
+    }
+
+    Ok(())
 }
 
 // JWT helper functions
@@ -456,6 +489,13 @@ async fn shorten_url(
         })));
     }
 
+    // Comprehensive URL validation
+    if let Err(error_message) = validate_url(&req_payload.url, data.config.max_url_length) {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": error_message
+        })));
+    }
+
     let db = data.db.lock().unwrap();
 
     // Check if URL is already shortened by this user
@@ -468,7 +508,7 @@ async fn shorten_url(
     ) {
         return Ok(HttpResponse::Ok().json(ShortenResponse {
             short_code: short_code.clone(),
-            short_url: format!("http://localhost:8080/{}", short_code),
+            short_url: format!("{}/{}", data.config.host_url, short_code),
             original_url: req_payload.url.clone(),
         }));
     }
@@ -497,7 +537,7 @@ async fn shorten_url(
     ) {
         Ok(_) => Ok(HttpResponse::Ok().json(ShortenResponse {
             short_code: short_code.clone(),
-            short_url: format!("http://localhost:8080/{}", short_code),
+            short_url: format!("{}/{}", data.config.host_url, short_code),
             original_url: req_payload.url.clone(),
         })),
         Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({

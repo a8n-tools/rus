@@ -16,7 +16,7 @@ This checklist tracks the implementation status of all feature prompts for the R
 - [x] **Chunk 02** - Password Validation
 - [x] **Chunk 03** - Login Attempts Tracking
 - [x] **Chunk 04** - Account Lockout
-- [~] **Chunk 05** - URL Validation (basic check only)
+- [x] **Chunk 05** - URL Validation
 - [ ] **Chunk 06** - Health Check Endpoint
 
 ### Refresh Token System
@@ -104,9 +104,9 @@ This checklist tracks the implementation status of all feature prompts for the R
 
 | Status | Count |
 |--------|-------|
-| Completed | 13 |
-| Partial | 8 |
+| Completed | 14 |
+| Partial | 7 |
 | Not Started | 22 |
 | **Total** | **43** |
 
-**Overall Progress: ~53% (with partial implementations)**
+**Overall Progress: ~55% (with partial implementations)**
