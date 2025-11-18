@@ -159,10 +159,18 @@ struct Claims {
     exp: usize,       // expiration time
 }
 
+#[derive(Serialize)]
+struct HealthResponse {
+    status: String,
+    version: String,
+    uptime_seconds: u64,
+}
+
 // Application state
 struct AppState {
     db: Mutex<Connection>,
     config: Config,
+    start_time: std::time::Instant,
 }
 
 impl AppState {
@@ -171,6 +179,7 @@ impl AppState {
         Ok(AppState {
             db: Mutex::new(conn),
             config,
+            start_time: std::time::Instant::now(),
         })
     }
 }
@@ -767,6 +776,17 @@ async fn serve_auth_js() -> Result<HttpResponse> {
         .body(include_str!("../static/auth.js")))
 }
 
+// Health check endpoint for monitoring and Docker health checks
+async fn health_check(data: web::Data<AppState>) -> Result<HttpResponse> {
+    let uptime = data.start_time.elapsed().as_secs();
+
+    Ok(HttpResponse::Ok().json(HealthResponse {
+        status: "healthy".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        uptime_seconds: uptime,
+    }))
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     // Load environment variables from .env file
@@ -818,6 +838,7 @@ async fn main() -> std::io::Result<()> {
             .route("/auth.js", web::get().to(serve_auth_js))
             .route("/api/register", web::post().to(register))
             .route("/api/login", web::post().to(login))
+            .route("/health", web::get().to(health_check))
             .route("/{code}", web::get().to(redirect_url))
             // Protected routes (require authentication)
             .service(
