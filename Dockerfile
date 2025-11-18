@@ -1,5 +1,8 @@
+
 # Build stage
-FROM rust:1.91 as builder
+FROM rust:1.91 AS builder
+
+LABEL org.opencontainers.image.source=https://github.com/joshrandall8478/rus
 
 WORKDIR /app
 
