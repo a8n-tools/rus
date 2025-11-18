@@ -209,6 +209,19 @@ fn validate_password(password: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Check if account is locked due to too many failed login attempts
+fn is_account_locked(db: &Connection, username: &str, max_attempts: i32, lockout_minutes: i64) -> bool {
+    let cutoff = Utc::now() - Duration::minutes(lockout_minutes);
+    let cutoff_str = cutoff.format("%Y-%m-%d %H:%M:%S").to_string();
+
+    let failed_attempts: i32 = db.query_row(
+        "SELECT COUNT(*) FROM login_attempts WHERE username = ?1 AND success = 0 AND attempted_at > ?2",
+        params![username, cutoff_str],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    failed_attempts >= max_attempts
+}
 
 // JWT helper functions
 fn create_jwt(username: &str, user_id: i64) -> Result<String, jsonwebtoken::errors::Error> {
@@ -340,6 +353,22 @@ async fn login(
     req: web::Json<LoginRequest>,
 ) -> Result<HttpResponse> {
     let db = data.db.lock().unwrap();
+
+    // Check for account lockout BEFORE any other database operations
+    // This prevents timing attacks that could reveal if a username exists
+    if is_account_locked(
+        &db,
+        &req.username,
+        data.config.account_lockout_attempts,
+        data.config.account_lockout_duration_minutes,
+    ) {
+        return Ok(HttpResponse::TooManyRequests().json(serde_json::json!({
+            "error": format!(
+                "Account locked due to too many failed attempts. Try again in {} minutes.",
+                data.config.account_lockout_duration_minutes
+            )
+        })));
+    }
 
     // Get user from database
     let mut stmt = match db.prepare("SELECT userID, username, password FROM users WHERE username = ?1") {
