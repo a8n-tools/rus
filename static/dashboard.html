@@ -123,9 +123,10 @@
                 }
 
                 // Show success message
+                const shortUrl = `${window.location.origin}/${data.short_code}`;
                 successDiv.innerHTML = `
                     <strong>✓ URL shortened successfully!</strong><br>
-                    Short URL: <a href="/${data.short_code}" target="_blank">${data.short_url}</a>
+                    Short URL: <a href="/${data.short_code}" target="_blank">${shortUrl}</a>
                 `;
                 successDiv.classList.add('show');
 
