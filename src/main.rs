@@ -96,6 +96,7 @@ impl Config {
 // DEPRECATED: These will be removed when JWT functions are updated to use Config
 // Temporary backward compatibility for create_jwt() and decode_jwt()
 const TOKEN_EXPIRY_HOURS: i64 = 24;
+const HOST: &str = "0.0.0.0";
 
 // DEPRECATED: Helper function to get JWT secret from environment
 // This will be replaced by Config.jwt_secret when JWT functions are updated
