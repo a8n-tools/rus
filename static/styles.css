@@ -5,22 +5,43 @@
     box-sizing: border-box;
 }
 
+:root {
+    /* Rust color palette */
+    --rust-orange: #f74c00;
+    --rust-orange-dark: #ce4300;
+    --rust-orange-light: #ff6b1a;
+    --rust-brown: #8b4513;
+    --rust-copper: #b87333;
+    --bg-dark: #1a1a1a;
+    --bg-darker: #0f0f0f;
+    --bg-card: #2a2a2a;
+    --bg-card-hover: #333333;
+    --text-primary: #f5f5f5;
+    --text-secondary: #a0a0a0;
+    --text-muted: #707070;
+    --border-color: #3a3a3a;
+    --success: #22c55e;
+    --error: #ef4444;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: var(--bg-darker);
     min-height: 100vh;
     padding-bottom: 40px;
+    color: var(--text-primary);
 }
 
 /* Navigation Bar */
 .navbar {
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--bg-card);
     backdrop-filter: blur(10px);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
     padding: 15px 0;
     position: sticky;
     top: 0;
     z-index: 1000;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .nav-content {
@@ -36,7 +57,7 @@ body {
 .nav-brand {
     font-size: 1.5em;
     font-weight: 700;
-    color: #667eea;
+    color: var(--rust-orange);
     text-decoration: none;
     transition: opacity 0.3s;
 }
@@ -52,23 +73,23 @@ body {
 }
 
 .nav-links a {
-    color: #333;
+    color: var(--text-primary);
     text-decoration: none;
     font-weight: 500;
     transition: color 0.3s;
 }
 
 .nav-links a:hover {
-    color: #667eea;
+    color: var(--rust-orange);
 }
 
 .user-info {
-    color: #555;
+    color: var(--text-secondary);
     font-weight: 500;
 }
 
 .logout-btn {
-    background: #ef4444;
+    background: var(--error);
     color: white;
     border: none;
     padding: 8px 16px;
@@ -95,23 +116,24 @@ body {
 
 /* Auth Card (Login/Signup) */
 .auth-card {
-    background: white;
+    background: var(--bg-card);
     border-radius: 20px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
     padding: 40px;
     max-width: 500px;
     margin: 0 auto;
+    border: 1px solid var(--border-color);
 }
 
 .auth-card h1 {
-    color: #333;
+    color: var(--text-primary);
     margin-bottom: 10px;
     font-size: 2em;
     text-align: center;
 }
 
 .subtitle {
-    color: #666;
+    color: var(--text-secondary);
     text-align: center;
     margin-bottom: 30px;
     font-size: 1.1em;
@@ -125,7 +147,7 @@ body {
 label {
     display: block;
     margin-bottom: 8px;
-    color: #555;
+    color: var(--text-secondary);
     font-weight: 500;
 }
 
@@ -134,34 +156,40 @@ input[type="password"],
 input[type="url"] {
     width: 100%;
     padding: 15px;
-    border: 2px solid #e0e0e0;
+    border: 2px solid var(--border-color);
     border-radius: 10px;
     font-size: 16px;
     transition: border-color 0.3s;
+    background: var(--bg-dark);
+    color: var(--text-primary);
 }
 
 input[type="text"]:focus,
 input[type="password"]:focus,
 input[type="url"]:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: var(--rust-orange);
 }
 
 input[readonly] {
-    background: #f5f5f5;
+    background: var(--bg-darker);
 }
 
 .input-hint {
     display: block;
     margin-top: 5px;
-    color: #888;
+    color: var(--text-muted);
     font-size: 0.9em;
+}
+
+input::placeholder {
+    color: var(--text-muted);
 }
 
 button[type="submit"] {
     width: 100%;
     padding: 15px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, var(--rust-orange) 0%, var(--rust-orange-dark) 100%);
     color: white;
     border: none;
     border-radius: 10px;
@@ -173,7 +201,7 @@ button[type="submit"] {
 
 button[type="submit"]:hover {
     transform: translateY(-2px);
-    box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+    box-shadow: 0 10px 20px rgba(247, 76, 0, 0.4);
 }
 
 button[type="submit"]:active {
@@ -181,20 +209,20 @@ button[type="submit"]:active {
 }
 
 button[type="submit"]:disabled {
-    background: #ccc;
+    background: var(--text-muted);
     cursor: not-allowed;
     transform: none;
 }
 
 /* Error and Success Messages */
 .error {
-    color: #ef4444;
+    color: var(--error);
     margin-top: 10px;
     padding: 12px;
-    background: #fee;
+    background: rgba(239, 68, 68, 0.1);
     border-radius: 8px;
     display: none;
-    border-left: 4px solid #ef4444;
+    border-left: 4px solid var(--error);
 }
 
 .error.show {
@@ -203,13 +231,13 @@ button[type="submit"]:disabled {
 }
 
 .success {
-    color: #10b981;
+    color: var(--success);
     margin-top: 20px;
     padding: 12px;
-    background: #d1fae5;
+    background: rgba(34, 197, 94, 0.1);
     border-radius: 8px;
     display: none;
-    border-left: 4px solid #10b981;
+    border-left: 4px solid var(--success);
 }
 
 .success.show {
@@ -218,7 +246,7 @@ button[type="submit"]:disabled {
 }
 
 .success a {
-    color: #059669;
+    color: var(--success);
     font-weight: 600;
 }
 
@@ -237,11 +265,11 @@ button[type="submit"]:disabled {
 .auth-switch {
     text-align: center;
     margin-top: 20px;
-    color: #666;
+    color: var(--text-secondary);
 }
 
 .auth-switch a {
-    color: #667eea;
+    color: var(--rust-orange);
     text-decoration: none;
     font-weight: 600;
 }
@@ -252,37 +280,40 @@ button[type="submit"]:disabled {
 
 /* Dashboard Styles */
 .dashboard-header {
-    background: white;
+    background: var(--bg-card);
     border-radius: 20px;
     padding: 30px;
     margin-bottom: 30px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
 }
 
 .dashboard-header h1 {
-    color: #333;
+    color: var(--text-primary);
     font-size: 2.5em;
 }
 
 .create-section {
-    background: white;
+    background: var(--bg-card);
     border-radius: 20px;
     padding: 30px;
     margin-bottom: 30px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
 }
 
 .create-section h2 {
-    color: #333;
+    color: var(--text-primary);
     margin-bottom: 20px;
     font-size: 1.5em;
 }
 
 .urls-section {
-    background: white;
+    background: var(--bg-card);
     border-radius: 20px;
     padding: 30px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-color);
 }
 
 .section-header {
@@ -293,12 +324,12 @@ button[type="submit"]:disabled {
 }
 
 .section-header h2 {
-    color: #333;
+    color: var(--text-primary);
     font-size: 1.5em;
 }
 
 .refresh-btn {
-    background: #667eea;
+    background: var(--rust-orange);
     color: white;
     border: none;
     padding: 8px 16px;
@@ -309,14 +340,14 @@ button[type="submit"]:disabled {
 }
 
 .refresh-btn:hover {
-    background: #5568d3;
+    background: var(--rust-orange-dark);
 }
 
 /* Loading State */
 .loading {
     text-align: center;
     padding: 40px;
-    color: #666;
+    color: var(--text-secondary);
     font-size: 1.1em;
 }
 
@@ -332,12 +363,12 @@ button[type="submit"]:disabled {
 }
 
 .empty-state h3 {
-    color: #333;
+    color: var(--text-primary);
     margin-bottom: 10px;
 }
 
 .empty-state p {
-    color: #666;
+    color: var(--text-secondary);
 }
 
 /* URL Card */
@@ -348,15 +379,17 @@ button[type="submit"]:disabled {
 }
 
 .url-card {
-    background: #f8f9fa;
+    background: var(--bg-dark);
     border-radius: 12px;
     padding: 20px;
     transition: transform 0.2s, box-shadow 0.2s, opacity 0.3s;
+    border: 1px solid var(--border-color);
 }
 
 .url-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    background: var(--bg-card-hover);
 }
 
 .url-card-header {
@@ -382,7 +415,7 @@ button[type="submit"]:disabled {
 .url-name {
     font-size: 1.1em;
     font-weight: 600;
-    color: #333;
+    color: var(--text-primary);
 }
 
 .rename-btn {
@@ -396,7 +429,7 @@ button[type="submit"]:disabled {
 }
 
 .rename-btn:hover {
-    background: #f0f0f0;
+    background: var(--bg-card-hover);
 }
 
 .rename-form {
@@ -409,14 +442,16 @@ button[type="submit"]:disabled {
 .rename-input {
     flex: 1;
     padding: 8px 12px;
-    border: 2px solid #667eea;
+    border: 2px solid var(--rust-orange);
     border-radius: 6px;
     font-size: 14px;
+    background: var(--bg-darker);
+    color: var(--text-primary);
 }
 
 .rename-input:focus {
     outline: none;
-    border-color: #5568d3;
+    border-color: var(--rust-orange-light);
 }
 
 .save-rename-btn,
@@ -431,33 +466,33 @@ button[type="submit"]:disabled {
 }
 
 .save-rename-btn {
-    background: #10b981;
+    background: var(--success);
     color: white;
 }
 
 .save-rename-btn:hover {
-    background: #059669;
+    background: #16a34a;
 }
 
 .cancel-rename-btn {
-    background: #e5e7eb;
-    color: #374151;
+    background: var(--border-color);
+    color: var(--text-primary);
 }
 
 .cancel-rename-btn:hover {
-    background: #d1d5db;
+    background: var(--text-muted);
 }
 
 .short-code {
     font-size: 1.2em;
     font-weight: 700;
-    color: #667eea;
+    color: var(--rust-orange);
     margin-bottom: 5px;
     font-family: 'Courier New', monospace;
 }
 
 .original-url {
-    color: #666;
+    color: var(--text-secondary);
     font-size: 0.9em;
     word-break: break-all;
 }
@@ -469,22 +504,23 @@ button[type="submit"]:disabled {
 
 .stat {
     text-align: center;
-    background: white;
+    background: var(--bg-card);
     padding: 10px 20px;
     border-radius: 8px;
+    border: 1px solid var(--border-color);
 }
 
 .stat-value {
     display: block;
     font-size: 1.5em;
     font-weight: 700;
-    color: #667eea;
+    color: var(--rust-orange);
 }
 
 .stat-label {
     display: block;
     font-size: 0.8em;
-    color: #888;
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -498,17 +534,18 @@ button[type="submit"]:disabled {
 .url-display {
     flex: 1;
     padding: 10px;
-    border: 2px solid #e0e0e0;
+    border: 2px solid var(--border-color);
     border-radius: 8px;
     font-size: 14px;
-    background: white;
+    background: var(--bg-darker);
+    color: var(--text-primary);
 }
 
 .copy-btn,
 .visit-btn,
 .delete-btn {
     padding: 10px 20px;
-    background: #667eea;
+    background: var(--rust-orange);
     color: white;
     border: none;
     border-radius: 8px;
@@ -522,23 +559,23 @@ button[type="submit"]:disabled {
 .copy-btn:hover,
 .visit-btn:hover,
 .delete-btn:hover {
-    background: #5568d3;
+    background: var(--rust-orange-dark);
 }
 
 .copy-btn.copied {
-    background: #10b981;
+    background: var(--success);
 }
 
 .visit-btn {
-    background: #10b981;
+    background: var(--success);
 }
 
 .visit-btn:hover {
-    background: #059669;
+    background: #16a34a;
 }
 
 .delete-btn {
-    background: #ef4444;
+    background: var(--error);
 }
 
 .delete-btn:hover {
@@ -546,7 +583,7 @@ button[type="submit"]:disabled {
 }
 
 .delete-btn:disabled {
-    background: #fca5a5;
+    background: #7f1d1d;
     cursor: not-allowed;
     opacity: 0.7;
 }

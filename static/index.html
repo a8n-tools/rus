@@ -7,12 +7,13 @@
     <link rel="stylesheet" href="styles.css">
     <style>
         .home-container {
-            background: white;
+            background: var(--bg-card);
             border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
             padding: 40px;
             max-width: 600px;
             margin: 40px auto;
+            border: 1px solid var(--border-color);
         }
 
         .rust-icon {
@@ -22,7 +23,7 @@
         }
 
         .home-container h1 {
-            color: #333;
+            color: var(--text-primary);
             margin-bottom: 10px;
             font-size: 2.5em;
             text-align: center;
@@ -48,20 +49,20 @@
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, var(--rust-orange) 0%, var(--rust-orange-dark) 100%);
             color: white;
             border: none;
         }
 
         .btn-secondary {
-            background: white;
-            color: #667eea;
-            border: 2px solid #667eea;
+            background: var(--bg-dark);
+            color: var(--rust-orange);
+            border: 2px solid var(--rust-orange);
         }
 
         .action-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 10px 20px rgba(247, 76, 0, 0.4);
         }
 
         .features {
@@ -72,9 +73,10 @@
         }
 
         .feature {
-            background: #f8f9fa;
+            background: var(--bg-dark);
             padding: 20px;
             border-radius: 12px;
+            border: 1px solid var(--border-color);
         }
 
         .feature-icon {
@@ -83,24 +85,24 @@
         }
 
         .feature h3 {
-            color: #333;
+            color: var(--text-primary);
             margin-bottom: 5px;
         }
 
         .feature p {
-            color: #666;
+            color: var(--text-secondary);
             font-size: 0.95em;
         }
 
         .footer {
             margin-top: 30px;
             text-align: center;
-            color: white;
+            color: var(--text-secondary);
             font-size: 14px;
         }
 
         .footer a {
-            color: white;
+            color: var(--rust-orange);
             text-decoration: underline;
         }
 
