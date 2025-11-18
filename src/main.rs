@@ -209,13 +209,6 @@ fn validate_password(password: &str) -> Result<(), String> {
     Ok(())
 }
 
-// Helper function to get JWT secret from environment
-fn get_jwt_secret() -> String {
-    env::var("JWT_SECRET").unwrap_or_else(|_| {
-        eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
-        "your-secret-key-change-this-in-production".to_string()
-    })
-}
 
 // JWT helper functions
 fn create_jwt(username: &str, user_id: i64) -> Result<String, jsonwebtoken::errors::Error> {
