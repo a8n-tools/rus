@@ -6,22 +6,13 @@
     <title>Rust URL Shortener</title>
     <link rel="stylesheet" href="styles.css">
     <style>
-        body {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-
         .home-container {
             background: white;
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             padding: 40px;
             max-width: 600px;
-            width: 100%;
-            margin-top: 40px;
+            margin: 40px auto;
         }
 
         .rust-icon {
@@ -125,6 +116,7 @@
         <div class="nav-content">
             <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
             <div class="nav-links" id="navLinks">
+                <a href="/">Home</a>
                 <a href="login.html">Log In</a>
                 <a href="signup.html">Sign Up</a>
             </div>
@@ -171,6 +163,7 @@
 
         if (isAuthenticated()) {
             navLinks.innerHTML = `
+                <a href="/">Home</a>
                 <a href="dashboard.html">Dashboard</a>
                 <button class="logout-btn" onclick="handleLogout()">Log Out</button>
             `;
