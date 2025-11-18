@@ -223,6 +223,14 @@ fn is_account_locked(db: &Connection, username: &str, max_attempts: i32, lockout
     failed_attempts >= max_attempts
 }
 
+// Record a login attempt (success or failure) for tracking
+fn record_login_attempt(db: &Connection, username: &str, success: bool) {
+    let _ = db.execute(
+        "INSERT INTO login_attempts (username, success) VALUES (?1, ?2)",
+        params![username, success as i32],
+    );
+}
+
 // JWT helper functions
 fn create_jwt(username: &str, user_id: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = Utc::now()
@@ -390,6 +398,8 @@ async fn login(
             // Verify password
             match verify(&req.password, &hashed_password) {
                 Ok(true) => {
+                    // Record successful login attempt
+                    record_login_attempt(&db, &req.username, true);
                     // Create JWT token
                     match create_jwt(&username, user_id) {
                         Ok(token) => Ok(HttpResponse::Ok().json(AuthResponse {
@@ -401,17 +411,25 @@ async fn login(
                         }))),
                     }
                 }
-                Ok(false) => Ok(HttpResponse::Unauthorized().json(serde_json::json!({
-                    "error": "Invalid credentials"
-                }))),
+                Ok(false) => {
+                    // Record failed login attempt (wrong password)
+                    record_login_attempt(&db, &req.username, false);
+                    Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                        "error": "Invalid credentials"
+                    })))
+                }
                 Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
                     "error": "Authentication error"
                 }))),
             }
         }
-        Err(_) => Ok(HttpResponse::Unauthorized().json(serde_json::json!({
-            "error": "Invalid credentials"
-        }))),
+        Err(_) => {
+            // Record failed login attempt (user not found)
+            record_login_attempt(&db, &req.username, false);
+            Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Invalid credentials"
+            })))
+        }
     }
 }
 
