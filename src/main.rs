@@ -187,6 +187,35 @@ fn generate_short_code() -> String {
         .collect()
 }
 
+// Validate password complexity
+fn validate_password(password: &str) -> Result<(), String> {
+    if password.len() < 8 {
+        return Err("Password must be at least 8 characters long".to_string());
+    }
+
+    if !password.chars().any(|c| c.is_uppercase()) {
+        return Err("Password must contain at least one uppercase letter".to_string());
+    }
+
+    if !password.chars().any(|c| c.is_numeric()) {
+        return Err("Password must contain at least one number".to_string());
+    }
+
+    if !password.chars().any(|c| !c.is_alphanumeric()) {
+        return Err("Password must contain at least one special character".to_string());
+    }
+
+    Ok(())
+}
+
+// Helper function to get JWT secret from environment
+fn get_jwt_secret() -> String {
+    env::var("JWT_SECRET").unwrap_or_else(|_| {
+        eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
+        "your-secret-key-change-this-in-production".to_string()
+    })
+}
+
 // JWT helper functions
 fn create_jwt(username: &str, user_id: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = Utc::now()
@@ -254,9 +283,16 @@ async fn register(
         })));
     }
 
-    if req.username.len() < 3 || req.password.len() < 6 {
+    if req.username.len() < 3 {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Username must be at least 3 characters, password at least 6 characters"
+            "error": "Username must be at least 3 characters"
+        })));
+    }
+
+    // Validate password complexity
+    if let Err(error_message) = validate_password(&req.password) {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": error_message
         })));
     }
 
