@@ -1,0 +1,39 @@
+# Build artifacts
+/target
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Data
+/data
+*.db
+*.db-shm
+*.db-wal
+
+# Environment
+.env
+.env.local
+
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+LICENSE
+*.md
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+compose.yml
+
+# Logs
+*.log

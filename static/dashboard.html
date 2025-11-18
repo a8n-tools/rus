@@ -191,10 +191,21 @@
             card.setAttribute('data-short-code', urlEntry.short_code);
 
             const shortUrl = `http://localhost:8080/${urlEntry.short_code}`;
+            const displayName = urlEntry.name || 'Unnamed URL';
 
             card.innerHTML = `
                 <div class="url-card-header">
                     <div class="url-info">
+                        <div class="url-name-section">
+                            <span class="url-name" data-short-code="${urlEntry.short_code}">${displayName}</span>
+                            <button class="rename-btn" onclick="toggleRename('${urlEntry.short_code}')" title="Rename">✏️</button>
+                        </div>
+                        <div class="rename-form" id="rename-form-${urlEntry.short_code}" style="display: none;">
+                            <input type="text" class="rename-input" id="rename-input-${urlEntry.short_code}"
+                                   value="${urlEntry.name || ''}" placeholder="Enter URL name">
+                            <button class="save-rename-btn" onclick="saveRename('${urlEntry.short_code}')">Save</button>
+                            <button class="cancel-rename-btn" onclick="cancelRename('${urlEntry.short_code}')">Cancel</button>
+                        </div>
                         <div class="short-code">/${urlEntry.short_code}</div>
                         <div class="original-url">${urlEntry.original_url}</div>
                     </div>
@@ -286,6 +297,70 @@
                 showError('Failed to delete URL: ' + error.message);
                 button.disabled = false;
                 button.textContent = originalText;
+            }
+        };
+
+        // Toggle rename form
+        window.toggleRename = function(shortCode) {
+            const renameForm = document.getElementById(`rename-form-${shortCode}`);
+            const nameSection = document.querySelector(`.url-name[data-short-code="${shortCode}"]`).parentElement;
+
+            if (renameForm.style.display === 'none') {
+                renameForm.style.display = 'flex';
+                nameSection.querySelector('.url-name').style.display = 'none';
+                nameSection.querySelector('.rename-btn').style.display = 'none';
+                document.getElementById(`rename-input-${shortCode}`).focus();
+            } else {
+                renameForm.style.display = 'none';
+                nameSection.querySelector('.url-name').style.display = 'inline';
+                nameSection.querySelector('.rename-btn').style.display = 'inline';
+            }
+        };
+
+        // Cancel rename
+        window.cancelRename = function(shortCode) {
+            toggleRename(shortCode);
+        };
+
+        // Save rename
+        window.saveRename = async function(shortCode) {
+            const input = document.getElementById(`rename-input-${shortCode}`);
+            const newName = input.value.trim();
+
+            try {
+                const response = await fetch(`/api/urls/${shortCode}/name`, {
+                    method: 'PATCH',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ name: newName || null }),
+                });
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        logout();
+                        window.location.href = 'login.html';
+                        return;
+                    }
+                    const data = await response.json();
+                    throw new Error(data.error || 'Failed to update URL name');
+                }
+
+                // Update the display
+                const nameSpan = document.querySelector(`.url-name[data-short-code="${shortCode}"]`);
+                nameSpan.textContent = newName || 'Unnamed URL';
+                toggleRename(shortCode);
+
+                // Show success message
+                successDiv.innerHTML = '<strong>✓ URL name updated successfully!</strong>';
+                successDiv.classList.add('show');
+                setTimeout(() => {
+                    successDiv.classList.remove('show');
+                }, 3000);
+
+            } catch (error) {
+                showError('Failed to update URL name: ' + error.message);
             }
         };
 

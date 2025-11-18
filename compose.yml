@@ -1,9 +1,21 @@
 services:
-  sqlite:
-    image: keinos/sqlite3:latest
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
     volumes:
-      - ./data:/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    user: 1000:1000
-    command: sh -c "rm -f /data/rus.db && sqlite3 /data/rus.db < /docker-entrypoint-initdb.d/init.sql && chmod 664 /data/rus.db && tail -f /dev/null"
+      - ./data:/app/data
+    environment:
+      - HOST=0.0.0.0
+      - RUST_LOG=info
+    env_file: .env
     restart: unless-stopped
+    networks:
+      - rus-network
+
+networks:
+  rus-network:
+    driver: bridge

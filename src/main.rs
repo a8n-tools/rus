@@ -10,8 +10,102 @@ use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
 use chrono::{Utc, Duration};
 
+// Configuration structure
+#[derive(Clone, Debug)]
+struct Config {
+    jwt_secret: String,
+    jwt_expiry_hours: i64,
+    refresh_token_expiry_days: i64,
+    max_url_length: usize,
+    account_lockout_attempts: i32,
+    account_lockout_duration_minutes: i64,
+    click_retention_days: i64,
+    host_url: String,
+    db_path: String,
+    host: String,
+    port: u16,
+}
+
+impl Config {
+    fn from_env() -> Self {
+        let jwt_secret = env::var("JWT_SECRET").unwrap_or_else(|_| {
+            eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
+            "your-secret-key-change-this-in-production".to_string()
+        });
+
+        let jwt_expiry_hours = env::var("JWT_EXPIRY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1);
+
+        let refresh_token_expiry_days = env::var("REFRESH_TOKEN_EXPIRY")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(7);
+
+        let max_url_length = env::var("MAX_URL_LENGTH")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2048);
+
+        let account_lockout_attempts = env::var("ACCOUNT_LOCKOUT_ATTEMPTS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5);
+
+        let account_lockout_duration_minutes = env::var("ACCOUNT_LOCKOUT_DURATION")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+
+        let click_retention_days = env::var("CLICK_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+
+        let host_url = env::var("HOST_URL")
+            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+
+        let db_path = env::var("DB_PATH")
+            .unwrap_or_else(|_| "./data/rus.db".to_string());
+
+        let host = env::var("HOST")
+            .unwrap_or_else(|_| "0.0.0.0".to_string());
+
+        let port = env::var("PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8080);
+
+        Config {
+            jwt_secret,
+            jwt_expiry_hours,
+            refresh_token_expiry_days,
+            max_url_length,
+            account_lockout_attempts,
+            account_lockout_duration_minutes,
+            click_retention_days,
+            host_url,
+            db_path,
+            host,
+            port,
+        }
+    }
+}
+
+// DEPRECATED: These will be removed when JWT functions are updated to use Config
+// Temporary backward compatibility for create_jwt() and decode_jwt()
 const TOKEN_EXPIRY_HOURS: i64 = 24;
 const HOST: &str = "0.0.0.0";
+
+// DEPRECATED: Helper function to get JWT secret from environment
+// This will be replaced by Config.jwt_secret when JWT functions are updated
+fn get_jwt_secret() -> String {
+    env::var("JWT_SECRET").unwrap_or_else(|_| {
+        eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
+        "your-secret-key-change-this-in-production".to_string()
+    })
+}
 
 // Data structures
 #[derive(Serialize, Deserialize)]
@@ -30,6 +124,7 @@ struct ShortenResponse {
 struct UrlEntry {
     original_url: String,
     short_code: String,
+    name: Option<String>,
     clicks: u64,
 }
 
@@ -51,6 +146,11 @@ struct AuthResponse {
     username: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct UpdateUrlNameRequest {
+    name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Claims {
     sub: String,      // username
@@ -61,13 +161,15 @@ struct Claims {
 // Application state
 struct AppState {
     db: Mutex<Connection>,
+    config: Config,
 }
 
 impl AppState {
-    fn new(db_path: &str) -> rusqlite::Result<Self> {
-        let conn = Connection::open(db_path)?;
+    fn new(config: Config) -> rusqlite::Result<Self> {
+        let conn = Connection::open(&config.db_path)?;
         Ok(AppState {
             db: Mutex::new(conn),
+            config,
         })
     }
 }
@@ -84,6 +186,27 @@ fn generate_short_code() -> String {
             CHARSET[idx] as char
         })
         .collect()
+}
+
+// Validate password complexity
+fn validate_password(password: &str) -> Result<(), String> {
+    if password.len() < 8 {
+        return Err("Password must be at least 8 characters long".to_string());
+    }
+
+    if !password.chars().any(|c| c.is_uppercase()) {
+        return Err("Password must contain at least one uppercase letter".to_string());
+    }
+
+    if !password.chars().any(|c| c.is_numeric()) {
+        return Err("Password must contain at least one number".to_string());
+    }
+
+    if !password.chars().any(|c| !c.is_alphanumeric()) {
+        return Err("Password must contain at least one special character".to_string());
+    }
+
+    Ok(())
 }
 
 // Helper function to get JWT secret from environment
@@ -161,9 +284,16 @@ async fn register(
         })));
     }
 
-    if req.username.len() < 3 || req.password.len() < 6 {
+    if req.username.len() < 3 {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-            "error": "Username must be at least 3 characters, password at least 6 characters"
+            "error": "Username must be at least 3 characters"
+        })));
+    }
+
+    // Validate password complexity
+    if let Err(error_message) = validate_password(&req.password) {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": error_message
         })));
     }
 
@@ -386,13 +516,14 @@ async fn get_stats(
 
     // Get URL entry for this user
     let result: rusqlite::Result<UrlEntry> = db.query_row(
-        "SELECT original_url, short_code, clicks FROM urls WHERE short_code = ?1 AND user_id = ?2",
+        "SELECT original_url, short_code, name, clicks FROM urls WHERE short_code = ?1 AND user_id = ?2",
         params![code.as_str(), claims.user_id],
         |row| {
             Ok(UrlEntry {
                 original_url: row.get(0)?,
                 short_code: row.get(1)?,
-                clicks: row.get(2)?,
+                name: row.get(2)?,
+                clicks: row.get(3)?,
             })
         },
     );
@@ -422,14 +553,15 @@ async fn get_user_urls(
     let db = data.db.lock().unwrap();
 
     let mut stmt = db.prepare(
-        "SELECT original_url, short_code, clicks FROM urls WHERE user_id = ?1 ORDER BY created_at DESC"
+        "SELECT original_url, short_code, name, clicks FROM urls WHERE user_id = ?1 ORDER BY created_at DESC"
     ).map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 
     let urls: Vec<UrlEntry> = stmt.query_map(params![claims.user_id], |row| {
         Ok(UrlEntry {
             original_url: row.get(0)?,
             short_code: row.get(1)?,
-            clicks: row.get(2)?,
+            name: row.get(2)?,
+            clicks: row.get(3)?,
         })
     })
     .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?
@@ -478,6 +610,46 @@ async fn delete_url(
     }
 }
 
+// Protected endpoint to update URL name
+async fn update_url_name(
+    data: web::Data<AppState>,
+    code: web::Path<String>,
+    req_payload: web::Json<UpdateUrlNameRequest>,
+    http_req: HttpRequest,
+) -> Result<HttpResponse> {
+    let claims = match get_claims(&http_req) {
+        Some(c) => c,
+        None => {
+            return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Unauthorized"
+            })));
+        }
+    };
+
+    let db = data.db.lock().unwrap();
+
+    // Update the URL name only if it belongs to the current user
+    match db.execute(
+        "UPDATE urls SET name = ?1 WHERE short_code = ?2 AND user_id = ?3",
+        params![req_payload.name.as_deref(), code.as_str(), claims.user_id],
+    ) {
+        Ok(rows_affected) => {
+            if rows_affected > 0 {
+                Ok(HttpResponse::Ok().json(serde_json::json!({
+                    "message": "URL name updated successfully"
+                })))
+            } else {
+                Ok(HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "Short URL not found or not owned by you"
+                })))
+            }
+        }
+        Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": "Failed to update URL name"
+        }))),
+    }
+}
+
 // Serve static HTML pages
 async fn index() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
@@ -520,16 +692,36 @@ async fn main() -> std::io::Result<()> {
     // Load environment variables from .env file
     dotenvy::dotenv().ok();
 
-    println!("🚀 Starting Rust URL Shortener with Authentication on {}:8080", HOST);
+    // Load configuration from environment
+    let config = Config::from_env();
+
+    // Print startup banner with configuration
+    println!("========================================");
+    println!("  Rust URL Shortener - Configuration");
+    println!("========================================");
+    println!("Host: {}", config.host);
+    println!("Port: {}", config.port);
+    println!("Host URL: {}", config.host_url);
+    println!("Database Path: {}", config.db_path);
+    println!("JWT Expiry: {} hours", config.jwt_expiry_hours);
+    println!("Refresh Token Expiry: {} days", config.refresh_token_expiry_days);
+    println!("Max URL Length: {}", config.max_url_length);
+    println!("Account Lockout Attempts: {}", config.account_lockout_attempts);
+    println!("Account Lockout Duration: {} minutes", config.account_lockout_duration_minutes);
+    println!("Click Retention: {} days", config.click_retention_days);
+    println!("========================================");
+
+    let bind_host = config.host.clone();
+    let bind_port = config.port;
 
     // Initialize database connection
-    let db_path = "./data/rus.db";
     let app_state = web::Data::new(
-        AppState::new(db_path)
+        AppState::new(config)
             .expect("Failed to connect to database. Make sure the SQLite container is running and ./data/rus.db exists.")
     );
 
-    println!("✓ Connected to database at {}", db_path);
+    println!("✓ Database connection established");
+    println!("🚀 Starting server on {}:{}", bind_host, bind_port);
 
     HttpServer::new(move || {
         let auth = HttpAuthentication::bearer(jwt_validator);
@@ -555,9 +747,10 @@ async fn main() -> std::io::Result<()> {
                     .route("/stats/{code}", web::get().to(get_stats))
                     .route("/urls", web::get().to(get_user_urls))
                     .route("/urls/{code}", web::delete().to(delete_url))
+                    .route("/urls/{code}/name", web::patch().to(update_url_name))
             )
     })
-    .bind((HOST, 8080))?
+    .bind((bind_host.as_str(), bind_port))?
     .run()
     .await
 }

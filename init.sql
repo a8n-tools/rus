@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS urls (
     user_id INTEGER NOT NULL,
     original_url TEXT NOT NULL,
     short_code TEXT NOT NULL UNIQUE,
+    name TEXT,
     clicks INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(userID) ON DELETE CASCADE
