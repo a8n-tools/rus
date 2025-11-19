@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Short Code Not Found - Rust URL Shortener</title>
+    <link rel="stylesheet" href="styles.css?v=2">
+    <style>
+        .error-container {
+            background: var(--bg-card);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            padding: 60px 40px;
+            max-width: 600px;
+            margin: 80px auto;
+            text-align: center;
+            border: 1px solid var(--border-color);
+        }
+
+        .panic-crab {
+            font-size: 8em;
+            margin-bottom: 20px;
+            display: inline-block;
+            animation: shake 0.5s ease-in-out infinite;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0) rotate(0deg); }
+            25% { transform: translateX(-5px) rotate(-5deg); }
+            75% { transform: translateX(5px) rotate(5deg); }
+        }
+
+        .error-container h1 {
+            color: var(--error);
+            margin-bottom: 15px;
+            font-size: 2.5em;
+        }
+
+        .error-code {
+            font-size: 6em;
+            font-weight: 800;
+            color: var(--rust-orange);
+            margin-bottom: 10px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .error-message {
+            color: var(--text-secondary);
+            font-size: 1.2em;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .panic-message {
+            background: var(--bg-dark);
+            border-left: 4px solid var(--error);
+            padding: 15px 20px;
+            margin: 20px 0;
+            text-align: left;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: var(--error);
+            border-radius: 0 8px 8px 0;
+        }
+
+        .panic-message::before {
+            content: "thread 'main' panicked at:";
+            display: block;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+        }
+
+        .home-btn {
+            display: inline-block;
+            padding: 15px 40px;
+            background: linear-gradient(135deg, var(--rust-orange) 0%, var(--rust-orange-dark) 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .home-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(247, 76, 0, 0.4);
+        }
+
+        .suggestions {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .suggestions h3 {
+            color: var(--text-primary);
+            margin-bottom: 15px;
+            font-size: 1.1em;
+        }
+
+        .suggestions ul {
+            list-style: none;
+            color: var(--text-secondary);
+            font-size: 0.95em;
+        }
+
+        .suggestions li {
+            margin-bottom: 8px;
+        }
+
+        .suggestions li::before {
+            content: "• ";
+            color: var(--rust-orange);
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-content">
+            <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
+            <div class="nav-links" id="navLinks">
+                <a href="/">Home</a>
+                <a href="login.html">Log In</a>
+                <a href="signup.html">Sign Up</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="error-container">
+        <div class="panic-crab">🦀</div>
+        <div class="error-code">404</div>
+        <h1>Short Code Not Found</h1>
+        <p class="error-message">
+            The short URL you're looking for doesn't exist or has been removed.
+        </p>
+        <div class="panic-message">
+            'short_code not found in database', src/main.rs:645
+        </div>
+        <a href="/" class="home-btn">Back to Home</a>
+
+        <div class="suggestions">
+            <h3>What might have happened?</h3>
+            <ul>
+                <li>The short code may have been typed incorrectly</li>
+                <li>The link may have been deleted by its owner</li>
+                <li>The link may have never existed</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="auth.js"></script>
+    <script>
+        // Update nav based on auth status
+        const navLinks = document.getElementById('navLinks');
+
+        if (typeof isAuthenticated === 'function' && isAuthenticated()) {
+            navLinks.innerHTML = `
+                <a href="/">Home</a>
+                <a href="dashboard.html">Dashboard</a>
+                <button class="logout-btn" onclick="handleLogout()">Log Out</button>
+            `;
+        }
+
+        function handleLogout() {
+            if (typeof logout === 'function') {
+                logout();
+            }
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>

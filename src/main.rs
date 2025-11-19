@@ -642,7 +642,13 @@ async fn redirect_url(
                 .append_header(("Location", original_url))
                 .finish())
         }
-        Err(_) => Ok(HttpResponse::NotFound().body("Short URL not found")),
+        Err(_) => {
+            // Serve the 404 page
+            let html = include_str!("../static/404.html");
+            Ok(HttpResponse::NotFound()
+                .content_type("text/html; charset=utf-8")
+                .body(html))
+        }
     }
 }
 
