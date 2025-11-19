@@ -10,6 +10,7 @@ use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
 use chrono::{Utc, Duration};
 use url::Url;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 // Configuration structure
 #[derive(Clone, Debug)]
@@ -257,6 +258,13 @@ fn generate_short_code() -> String {
             CHARSET[idx] as char
         })
         .collect()
+}
+
+// Generate a cryptographically secure refresh token
+fn generate_refresh_token() -> String {
+    let mut rng = rand::thread_rng();
+    let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+    BASE64.encode(&bytes)
 }
 
 // Validate password complexity
