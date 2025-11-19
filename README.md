@@ -1,22 +1,26 @@
 # rus
-**Rust URL Shortener** - A fast, simple, and elegant URL shortening web application built with Rust 🦀
+**Rust URL Shortener** - A fast, secure, and elegant URL shortening web application built with Rust 🦀
 
-![URL Shortener Homepage](https://github.com/user-attachments/assets/b312c760-d373-4e21-9887-28dc9fab1a18)
+![URL Shortener Homepage](/assets/screenshot.png)
 
 ## Features
 
-- ✨ **Clean and Modern UI** - Beautiful, responsive web interface with a gradient design
-- 🚀 **Fast Performance** - Built with Rust and Actix-web for maximum speed
-- 🔗 **URL Shortening** - Convert long URLs into short, shareable links
+- 🔒 **JWT Authentication** - Secure user registration and login with bcrypt password hashing
+- 💾 **SQLite Persistence** - Reliable data storage with SQLite database
 - 📊 **Click Tracking** - Monitor how many times each shortened URL is accessed
-- 🎯 **Simple API** - RESTful API endpoints for programmatic access
-- 💾 **In-Memory Storage** - Quick access with HashMap-based storage
-- 🦀 **Pure Rust** - Written entirely in Rust for safety and performance
+- ✏️ **Custom Names** - Give your shortened URLs memorable names
+- 🗑️ **URL Management** - Delete URLs you no longer need
+- 🚀 **Fast Performance** - Built with Rust and Actix-web for maximum speed
+- 🎨 **Modern Dark UI** - Beautiful, responsive web interface with Rust-themed colors
+- 🦀 **Custom 404 Page** - Friendly error page with panicked crab when short codes aren't found
+- 🐳 **Docker Support** - Easy deployment with Docker Compose
 
 ## Prerequisites
 
-- Rust 1.70 or higher
+- Rust 1.91.0 or higher
 - Cargo (comes with Rust)
+
+Or use Docker for containerized deployment.
 
 ## Installation
 
@@ -26,36 +30,84 @@ git clone https://github.com/joshrandall8478/rus.git
 cd rus
 ```
 
-2. Build the project:
+2. Create a `.env` file with your JWT secret:
 ```bash
-cargo build --release
+JWT_SECRET=<base64-encoded-32-bytes>
 ```
 
-3. Run the application:
+3. Build and run the project:
 ```bash
+cargo build --release
 cargo run --release
 ```
 
 The application will start on `http://localhost:8080`
 
+### Docker Deployment
+
+```bash
+docker compose up --build
+```
+
 ## Usage
 
 ### Web Interface
 
-1. Open your browser and navigate to `http://localhost:8080`
-2. Enter a long URL in the input field
-3. Click "Shorten URL"
-4. Copy the shortened URL and share it!
-
-![URL Shortening Result](https://github.com/user-attachments/assets/3ea8be05-4af1-497c-ae28-e3b21633818e)
+1. **Sign Up** - Create an account at `/signup.html`
+2. **Log In** - Authenticate at `/login.html`
+3. **Dashboard** - Manage your URLs at `/dashboard.html`:
+   - Shorten new URLs
+   - View click statistics
+   - Rename URLs with custom names
+   - Copy short URLs to clipboard
+   - Delete URLs you no longer need
 
 ### API Endpoints
 
-#### Shorten a URL
+#### Public Endpoints
 
+**Register a new user:**
+```bash
+POST /api/register
+Content-Type: application/json
+
+{
+  "username": "myuser",
+  "password": "mypassword"
+}
+```
+
+**Login:**
+```bash
+POST /api/login
+Content-Type: application/json
+
+{
+  "username": "myuser",
+  "password": "mypassword"
+}
+```
+
+**Response:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIs..."
+}
+```
+
+**Redirect to Original URL:**
+```bash
+GET /{short_code}
+```
+Redirects to the original URL and increments the click counter.
+
+#### Protected Endpoints (Require Bearer Token)
+
+**Shorten a URL:**
 ```bash
 POST /api/shorten
 Content-Type: application/json
+Authorization: Bearer {TOKEN}
 
 {
   "url": "https://example.com/very/long/url"
@@ -71,18 +123,16 @@ Content-Type: application/json
 }
 ```
 
-#### Redirect to Original URL
-
+**Get all user URLs:**
 ```bash
-GET /{short_code}
+GET /api/urls
+Authorization: Bearer {TOKEN}
 ```
 
-Redirects to the original URL and increments the click counter.
-
-#### Get URL Statistics
-
+**Get URL statistics:**
 ```bash
 GET /api/stats/{short_code}
+Authorization: Bearer {TOKEN}
 ```
 
 **Response:**
@@ -90,7 +140,25 @@ GET /api/stats/{short_code}
 {
   "original_url": "https://example.com/very/long/url",
   "short_code": "abc123",
+  "name": "My Link",
   "clicks": 42
+}
+```
+
+**Delete a URL:**
+```bash
+DELETE /api/urls/{short_code}
+Authorization: Bearer {TOKEN}
+```
+
+**Rename a URL:**
+```bash
+PATCH /api/urls/{short_code}/name
+Content-Type: application/json
+Authorization: Bearer {TOKEN}
+
+{
+  "name": "My Custom Name"
 }
 ```
 
@@ -98,26 +166,33 @@ GET /api/stats/{short_code}
 
 ### Using cURL
 
+Register:
+```bash
+curl -X POST http://localhost:8080/api/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test","password":"password123"}'
+```
+
+Login and save token:
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8080/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test","password":"password123"}' | jq -r '.token')
+```
+
 Shorten a URL:
 ```bash
 curl -X POST http://localhost:8080/api/shorten \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"url":"https://github.com/joshrandall8478/rus"}'
 ```
 
-Get statistics:
+Get your URLs:
 ```bash
-curl http://localhost:8080/api/stats/abc123
+curl http://localhost:8080/api/urls \
+  -H "Authorization: Bearer $TOKEN"
 ```
-
-### Using the short URL
-
-Simply visit the shortened URL in your browser:
-```
-http://localhost:8080/abc123
-```
-
-You'll be automatically redirected to the original URL.
 
 ## Project Structure
 
@@ -126,17 +201,55 @@ rus/
 ├── src/
 │   └── main.rs          # Main application code
 ├── static/
-│   └── index.html       # Web interface
+│   ├── index.html       # Landing page
+│   ├── login.html       # Login page
+│   ├── signup.html      # Registration page
+│   ├── dashboard.html   # URL management dashboard
+│   ├── 404.html         # Custom 404 error page
+│   ├── styles.css       # Global styles
+│   └── auth.js          # Authentication utilities
+├── data/
+│   └── rus.db           # SQLite database (auto-created)
 ├── Cargo.toml           # Rust dependencies
+├── compose.yml          # Docker Compose configuration
+├── Dockerfile           # Docker build configuration
 └── README.md            # This file
 ```
 
 ## Technology Stack
 
 - **[Actix-web](https://actix.rs/)** - High-performance web framework for Rust
+- **[SQLite](https://www.sqlite.org/)** - Embedded relational database via rusqlite
+- **[JSON Web Tokens](https://jwt.io/)** - Secure authentication via jsonwebtoken
+- **[bcrypt](https://en.wikipedia.org/wiki/Bcrypt)** - Secure password hashing
 - **[Serde](https://serde.rs/)** - Serialization/deserialization framework
 - **[Tokio](https://tokio.rs/)** - Async runtime for Rust
-- **[Rand](https://rust-random.github.io/rand/)** - Random number generation for short codes
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `JWT_SECRET` | Base64-encoded 32-byte secret for JWT signing | **Required** |
+| `DB_PATH` | Path to SQLite database file | `./data/rus.db` |
+| `HOST` | Server bind address | `0.0.0.0` |
+| `PORT` | Server port | `8080` |
+
+## Database Schema
+
+**users table:**
+- `userID` - Primary key
+- `username` - Unique username
+- `password` - bcrypt hashed password
+- `created_at` - Account creation timestamp
+
+**urls table:**
+- `id` - Primary key
+- `user_id` - Foreign key to users
+- `original_url` - The original long URL
+- `short_code` - Unique 6-character code (indexed)
+- `name` - Optional custom name
+- `clicks` - Click counter
+- `created_at` - URL creation timestamp
 
 ## Development
 
@@ -150,6 +263,16 @@ cargo run
 cargo test
 ```
 
+### Lint code:
+```bash
+cargo clippy
+```
+
+### Format code:
+```bash
+cargo fmt
+```
+
 ### Build for production:
 ```bash
 cargo build --release
@@ -157,15 +280,12 @@ cargo build --release
 
 The optimized binary will be available at `./target/release/rus`
 
-## Configuration
-
-By default, the application runs on `localhost:8080`. To change the host or port, modify the `.bind()` call in `src/main.rs`:
-
-```rust
-.bind(("127.0.0.1", 8080))?
-```
-
 ## Features in Detail
+
+### Authentication
+- JWT tokens with 24-hour expiry
+- bcrypt password hashing (cost factor 12)
+- Tokens stored in localStorage on frontend
 
 ### Short Code Generation
 - 6-character alphanumeric codes (A-Z, a-z, 0-9)
@@ -174,24 +294,31 @@ By default, the application runs on `localhost:8080`. To change the host or port
 
 ### Click Tracking
 - Each redirect increments a counter
-- View statistics via the API endpoint
+- View statistics in dashboard or via API
 - Useful for analytics and monitoring
 
 ### Error Handling
-- Validates empty URLs
+- Validates URLs and authentication
+- Custom 404 page with friendly error message
 - Returns proper HTTP status codes
 - User-friendly error messages
 
-## Security Considerations
+## Security Features
 
-⚠️ **Note:** This is a demonstration project. For production use, consider:
-- Adding authentication for API endpoints
+- ✅ JWT-based authentication
+- ✅ bcrypt password hashing
+- ✅ Protected API endpoints
+- ✅ User-scoped URL management
+- ✅ SQL injection prevention via parameterized queries
+
+### Production Considerations
+
+For production deployment, also consider:
 - Implementing rate limiting
-- Using persistent storage (database)
-- Adding URL validation and sanitization
-- Implementing HTTPS
+- Setting up HTTPS with TLS
 - Adding CORS configuration
-- Setting up proper logging and monitoring
+- Configuring proper logging and monitoring
+- Using connection pooling for the database
 
 ## Contributing
 
@@ -213,4 +340,3 @@ This project is open source and available under the MIT License.
 ---
 
 **Made with 🦀 and Rust**
-
