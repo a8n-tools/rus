@@ -94,13 +94,7 @@ impl Config {
     }
 }
 
-// DEPRECATED: These will be removed when JWT functions are updated to use Config
-// Temporary backward compatibility for create_jwt() and decode_jwt()
-const TOKEN_EXPIRY_HOURS: i64 = 24;
-const HOST: &str = "0.0.0.0";
-
-// DEPRECATED: Helper function to get JWT secret from environment
-// This will be replaced by Config.jwt_secret when JWT functions are updated
+// Helper function to get JWT secret from environment (used by decode_jwt)
 fn get_jwt_secret() -> String {
     env::var("JWT_SECRET").unwrap_or_else(|_| {
         eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
@@ -144,6 +138,7 @@ struct LoginRequest {
 #[derive(Serialize, Deserialize)]
 struct AuthResponse {
     token: String,
+    refresh_token: String,
     username: String,
 }
 
@@ -334,10 +329,18 @@ fn validate_url(url_str: &str, max_length: usize) -> Result<(), String> {
     Ok(())
 }
 
+// Generate a cryptographically secure refresh token
+fn generate_refresh_token() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, bytes)
+}
+
 // JWT helper functions
-fn create_jwt(username: &str, user_id: i64) -> Result<String, jsonwebtoken::errors::Error> {
+fn create_jwt(username: &str, user_id: i64, secret: &str, expiry_hours: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = Utc::now()
-        .checked_add_signed(Duration::hours(TOKEN_EXPIRY_HOURS))
+        .checked_add_signed(Duration::hours(expiry_hours))
         .expect("valid timestamp")
         .timestamp();
 
@@ -347,7 +350,6 @@ fn create_jwt(username: &str, user_id: i64) -> Result<String, jsonwebtoken::erro
         exp: expiration as usize,
     };
 
-    let secret = get_jwt_secret();
     encode(
         &Header::default(),
         &claims,
@@ -435,11 +437,24 @@ async fn register(
             let user_id: i64 = db.last_insert_rowid();
 
             // Create JWT token
-            match create_jwt(&req.username, user_id) {
-                Ok(token) => Ok(HttpResponse::Created().json(AuthResponse {
-                    token,
-                    username: req.username.clone(),
-                })),
+            match create_jwt(&req.username, user_id, &data.config.jwt_secret, data.config.jwt_expiry_hours) {
+                Ok(token) => {
+                    // Create refresh token
+                    let refresh_token = generate_refresh_token();
+                    let expires_at = Utc::now() + Duration::days(data.config.refresh_token_expiry_days);
+                    let expires_at_str = expires_at.format("%Y-%m-%d %H:%M:%S").to_string();
+
+                    let _ = db.execute(
+                        "INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?1, ?2, ?3)",
+                        params![user_id, &refresh_token, &expires_at_str],
+                    );
+
+                    Ok(HttpResponse::Created().json(AuthResponse {
+                        token,
+                        refresh_token,
+                        username: req.username.clone(),
+                    }))
+                }
                 Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
                     "error": "Failed to create token"
                 }))),
@@ -504,11 +519,24 @@ async fn login(
                     // Record successful login attempt
                     record_login_attempt(&db, &req.username, true);
                     // Create JWT token
-                    match create_jwt(&username, user_id) {
-                        Ok(token) => Ok(HttpResponse::Ok().json(AuthResponse {
-                            token,
-                            username,
-                        })),
+                    match create_jwt(&username, user_id, &data.config.jwt_secret, data.config.jwt_expiry_hours) {
+                        Ok(token) => {
+                            // Create refresh token
+                            let refresh_token = generate_refresh_token();
+                            let expires_at = Utc::now() + Duration::days(data.config.refresh_token_expiry_days);
+                            let expires_at_str = expires_at.format("%Y-%m-%d %H:%M:%S").to_string();
+
+                            let _ = db.execute(
+                                "INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?1, ?2, ?3)",
+                                params![user_id, &refresh_token, &expires_at_str],
+                            );
+
+                            Ok(HttpResponse::Ok().json(AuthResponse {
+                                token,
+                                refresh_token,
+                                username,
+                            }))
+                        }
                         Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
                             "error": "Failed to create token"
                         }))),
