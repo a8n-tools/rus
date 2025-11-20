@@ -158,6 +158,17 @@ struct RefreshResponse {
     refresh_token: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ClickHistoryEntry {
+    clicked_at: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ClickStats {
+    total_clicks: u64,
+    history: Vec<ClickHistoryEntry>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Claims {
     sub: String,      // username
@@ -305,6 +316,17 @@ fn record_login_attempt(db: &Connection, username: &str, success: bool) {
     let _ = db.execute(
         "INSERT INTO login_attempts (username, success) VALUES (?1, ?2)",
         params![username, success as i32],
+    );
+}
+
+// Cleanup old click history records
+fn cleanup_old_clicks(db: &Connection, retention_days: i64) {
+    let cutoff = Utc::now() - Duration::days(retention_days);
+    let cutoff_str = cutoff.format("%Y-%m-%d %H:%M:%S").to_string();
+
+    let _ = db.execute(
+        "DELETE FROM click_history WHERE clicked_at < ?1",
+        params![cutoff_str],
     );
 }
 
@@ -719,20 +741,31 @@ async fn redirect_url(
 ) -> Result<HttpResponse> {
     let db = data.db.lock().unwrap();
 
-    // Get URL and increment clicks
-    let result: rusqlite::Result<String> = db.query_row(
-        "SELECT original_url FROM urls WHERE short_code = ?1",
+    // Get URL ID and original URL
+    let result: rusqlite::Result<(i64, String)> = db.query_row(
+        "SELECT id, original_url FROM urls WHERE short_code = ?1",
         params![code.as_str()],
-        |row| row.get(0),
+        |row| Ok((row.get(0)?, row.get(1)?)),
     );
 
     match result {
-        Ok(original_url) => {
-            // Increment click count
+        Ok((url_id, original_url)) => {
+            // Increment click count (legacy counter)
             let _ = db.execute(
-                "UPDATE urls SET clicks = clicks + 1 WHERE short_code = ?1",
-                params![code.as_str()],
+                "UPDATE urls SET clicks = clicks + 1 WHERE id = ?1",
+                params![url_id],
             );
+
+            // Record click in history
+            let _ = db.execute(
+                "INSERT INTO click_history (url_id) VALUES (?1)",
+                params![url_id],
+            );
+
+            // Cleanup old clicks periodically (1% chance)
+            if rand::thread_rng().gen_range(0..100) == 0 {
+                cleanup_old_clicks(&db, data.config.click_retention_days);
+            }
 
             Ok(HttpResponse::Found()
                 .append_header(("Location", original_url))
@@ -902,6 +935,66 @@ async fn update_url_name(
     }
 }
 
+// Protected endpoint to get click history
+async fn get_click_history(
+    data: web::Data<AppState>,
+    code: web::Path<String>,
+    http_req: HttpRequest,
+) -> Result<HttpResponse> {
+    let claims = match get_claims(&http_req) {
+        Some(c) => c,
+        None => {
+            return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Unauthorized"
+            })));
+        }
+    };
+
+    let db = data.db.lock().unwrap();
+
+    // First verify ownership
+    let url_id: rusqlite::Result<i64> = db.query_row(
+        "SELECT id FROM urls WHERE short_code = ?1 AND user_id = ?2",
+        params![code.as_str(), claims.user_id],
+        |row| row.get(0),
+    );
+
+    let url_id = match url_id {
+        Ok(id) => id,
+        Err(_) => {
+            return Ok(HttpResponse::NotFound().json(serde_json::json!({
+                "error": "Short URL not found or not owned by you"
+            })));
+        }
+    };
+
+    // Get total clicks from counter
+    let total_clicks: u64 = db.query_row(
+        "SELECT clicks FROM urls WHERE id = ?1",
+        params![url_id],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    // Get click history (limited to recent 1000)
+    let mut stmt = db.prepare(
+        "SELECT clicked_at FROM click_history WHERE url_id = ?1 ORDER BY clicked_at DESC LIMIT 1000"
+    ).map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
+
+    let history: Vec<ClickHistoryEntry> = stmt.query_map(params![url_id], |row| {
+        Ok(ClickHistoryEntry {
+            clicked_at: row.get(0)?,
+        })
+    })
+    .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(HttpResponse::Ok().json(ClickStats {
+        total_clicks,
+        history,
+    }))
+}
+
 // Serve static HTML pages
 async fn index() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
@@ -1013,6 +1106,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/urls", web::get().to(get_user_urls))
                     .route("/urls/{code}", web::delete().to(delete_url))
                     .route("/urls/{code}/name", web::patch().to(update_url_name))
+                    .route("/urls/{code}/clicks", web::get().to(get_click_history))
             )
     })
     .bind((bind_host.as_str(), bind_port))?
