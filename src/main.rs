@@ -10,7 +10,6 @@ use bcrypt::{hash, verify, DEFAULT_COST};
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
 use chrono::{Utc, Duration};
 use url::Url;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 // Configuration structure
 #[derive(Clone, Debug)]
@@ -148,6 +147,17 @@ struct UpdateUrlNameRequest {
     name: Option<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct RefreshRequest {
+    refresh_token: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RefreshResponse {
+    token: String,
+    refresh_token: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Claims {
     sub: String,      // username
@@ -255,13 +265,6 @@ fn generate_short_code() -> String {
         .collect()
 }
 
-// Generate a cryptographically secure refresh token
-fn generate_refresh_token() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
-    BASE64.encode(&bytes)
-}
-
 // Validate password complexity
 fn validate_password(password: &str) -> Result<(), String> {
     if password.len() < 8 {
@@ -365,8 +368,7 @@ fn create_jwt(username: &str, user_id: i64, secret: &str, expiry_hours: i64) -> 
     )
 }
 
-fn decode_jwt(token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
-    let secret = get_jwt_secret();
+fn decode_jwt(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let token_data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_ref()),
@@ -382,7 +384,13 @@ async fn jwt_validator(
 ) -> Result<actix_web::dev::ServiceRequest, (actix_web::Error, actix_web::dev::ServiceRequest)> {
     let token = credentials.token();
 
-    match decode_jwt(token) {
+    // Get the secret from app state
+    let secret = req
+        .app_data::<web::Data<AppState>>()
+        .map(|state| state.config.jwt_secret.clone())
+        .unwrap_or_else(get_jwt_secret);
+
+    match decode_jwt(token, &secret) {
         Ok(claims) => {
             req.extensions_mut().insert(claims);
             Ok(req)
@@ -569,6 +577,58 @@ async fn login(
                 "error": "Invalid credentials"
             })))
         }
+    }
+}
+
+// Token refresh endpoint
+async fn refresh_token(
+    data: web::Data<AppState>,
+    req: web::Json<RefreshRequest>,
+) -> Result<HttpResponse> {
+    let db = data.db.lock().unwrap();
+
+    // Find and validate refresh token
+    let token_result: rusqlite::Result<(i64, i64, String)> = db.query_row(
+        "SELECT rt.id, rt.user_id, u.username FROM refresh_tokens rt
+         JOIN users u ON rt.user_id = u.userID
+         WHERE rt.token = ?1 AND rt.expires_at > datetime('now')",
+        params![&req.refresh_token],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    );
+
+    match token_result {
+        Ok((token_id, user_id, username)) => {
+            // Delete old refresh token (rotation)
+            let _ = db.execute("DELETE FROM refresh_tokens WHERE id = ?1", params![token_id]);
+
+            // Create new JWT token
+            let token = match create_jwt(&username, user_id, &data.config.jwt_secret, data.config.jwt_expiry_hours) {
+                Ok(t) => t,
+                Err(_) => {
+                    return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                        "error": "Failed to create token"
+                    })));
+                }
+            };
+
+            // Create new refresh token (rotation)
+            let new_refresh_token = generate_refresh_token();
+            let expires_at = Utc::now() + Duration::days(data.config.refresh_token_expiry_days);
+            let expires_at_str = expires_at.format("%Y-%m-%d %H:%M:%S").to_string();
+
+            let _ = db.execute(
+                "INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?1, ?2, ?3)",
+                params![user_id, &new_refresh_token, &expires_at_str],
+            );
+
+            Ok(HttpResponse::Ok().json(RefreshResponse {
+                token,
+                refresh_token: new_refresh_token,
+            }))
+        }
+        Err(_) => Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Invalid or expired refresh token"
+        }))),
     }
 }
 
@@ -941,6 +1001,7 @@ async fn main() -> std::io::Result<()> {
             .route("/auth.js", web::get().to(serve_auth_js))
             .route("/api/register", web::post().to(register))
             .route("/api/login", web::post().to(login))
+            .route("/api/refresh", web::post().to(refresh_token))
             .route("/health", web::get().to(health_check))
             .route("/{code}", web::get().to(redirect_url))
             // Protected routes (require authentication)
