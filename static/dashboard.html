@@ -58,6 +58,31 @@
         </div>
     </div>
 
+    <!-- QR Code Modal -->
+    <div id="qrModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>QR Code</h2>
+                <button class="modal-close" onclick="closeQRModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="qrLoading" class="loading">Generating QR code...</div>
+                <div id="qrDisplay" style="display: none;">
+                    <img id="qrImage" src="" alt="QR Code" class="qr-image">
+                    <p class="qr-url" id="qrUrl"></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="download-btn" onclick="downloadQR('png')" id="downloadPngBtn" style="display: none;">
+                    Download PNG
+                </button>
+                <button class="download-btn" onclick="downloadQR('svg')" id="downloadSvgBtn" style="display: none;">
+                    Download SVG
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="auth.js"></script>
     <script>
         // Check authentication
@@ -221,6 +246,7 @@
                     <input type="text" value="${shortUrl}" readonly class="url-display">
                     <button class="copy-btn" onclick="copyToClipboard('${shortUrl}', this)">Copy</button>
                     <a href="/${urlEntry.short_code}" target="_blank" class="visit-btn">Visit</a>
+                    <button class="qr-btn" onclick="showQRCode('${urlEntry.short_code}')">🔲 QR Code</button>
                     <button class="delete-btn" onclick="deleteUrl('${urlEntry.short_code}', this)">Delete</button>
                 </div>
             `;
@@ -373,6 +399,112 @@
             errorDiv.textContent = message;
             errorDiv.classList.add('show');
         }
+
+        // QR Code functionality
+        let currentQRShortCode = null;
+
+        window.showQRCode = async function(shortCode) {
+            currentQRShortCode = shortCode;
+            const modal = document.getElementById('qrModal');
+            const qrLoading = document.getElementById('qrLoading');
+            const qrDisplay = document.getElementById('qrDisplay');
+            const qrImage = document.getElementById('qrImage');
+            const qrUrl = document.getElementById('qrUrl');
+            const downloadPngBtn = document.getElementById('downloadPngBtn');
+            const downloadSvgBtn = document.getElementById('downloadSvgBtn');
+
+            // Show modal and loading state
+            modal.style.display = 'flex';
+            qrLoading.style.display = 'block';
+            qrDisplay.style.display = 'none';
+            downloadPngBtn.style.display = 'none';
+            downloadSvgBtn.style.display = 'none';
+
+            try {
+                // Fetch QR code PNG
+                const response = await fetch(`/api/urls/${shortCode}/qr/png`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        logout();
+                        window.location.href = 'login.html';
+                        return;
+                    }
+                    throw new Error('Failed to generate QR code');
+                }
+
+                // Convert response to blob and create object URL
+                const blob = await response.blob();
+                const imageUrl = URL.createObjectURL(blob);
+
+                // Display QR code
+                qrImage.src = imageUrl;
+                const shortUrl = `${window.location.origin}/${shortCode}`;
+                qrUrl.textContent = shortUrl;
+
+                qrLoading.style.display = 'none';
+                qrDisplay.style.display = 'block';
+                downloadPngBtn.style.display = 'inline-block';
+                downloadSvgBtn.style.display = 'inline-block';
+
+            } catch (error) {
+                qrLoading.textContent = 'Failed to generate QR code';
+                console.error('QR code error:', error);
+            }
+        };
+
+        window.downloadQR = async function(format) {
+            if (!currentQRShortCode) return;
+
+            try {
+                const response = await fetch(`/api/urls/${currentQRShortCode}/qr/${format}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to download QR code');
+                }
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${currentQRShortCode}.${format}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+            } catch (error) {
+                showError('Failed to download QR code: ' + error.message);
+            }
+        };
+
+        window.closeQRModal = function() {
+            const modal = document.getElementById('qrModal');
+            modal.style.display = 'none';
+            currentQRShortCode = null;
+
+            // Revoke object URL to free memory
+            const qrImage = document.getElementById('qrImage');
+            if (qrImage.src) {
+                URL.revokeObjectURL(qrImage.src);
+                qrImage.src = '';
+            }
+        };
+
+        // Close modal when clicking outside
+        document.getElementById('qrModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeQRModal();
+            }
+        });
 
         // Initial load
         loadUrls();

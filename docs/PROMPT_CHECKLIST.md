@@ -37,13 +37,13 @@ This checklist tracks the implementation status of all feature prompts for the R
 
 ### QR Code Backend
 - [x] **Chunk 15** - QR Code Dependencies
-- [ ] **Chunk 16** - QR PNG Generation
+- [x] **Chunk 16** - QR PNG Generation
 - [ ] **Chunk 17** - QR Logo Branding
-- [ ] **Chunk 18** - QR SVG Generation
-- [ ] **Chunk 19** - QR API Endpoint
+- [x] **Chunk 18** - QR SVG Generation
+- [x] **Chunk 19** - QR API Endpoint
 
 ### Configuration API
-- [ ] **Chunk 20** - Config API Endpoint
+- [x] **Chunk 20** - Config API Endpoint
 
 ---
 
@@ -104,9 +104,9 @@ This checklist tracks the implementation status of all feature prompts for the R
 
 | Status | Count |
 |--------|-------|
-| Completed | 21 |
+| Completed | 26 |
 | Partial | 6 |
-| Not Started | 16 |
+| Not Started | 11 |
 | **Total** | **43** |
 
-**Overall Progress: ~67% (with partial implementations)**
+**Overall Progress: ~74% (with partial implementations)**
