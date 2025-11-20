@@ -1066,7 +1066,19 @@ async fn get_qr_code(
         })));
     }
 
-    let full_url = format!("{}/{}", data.config.host_url, code);
+    // Get the actual host from the request
+    let host = http_req
+        .connection_info()
+        .host()
+        .to_string();
+
+    let scheme = if http_req.connection_info().scheme() == "https" {
+        "https"
+    } else {
+        "http"
+    };
+
+    let full_url = format!("{}://{}/{}", scheme, host, code);
     drop(db); // Release lock before heavy computation
 
     match format.as_str() {
