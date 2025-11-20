@@ -48,8 +48,8 @@ Make sure rand is already imported (it should be from short code generation).
 ```
 
 ## Expected Output
-- base64 crate dependency
-- BASE64 engine import
-- generate_refresh_token() function
-- Returns 44-character base64 string
-- Uses cryptographically secure randomness
+- [x] base64 crate dependency
+- [x] BASE64 engine import
+- [x] generate_refresh_token() function
+- [x] Returns 44-character base64 string
+- [x] Uses cryptographically secure randomness
