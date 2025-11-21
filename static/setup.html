@@ -3,37 +3,37 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Up - Rust URL Shortener</title>
+    <title>Initial Setup - Rust URL Shortener</title>
     <link rel="stylesheet" href="styles.css?v=2">
 </head>
 <body>
     <nav class="navbar">
         <div class="nav-content">
             <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
-            <div class="nav-links">
-                <a href="/">Home</a>
-                <a href="login.html">Log In</a>
-            </div>
         </div>
     </nav>
 
     <div class="container">
         <div class="auth-card">
-            <h1>Create Account</h1>
-            <p class="subtitle">Sign up to start shortening your URLs</p>
+            <h1>Initial Setup</h1>
+            <p class="subtitle">Create your administrator account to get started</p>
 
-            <form id="signupForm">
+            <div class="info-box">
+                <p><strong>Note:</strong> This is a one-time setup. The first account will have administrator privileges and cannot be undone.</p>
+            </div>
+
+            <form id="setupForm">
                 <div class="input-group">
-                    <label for="username">Username</label>
+                    <label for="username">Admin Username</label>
                     <input
                         type="text"
                         id="username"
-                        placeholder="Choose a username (min 3 characters)"
+                        placeholder="Choose an admin username"
                         required
                         autocomplete="username"
                         minlength="3"
                     />
-                    <small class="input-hint">At least 3 characters</small>
+                    <small>Minimum 3 characters</small>
                 </div>
 
                 <div class="input-group">
@@ -41,12 +41,11 @@
                     <input
                         type="password"
                         id="password"
-                        placeholder="Choose a password (min 6 characters)"
+                        placeholder="Choose a strong password"
                         required
                         autocomplete="new-password"
-                        minlength="6"
                     />
-                    <small class="input-hint">At least 6 characters</small>
+                    <small>Must contain: 8+ characters, 1 uppercase, 1 number, 1 special character</small>
                 </div>
 
                 <div class="input-group">
@@ -54,56 +53,44 @@
                     <input
                         type="password"
                         id="confirmPassword"
-                        placeholder="Confirm your password"
+                        placeholder="Re-enter your password"
                         required
                         autocomplete="new-password"
-                        minlength="6"
                     />
                 </div>
 
                 <div class="error" id="error"></div>
 
-                <button type="submit" id="signupBtn">Create Account</button>
+                <button type="submit" id="setupBtn">Create Admin Account</button>
             </form>
-
-            <p class="auth-switch">
-                Already have an account? <a href="login.html">Log in here</a>
-            </p>
         </div>
     </div>
 
     <script src="auth.js"></script>
     <script>
-        const form = document.getElementById('signupForm');
+        const form = document.getElementById('setupForm');
         const usernameInput = document.getElementById('username');
         const passwordInput = document.getElementById('password');
         const confirmPasswordInput = document.getElementById('confirmPassword');
-        const signupBtn = document.getElementById('signupBtn');
+        const setupBtn = document.getElementById('setupBtn');
         const errorDiv = document.getElementById('error');
 
-        // Check if setup is required
-        async function checkSetup() {
+        // Check if setup is actually required
+        async function checkSetupRequired() {
             try {
                 const response = await fetch('/api/setup/required');
                 const data = await response.json();
 
-                if (data.setup_required) {
-                    window.location.href = 'setup.html';
-                    return true;
+                if (!data.setup_required) {
+                    // Setup already completed, redirect to login
+                    window.location.href = 'login.html';
                 }
-                return false;
             } catch (error) {
                 console.error('Failed to check setup status:', error);
-                return false;
             }
         }
 
-        // Check if already logged in
-        if (getToken()) {
-            window.location.href = 'dashboard.html';
-        } else {
-            checkSetup();
-        }
+        checkSetupRequired();
 
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -112,14 +99,13 @@
             const password = passwordInput.value;
             const confirmPassword = confirmPasswordInput.value;
 
-            // Validation
-            if (username.length < 3) {
-                showError('Username must be at least 3 characters');
+            if (!username || !password || !confirmPassword) {
+                showError('Please fill in all fields');
                 return;
             }
 
-            if (password.length < 6) {
-                showError('Password must be at least 6 characters');
+            if (username.length < 3) {
+                showError('Username must be at least 3 characters');
                 return;
             }
 
@@ -129,8 +115,8 @@
             }
 
             errorDiv.classList.remove('show');
-            signupBtn.disabled = true;
-            signupBtn.textContent = 'Creating account...';
+            setupBtn.disabled = true;
+            setupBtn.textContent = 'Creating account...';
 
             try {
                 const response = await fetch('/api/register', {
@@ -144,7 +130,7 @@
                 const data = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Registration failed');
+                    throw new Error(data.error || 'Setup failed');
                 }
 
                 // Save token and username
@@ -154,8 +140,8 @@
                 window.location.href = 'dashboard.html';
             } catch (error) {
                 showError(error.message);
-                signupBtn.disabled = false;
-                signupBtn.textContent = 'Create Account';
+                setupBtn.disabled = false;
+                setupBtn.textContent = 'Create Admin Account';
             }
         });
 
@@ -164,5 +150,28 @@
             errorDiv.classList.add('show');
         }
     </script>
+
+    <style>
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border-radius: 4px;
+        }
+
+        .info-box p {
+            margin: 0;
+            color: #1565c0;
+            font-size: 0.9rem;
+        }
+
+        small {
+            display: block;
+            margin-top: 0.25rem;
+            color: #666;
+            font-size: 0.85rem;
+        }
+    </style>
 </body>
 </html>

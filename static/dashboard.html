@@ -11,6 +11,7 @@
         <div class="nav-content">
             <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
             <div class="nav-links">
+                <a href="admin.html" id="adminLink" style="display: none;" class="admin-link">⚙️ Admin</a>
                 <span class="user-info">👤 <span id="username"></span></span>
                 <button id="logoutBtn" class="logout-btn">Log Out</button>
             </div>
@@ -95,6 +96,28 @@
 
         // Display username
         document.getElementById('username').textContent = username;
+
+        // Check if user is admin and show admin link
+        async function checkAdminStatus() {
+            try {
+                const response = await fetch('/api/me', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.is_admin) {
+                        document.getElementById('adminLink').style.display = 'inline';
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to check admin status:', error);
+            }
+        }
+
+        checkAdminStatus();
 
         // Elements
         const createForm = document.getElementById('createForm');

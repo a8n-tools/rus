@@ -176,6 +176,7 @@ struct ClickStats {
 struct Claims {
     sub: String,      // username
     user_id: i64,     // user ID
+    is_admin: bool,   // admin flag
     exp: usize,       // expiration time
 }
 
@@ -190,6 +191,34 @@ struct HealthResponse {
 struct ConfigResponse {
     host_url: String,
     max_url_length: usize,
+}
+
+#[derive(Serialize)]
+struct SetupCheckResponse {
+    setup_required: bool,
+}
+
+#[derive(Serialize)]
+struct UserInfo {
+    user_id: i64,
+    username: String,
+    is_admin: bool,
+    created_at: String,
+    url_count: i64,
+}
+
+#[derive(Serialize)]
+struct CurrentUserResponse {
+    user_id: i64,
+    username: String,
+    is_admin: bool,
+}
+
+#[derive(Serialize)]
+struct AdminStatsResponse {
+    total_users: i64,
+    total_urls: i64,
+    total_clicks: i64,
 }
 
 // Application state
@@ -215,6 +244,7 @@ impl AppState {
                 userID INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
                 password TEXT NOT NULL,
+                is_admin INTEGER NOT NULL DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -410,7 +440,7 @@ fn generate_refresh_token() -> String {
 }
 
 // JWT helper functions
-fn create_jwt(username: &str, user_id: i64, secret: &str, expiry_hours: i64) -> Result<String, jsonwebtoken::errors::Error> {
+fn create_jwt(username: &str, user_id: i64, is_admin: bool, secret: &str, expiry_hours: i64) -> Result<String, jsonwebtoken::errors::Error> {
     let expiration = Utc::now()
         .checked_add_signed(Duration::hours(expiry_hours))
         .expect("valid timestamp")
@@ -419,6 +449,7 @@ fn create_jwt(username: &str, user_id: i64, secret: &str, expiry_hours: i64) -> 
     let claims = Claims {
         sub: username.to_owned(),
         user_id,
+        is_admin,
         exp: expiration as usize,
     };
 
@@ -453,6 +484,37 @@ async fn jwt_validator(
 
     match decode_jwt(token, &secret) {
         Ok(claims) => {
+            req.extensions_mut().insert(claims);
+            Ok(req)
+        }
+        Err(_) => Err((
+            actix_web::error::ErrorUnauthorized("Invalid token"),
+            req,
+        )),
+    }
+}
+
+// Admin validator middleware (requires valid JWT with admin flag)
+async fn admin_validator(
+    req: actix_web::dev::ServiceRequest,
+    credentials: BearerAuth,
+) -> Result<actix_web::dev::ServiceRequest, (actix_web::Error, actix_web::dev::ServiceRequest)> {
+    let token = credentials.token();
+
+    // Get the secret from app state
+    let secret = req
+        .app_data::<web::Data<AppState>>()
+        .map(|state| state.config.jwt_secret.clone())
+        .unwrap_or_else(get_jwt_secret);
+
+    match decode_jwt(token, &secret) {
+        Ok(claims) => {
+            if !claims.is_admin {
+                return Err((
+                    actix_web::error::ErrorForbidden("Admin access required"),
+                    req,
+                ));
+            }
             req.extensions_mut().insert(claims);
             Ok(req)
         }
@@ -505,16 +567,26 @@ async fn register(
 
     // Insert user into database
     let db = data.db.lock().unwrap();
+
+    // Check if this is the first user (will be admin)
+    let user_count: i64 = db.query_row(
+        "SELECT COUNT(*) FROM users",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    let is_admin = user_count == 0;
+
     match db.execute(
-        "INSERT INTO users (username, password) VALUES (?1, ?2)",
-        params![&req.username, &hashed_password],
+        "INSERT INTO users (username, password, is_admin) VALUES (?1, ?2, ?3)",
+        params![&req.username, &hashed_password, is_admin as i32],
     ) {
         Ok(_) => {
             // Get the user ID
             let user_id: i64 = db.last_insert_rowid();
 
             // Create JWT token
-            match create_jwt(&req.username, user_id, &data.config.jwt_secret, data.config.jwt_expiry_hours) {
+            match create_jwt(&req.username, user_id, is_admin, &data.config.jwt_secret, data.config.jwt_expiry_hours) {
                 Ok(token) => {
                     // Create refresh token
                     let refresh_token = generate_refresh_token();
@@ -574,7 +646,7 @@ async fn login(
     }
 
     // Get user from database
-    let mut stmt = match db.prepare("SELECT userID, username, password FROM users WHERE username = ?1") {
+    let mut stmt = match db.prepare("SELECT userID, username, password, is_admin FROM users WHERE username = ?1") {
         Ok(stmt) => stmt,
         Err(_) => {
             return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
@@ -583,20 +655,21 @@ async fn login(
         }
     };
 
-    let user_result: rusqlite::Result<(i64, String, String)> = stmt.query_row(
+    let user_result: rusqlite::Result<(i64, String, String, i32)> = stmt.query_row(
         params![&req.username],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     );
 
     match user_result {
-        Ok((user_id, username, hashed_password)) => {
+        Ok((user_id, username, hashed_password, is_admin_int)) => {
+            let is_admin = is_admin_int != 0;
             // Verify password
             match verify(&req.password, &hashed_password) {
                 Ok(true) => {
                     // Record successful login attempt
                     record_login_attempt(&db, &req.username, true);
                     // Create JWT token
-                    match create_jwt(&username, user_id, &data.config.jwt_secret, data.config.jwt_expiry_hours) {
+                    match create_jwt(&username, user_id, is_admin, &data.config.jwt_secret, data.config.jwt_expiry_hours) {
                         Ok(token) => {
                             // Create refresh token
                             let refresh_token = generate_refresh_token();
@@ -649,21 +722,22 @@ async fn refresh_token(
     let db = data.db.lock().unwrap();
 
     // Find and validate refresh token
-    let token_result: rusqlite::Result<(i64, i64, String)> = db.query_row(
-        "SELECT rt.id, rt.user_id, u.username FROM refresh_tokens rt
+    let token_result: rusqlite::Result<(i64, i64, String, i32)> = db.query_row(
+        "SELECT rt.id, rt.user_id, u.username, u.is_admin FROM refresh_tokens rt
          JOIN users u ON rt.user_id = u.userID
          WHERE rt.token = ?1 AND rt.expires_at > datetime('now')",
         params![&req.refresh_token],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     );
 
     match token_result {
-        Ok((token_id, user_id, username)) => {
+        Ok((token_id, user_id, username, is_admin_int)) => {
+            let is_admin = is_admin_int != 0;
             // Delete old refresh token (rotation)
             let _ = db.execute("DELETE FROM refresh_tokens WHERE id = ?1", params![token_id]);
 
             // Create new JWT token
-            let token = match create_jwt(&username, user_id, &data.config.jwt_secret, data.config.jwt_expiry_hours) {
+            let token = match create_jwt(&username, user_id, is_admin, &data.config.jwt_secret, data.config.jwt_expiry_hours) {
                 Ok(t) => t,
                 Err(_) => {
                     return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
@@ -1135,6 +1209,18 @@ async fn dashboard_page() -> Result<HttpResponse> {
         .body(include_str!("../static/dashboard.html")))
 }
 
+async fn setup_page() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../static/setup.html")))
+}
+
+async fn admin_page() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../static/admin.html")))
+}
+
 async fn serve_css() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("text/css; charset=utf-8")
@@ -1163,6 +1249,147 @@ async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
     Ok(HttpResponse::Ok().json(ConfigResponse {
         host_url: data.config.host_url.clone(),
         max_url_length: data.config.max_url_length,
+    }))
+}
+
+// Check if initial setup is required (no users exist)
+async fn check_setup_required(data: web::Data<AppState>) -> Result<HttpResponse> {
+    let db = data.db.lock().unwrap();
+
+    let user_count: i64 = db.query_row(
+        "SELECT COUNT(*) FROM users",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    Ok(HttpResponse::Ok().json(SetupCheckResponse {
+        setup_required: user_count == 0,
+    }))
+}
+
+// Get current user info
+async fn get_current_user(
+    http_req: HttpRequest,
+) -> Result<HttpResponse> {
+    let claims = match get_claims(&http_req) {
+        Some(c) => c,
+        None => {
+            return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Unauthorized"
+            })));
+        }
+    };
+
+    Ok(HttpResponse::Ok().json(CurrentUserResponse {
+        user_id: claims.user_id,
+        username: claims.sub,
+        is_admin: claims.is_admin,
+    }))
+}
+
+// Admin endpoint to list all users
+async fn admin_list_users(
+    data: web::Data<AppState>,
+) -> Result<HttpResponse> {
+    let db = data.db.lock().unwrap();
+
+    let mut stmt = db.prepare(
+        "SELECT u.userID, u.username, u.is_admin, u.created_at,
+                (SELECT COUNT(*) FROM urls WHERE user_id = u.userID) as url_count
+         FROM users u
+         ORDER BY u.created_at DESC"
+    ).map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
+
+    let users: Vec<UserInfo> = stmt.query_map([], |row| {
+        Ok(UserInfo {
+            user_id: row.get(0)?,
+            username: row.get(1)?,
+            is_admin: row.get::<_, i32>(2)? != 0,
+            created_at: row.get(3)?,
+            url_count: row.get(4)?,
+        })
+    })
+    .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(HttpResponse::Ok().json(users))
+}
+
+// Admin endpoint to delete a user
+async fn admin_delete_user(
+    data: web::Data<AppState>,
+    user_id: web::Path<i64>,
+    http_req: HttpRequest,
+) -> Result<HttpResponse> {
+    let claims = match get_claims(&http_req) {
+        Some(c) => c,
+        None => {
+            return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Unauthorized"
+            })));
+        }
+    };
+
+    // Prevent admin from deleting themselves
+    if claims.user_id == *user_id {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Cannot delete your own account"
+        })));
+    }
+
+    let db = data.db.lock().unwrap();
+
+    // Delete the user (CASCADE will handle related records)
+    match db.execute(
+        "DELETE FROM users WHERE userID = ?1",
+        params![*user_id],
+    ) {
+        Ok(rows_affected) => {
+            if rows_affected > 0 {
+                Ok(HttpResponse::Ok().json(serde_json::json!({
+                    "message": "User deleted successfully"
+                })))
+            } else {
+                Ok(HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "User not found"
+                })))
+            }
+        }
+        Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": "Failed to delete user"
+        }))),
+    }
+}
+
+// Admin endpoint to get system statistics
+async fn admin_get_stats(
+    data: web::Data<AppState>,
+) -> Result<HttpResponse> {
+    let db = data.db.lock().unwrap();
+
+    let total_users: i64 = db.query_row(
+        "SELECT COUNT(*) FROM users",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    let total_urls: i64 = db.query_row(
+        "SELECT COUNT(*) FROM urls",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    let total_clicks: i64 = db.query_row(
+        "SELECT SUM(clicks) FROM urls",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
+
+    Ok(HttpResponse::Ok().json(AdminStatsResponse {
+        total_users,
+        total_urls,
+        total_clicks,
     }))
 }
 
@@ -1204,6 +1431,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         let auth = HttpAuthentication::bearer(jwt_validator);
+        let admin_auth = HttpAuthentication::bearer(admin_validator);
 
         App::new()
             .app_data(app_state.clone())
@@ -1213,18 +1441,22 @@ async fn main() -> std::io::Result<()> {
             .route("/login.html", web::get().to(login_page))
             .route("/signup.html", web::get().to(signup_page))
             .route("/dashboard.html", web::get().to(dashboard_page))
+            .route("/setup.html", web::get().to(setup_page))
+            .route("/admin.html", web::get().to(admin_page))
             .route("/styles.css", web::get().to(serve_css))
             .route("/auth.js", web::get().to(serve_auth_js))
             .route("/api/register", web::post().to(register))
             .route("/api/login", web::post().to(login))
             .route("/api/refresh", web::post().to(refresh_token))
             .route("/api/config", web::get().to(get_config))
+            .route("/api/setup/required", web::get().to(check_setup_required))
             .route("/health", web::get().to(health_check))
             .route("/{code}", web::get().to(redirect_url))
             // Protected routes (require authentication)
             .service(
                 web::scope("/api")
                     .wrap(auth)
+                    .route("/me", web::get().to(get_current_user))
                     .route("/shorten", web::post().to(shorten_url))
                     .route("/stats/{code}", web::get().to(get_stats))
                     .route("/urls", web::get().to(get_user_urls))
@@ -1232,6 +1464,14 @@ async fn main() -> std::io::Result<()> {
                     .route("/urls/{code}/name", web::patch().to(update_url_name))
                     .route("/urls/{code}/clicks", web::get().to(get_click_history))
                     .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code))
+            )
+            // Admin-only routes
+            .service(
+                web::scope("/api/admin")
+                    .wrap(admin_auth)
+                    .route("/users", web::get().to(admin_list_users))
+                    .route("/users/{user_id}", web::delete().to(admin_delete_user))
+                    .route("/stats", web::get().to(admin_get_stats))
             )
     })
     .bind((bind_host.as_str(), bind_port))?

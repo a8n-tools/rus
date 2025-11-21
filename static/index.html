@@ -160,6 +160,22 @@
 
     <script src="auth.js"></script>
     <script>
+        // Check if setup is required
+        async function checkSetup() {
+            try {
+                const response = await fetch('/api/setup/required');
+                const data = await response.json();
+
+                if (data.setup_required) {
+                    window.location.href = 'setup.html';
+                }
+            } catch (error) {
+                console.error('Failed to check setup status:', error);
+            }
+        }
+
+        checkSetup();
+
         // Update nav based on auth status
         const navLinks = document.getElementById('navLinks');
 

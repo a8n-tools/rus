@@ -64,9 +64,28 @@
         const loginBtn = document.getElementById('loginBtn');
         const errorDiv = document.getElementById('error');
 
+        // Check if setup is required
+        async function checkSetup() {
+            try {
+                const response = await fetch('/api/setup/required');
+                const data = await response.json();
+
+                if (data.setup_required) {
+                    window.location.href = 'setup.html';
+                    return true;
+                }
+                return false;
+            } catch (error) {
+                console.error('Failed to check setup status:', error);
+                return false;
+            }
+        }
+
         // Check if already logged in
         if (getToken()) {
             window.location.href = 'dashboard.html';
+        } else {
+            checkSetup();
         }
 
         form.addEventListener('submit', async (e) => {
