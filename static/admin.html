@@ -126,6 +126,10 @@
                 });
 
                 if (!response.ok) {
+                    if (response.status === 401 || response.status === 403) {
+                        // Let loadUsers handle the redirect
+                        return;
+                    }
                     throw new Error('Failed to load statistics');
                 }
 
@@ -135,6 +139,10 @@
                 document.getElementById('totalClicks').textContent = stats.total_clicks;
             } catch (error) {
                 console.error('Failed to load stats:', error);
+                // Don't show error to user for stats, just log it
+                document.getElementById('totalUsers').textContent = 'N/A';
+                document.getElementById('totalUrls').textContent = 'N/A';
+                document.getElementById('totalClicks').textContent = 'N/A';
             }
         }
 
@@ -153,11 +161,18 @@
                 });
 
                 if (!response.ok) {
-                    if (response.status === 401 || response.status === 403) {
+                    if (response.status === 401) {
+                        alert('Your session has expired. Please log in again.');
                         window.location.href = 'login.html';
                         return;
                     }
-                    throw new Error('Failed to load users');
+                    if (response.status === 403) {
+                        alert('Access denied: Admin privileges required');
+                        window.location.href = 'dashboard.html';
+                        return;
+                    }
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Server error: ${response.status}`);
                 }
 
                 const users = await response.json();
@@ -192,7 +207,8 @@
 
             } catch (error) {
                 loading.style.display = 'none';
-                showError('Failed to load users: ' + error.message);
+                console.error('Error loading users:', error);
+                showError(error.message);
             }
         }
 
@@ -283,13 +299,20 @@
         }
 
         .stat-card {
-            background: white;
+            background: var(--bg-card);
             padding: 1.5rem;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             gap: 1rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
         }
 
         .stat-icon {
@@ -299,19 +322,20 @@
         .stat-value {
             font-size: 2rem;
             font-weight: bold;
-            color: #333;
+            color: var(--rust-orange);
         }
 
         .stat-label {
-            color: #666;
+            color: var(--text-secondary);
             font-size: 0.9rem;
         }
 
         .users-section {
-            background: white;
+            background: var(--bg-card);
             padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 20px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-color);
         }
 
         .users-table table {
@@ -324,35 +348,41 @@
         .users-table td {
             padding: 1rem;
             text-align: left;
-            border-bottom: 1px solid #e0e0e0;
+            border-bottom: 1px solid var(--border-color);
         }
 
         .users-table th {
-            background: #f5f5f5;
+            background: var(--bg-dark);
             font-weight: 600;
-            color: #333;
+            color: var(--text-primary);
+        }
+
+        .users-table tr {
+            transition: background 0.2s;
         }
 
         .users-table tr:hover {
-            background: #f9f9f9;
+            background: var(--bg-card-hover);
         }
 
         .delete-user-btn {
-            background: #f44336;
+            background: var(--error);
             color: white;
             border: none;
             padding: 0.5rem 1rem;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 0.9rem;
+            font-weight: 600;
+            transition: background 0.3s;
         }
 
         .delete-user-btn:hover {
-            background: #d32f2f;
+            background: #dc2626;
         }
 
         .text-muted {
-            color: #999;
+            color: var(--text-muted);
             font-style: italic;
         }
 
@@ -361,20 +391,6 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 1rem;
-        }
-
-        .refresh-btn {
-            background: #2196f3;
-            color: white;
-            border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-
-        .refresh-btn:hover {
-            background: #1976d2;
         }
     </style>
 </body>
