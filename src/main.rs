@@ -1436,22 +1436,20 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(app_state.clone())
             .wrap(middleware::Logger::default())
-            // Public routes
-            .route("/", web::get().to(index))
-            .route("/login.html", web::get().to(login_page))
-            .route("/signup.html", web::get().to(signup_page))
-            .route("/dashboard.html", web::get().to(dashboard_page))
-            .route("/setup.html", web::get().to(setup_page))
-            .route("/admin.html", web::get().to(admin_page))
-            .route("/styles.css", web::get().to(serve_css))
-            .route("/auth.js", web::get().to(serve_auth_js))
+            // Public API routes - MUST BE BEFORE scoped /api routes
             .route("/api/register", web::post().to(register))
             .route("/api/login", web::post().to(login))
             .route("/api/refresh", web::post().to(refresh_token))
             .route("/api/config", web::get().to(get_config))
             .route("/api/setup/required", web::get().to(check_setup_required))
-            .route("/health", web::get().to(health_check))
-            .route("/{code}", web::get().to(redirect_url))
+            // Admin-only routes - MUST BE BEFORE /api scope
+            .service(
+                web::scope("/api/admin")
+                    .wrap(admin_auth)
+                    .route("/users", web::get().to(admin_list_users))
+                    .route("/users/{user_id}", web::delete().to(admin_delete_user))
+                    .route("/stats", web::get().to(admin_get_stats))
+            )
             // Protected routes (require authentication)
             .service(
                 web::scope("/api")
@@ -1465,14 +1463,18 @@ async fn main() -> std::io::Result<()> {
                     .route("/urls/{code}/clicks", web::get().to(get_click_history))
                     .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code))
             )
-            // Admin-only routes
-            .service(
-                web::scope("/api/admin")
-                    .wrap(admin_auth)
-                    .route("/users", web::get().to(admin_list_users))
-                    .route("/users/{user_id}", web::delete().to(admin_delete_user))
-                    .route("/stats", web::get().to(admin_get_stats))
-            )
+            // Public page routes
+            .route("/", web::get().to(index))
+            .route("/login.html", web::get().to(login_page))
+            .route("/signup.html", web::get().to(signup_page))
+            .route("/dashboard.html", web::get().to(dashboard_page))
+            .route("/setup.html", web::get().to(setup_page))
+            .route("/admin.html", web::get().to(admin_page))
+            .route("/styles.css", web::get().to(serve_css))
+            .route("/auth.js", web::get().to(serve_auth_js))
+            .route("/health", web::get().to(health_check))
+            // Catch-all route for short code redirects (MUST BE LAST)
+            .route("/{code}", web::get().to(redirect_url))
     })
     .bind((bind_host.as_str(), bind_port))?
     .run()
