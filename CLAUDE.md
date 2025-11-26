@@ -57,9 +57,12 @@ JWT_SECRET=<base64-encoded-32-bytes>
 
 Optional:
 ```
-DB_PATH=./data/rus.db    # Database location
-HOST=0.0.0.0             # Bind address
-PORT=8080                # Server port
+DB_PATH=./data/rus.db       # Database location
+HOST=0.0.0.0                # Bind address
+PORT=8080                   # Server port
+ALLOW_REGISTRATION=true     # Allow public signups (default: true)
+                            # Set to false to disable new registrations
+                            # First user can still register (setup)
 ```
 
 ## Database Schema

@@ -62,6 +62,20 @@
 
             <div id="usersTable" class="users-table"></div>
         </div>
+
+        <!-- Abuse Reports Management -->
+        <div class="users-section" style="margin-top: 30px;">
+            <div class="section-header">
+                <h2>Abuse Reports</h2>
+                <button id="refreshReportsBtn" class="refresh-btn">🔄 Refresh</button>
+            </div>
+
+            <div id="loadingReports" class="loading" style="display: none;">Loading reports...</div>
+            <div class="error" id="reportsError"></div>
+            <div class="success" id="reportsSuccess"></div>
+
+            <div id="reportsTable" class="users-table"></div>
+        </div>
     </div>
 
     <script src="auth.js"></script>
@@ -288,6 +302,168 @@
         checkAdminAccess();
         loadStats();
         loadUsers();
+
+        // ============= Abuse Reports Management =============
+        const loadingReports = document.getElementById('loadingReports');
+        const reportsError = document.getElementById('reportsError');
+        const reportsSuccess = document.getElementById('reportsSuccess');
+        const reportsTable = document.getElementById('reportsTable');
+        const refreshReportsBtn = document.getElementById('refreshReportsBtn');
+
+        // Load abuse reports
+        async function loadReports() {
+            loadingReports.style.display = 'block';
+            reportsTable.innerHTML = '';
+            reportsError.classList.remove('show');
+            reportsSuccess.classList.remove('show');
+
+            try {
+                const response = await fetch('/api/admin/reports', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to load reports');
+                }
+
+                const reports = await response.json();
+                loadingReports.style.display = 'none';
+
+                if (reports.length === 0) {
+                    reportsTable.innerHTML = '<p class="empty-state">No abuse reports</p>';
+                    return;
+                }
+
+                // Create table
+                const table = document.createElement('table');
+                table.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Short Code</th>
+                            <th>Reason</th>
+                            <th>Reporter</th>
+                            <th>Reported</th>
+                            <th>Owner</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reportsTableBody"></tbody>
+                `;
+                reportsTable.appendChild(table);
+
+                const tbody = document.getElementById('reportsTableBody');
+                reports.forEach(report => {
+                    const row = createReportRow(report);
+                    tbody.appendChild(row);
+                });
+
+            } catch (error) {
+                loadingReports.style.display = 'none';
+                console.error('Error loading reports:', error);
+                showReportsError(error.message);
+            }
+        }
+
+        // Create report row
+        function createReportRow(report) {
+            const row = document.createElement('tr');
+
+            const statusBadge = report.status === 'pending'
+                ? '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em;">⏳ Pending</span>'
+                : report.status === 'resolved'
+                ? '<span style="background: #22c55e; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em;">✓ Resolved</span>'
+                : '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em;">Dismissed</span>';
+
+            const reportedDate = new Date(report.created_at).toLocaleDateString();
+            const reporterEmail = report.reporter_email || 'Anonymous';
+            const ownerInfo = report.url_owner_username || 'Unknown';
+            const originalUrl = report.original_url || 'URL deleted';
+
+            row.innerHTML = `
+                <td>${statusBadge}</td>
+                <td>
+                    <strong style="color: var(--rust-orange);">${report.short_code}</strong><br>
+                    <small style="color: var(--text-muted); font-size: 0.85em;">${originalUrl}</small>
+                </td>
+                <td>
+                    <strong>${report.reason}</strong><br>
+                    ${report.description ? `<small style="color: var(--text-secondary);">${report.description}</small>` : ''}
+                </td>
+                <td style="font-size: 0.9em;">${reporterEmail}</td>
+                <td style="font-size: 0.9em;">${reportedDate}</td>
+                <td>${ownerInfo}</td>
+                <td>
+                    ${report.status === 'pending' ? `
+                        <div style="display: flex; gap: 5px; flex-direction: column;">
+                            <button class="action-btn-small" style="background: #6b7280;" onclick="resolveReport(${report.id}, 'dismiss')">Dismiss</button>
+                            <button class="action-btn-small" style="background: var(--error);" onclick="resolveReport(${report.id}, 'delete_url')">Delete URL</button>
+                            <button class="action-btn-small" style="background: #dc2626;" onclick="resolveReport(${report.id}, 'ban_user')">Ban User</button>
+                        </div>
+                    ` : '<span class="text-muted">Resolved</span>'}
+                </td>
+            `;
+
+            return row;
+        }
+
+        // Resolve report
+        window.resolveReport = async function(reportId, action) {
+            const actionText = action === 'dismiss' ? 'dismiss this report'
+                : action === 'delete_url' ? 'delete this URL'
+                : 'ban this user and delete all their URLs';
+
+            if (!confirm(`Are you sure you want to ${actionText}?\n\nThis action cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/admin/reports/${reportId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ action })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to resolve report');
+                }
+
+                // Show success message
+                reportsSuccess.innerHTML = `<strong>✓ ${data.message}</strong>`;
+                reportsSuccess.classList.add('show');
+
+                // Reload data
+                await loadReports();
+                await loadUsers();
+                await loadStats();
+
+                setTimeout(() => {
+                    reportsSuccess.classList.remove('show');
+                }, 3000);
+
+            } catch (error) {
+                showReportsError('Failed to resolve report: ' + error.message);
+            }
+        };
+
+        // Refresh reports button
+        refreshReportsBtn.addEventListener('click', loadReports);
+
+        // Show reports error
+        function showReportsError(message) {
+            reportsError.textContent = message;
+            reportsError.classList.add('show');
+        }
+
+        // Load reports on page load
+        loadReports();
     </script>
 
     <style>
@@ -391,6 +567,28 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 1rem;
+        }
+
+        .action-btn-small {
+            color: white;
+            border: none;
+            padding: 0.4rem 0.8rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            font-weight: 600;
+            transition: opacity 0.2s;
+            width: 100%;
+        }
+
+        .action-btn-small:hover {
+            opacity: 0.8;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
         }
     </style>
 </body>

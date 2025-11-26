@@ -10,9 +10,9 @@
     <nav class="navbar">
         <div class="nav-content">
             <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
-            <div class="nav-links">
+            <div class="nav-links" id="navLinks">
                 <a href="/">Home</a>
-                <a href="signup.html">Sign Up</a>
+                <a href="signup.html" id="signupLink">Sign Up</a>
             </div>
         </div>
     </nav>
@@ -50,7 +50,7 @@
                 <button type="submit" id="loginBtn">Log In</button>
             </form>
 
-            <p class="auth-switch">
+            <p class="auth-switch" id="signupPrompt">
                 Don't have an account? <a href="signup.html">Sign up here</a>
             </p>
         </div>
@@ -81,11 +81,30 @@
             }
         }
 
+        // Check if registration is allowed and update links
+        async function checkRegistrationAllowed() {
+            try {
+                const response = await fetch('/api/config');
+                const data = await response.json();
+
+                if (!data.allow_registration) {
+                    // Hide signup links
+                    const signupLink = document.getElementById('signupLink');
+                    const signupPrompt = document.getElementById('signupPrompt');
+                    if (signupLink) signupLink.style.display = 'none';
+                    if (signupPrompt) signupPrompt.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Failed to check registration status:', error);
+            }
+        }
+
         // Check if already logged in
         if (getToken()) {
             window.location.href = 'dashboard.html';
         } else {
             checkSetup();
+            checkRegistrationAllowed();
         }
 
         form.addEventListener('submit', async (e) => {

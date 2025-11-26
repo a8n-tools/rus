@@ -98,11 +98,46 @@
             }
         }
 
+        // Check if registration is allowed
+        async function checkRegistrationAllowed() {
+            try {
+                const response = await fetch('/api/config');
+                const data = await response.json();
+
+                if (!data.allow_registration) {
+                    // Hide the form and show a message
+                    const formContainer = document.querySelector('.auth-card');
+                    formContainer.innerHTML = `
+                        <h1>Registration Disabled</h1>
+                        <p class="subtitle" style="color: var(--text-secondary); margin-bottom: 30px;">
+                            New user registration is currently disabled. Please contact the administrator.
+                        </p>
+                        <p class="auth-switch">
+                            Already have an account? <a href="login.html">Log in here</a>
+                        </p>
+                        <p class="auth-switch">
+                            <a href="/">Return to home</a>
+                        </p>
+                    `;
+                    return false;
+                }
+                return true;
+            } catch (error) {
+                console.error('Failed to check registration status:', error);
+                return true; // Default to allowing registration if check fails
+            }
+        }
+
         // Check if already logged in
         if (getToken()) {
             window.location.href = 'dashboard.html';
         } else {
-            checkSetup();
+            // Check both setup and registration status
+            checkSetup().then(setupRequired => {
+                if (!setupRequired) {
+                    checkRegistrationAllowed();
+                }
+            });
         }
 
         form.addEventListener('submit', async (e) => {
