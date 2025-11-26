@@ -6,13 +6,20 @@
     <title>Rust URL Shortener</title>
     <link rel="stylesheet" href="styles.css?v=2">
     <style>
+        .home-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            max-width: 1400px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
         .home-container {
             background: var(--bg-card);
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
             padding: 40px;
-            max-width: 600px;
-            margin: 40px auto;
             border: 1px solid var(--border-color);
         }
 
@@ -26,6 +33,13 @@
             color: var(--text-primary);
             margin-bottom: 10px;
             font-size: 2.5em;
+            text-align: center;
+        }
+
+        .home-container h2 {
+            color: var(--text-primary);
+            margin-bottom: 10px;
+            font-size: 2em;
             text-align: center;
         }
 
@@ -99,6 +113,7 @@
             text-align: center;
             color: var(--text-secondary);
             font-size: 14px;
+            grid-column: 1 / -1;
         }
 
         .footer a {
@@ -106,7 +121,12 @@
             text-decoration: underline;
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 1024px) {
+            .home-grid {
+                grid-template-columns: 1fr;
+                max-width: 700px;
+            }
+
             .action-buttons {
                 flex-direction: column;
             }
@@ -125,10 +145,11 @@
         </div>
     </nav>
 
-    <div class="home-container">
-        <div class="rust-icon">🦀</div>
-        <h1>Rust URL Shortener</h1>
-        <p class="subtitle">Fast, secure, and efficient URL shortening service built with Rust</p>
+    <div class="home-grid">
+        <div class="home-container">
+            <div class="rust-icon">🦀</div>
+            <h1>Rust URL Shortener</h1>
+            <p class="subtitle">Fast, secure, and efficient URL shortening service built with Rust</p>
 
         <div class="action-buttons" id="actionButtons">
             <a href="signup.html" class="action-btn btn-primary" id="getStartedBtn">Get Started</a>
@@ -146,58 +167,71 @@
                 <h3>Track Your Links</h3>
                 <p>Monitor click statistics and manage all your shortened URLs in one place</p>
             </div>
-            <div class="feature">
-                <div class="feature-icon">⚡</div>
-                <h3>Lightning Fast</h3>
-                <p>Built with Rust and Actix-web for blazing fast performance and reliability</p>
+
+            <div class="features">
+                <div class="feature">
+                    <div class="feature-icon">🔒</div>
+                    <h3>Secure Authentication</h3>
+                    <p>Your URLs are protected with JWT-based authentication and bcrypt password hashing</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">📊</div>
+                    <h3>Track Your Links</h3>
+                    <p>Monitor click statistics and manage all your shortened URLs in one place</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">⚡</div>
+                    <h3>Lightning Fast</h3>
+                    <p>Built with Rust and Actix-web for blazing fast performance and reliability</p>
+                </div>
             </div>
         </div>
-    </div>
 
-    <div class="home-container" style="margin-top: 20px;">
-        <h2 style="color: var(--text-primary); text-align: center; margin-bottom: 15px;">🚨 Report Abuse</h2>
-        <p class="subtitle" style="margin-bottom: 25px;">Found an abusive or malicious shortened link? Report it to our moderators.</p>
+        <div class="home-container">
+            <h2 style="color: var(--text-primary); text-align: center; margin-bottom: 15px;">🚨 Report Abuse</h2>
+            <p class="subtitle" style="margin-bottom: 25px;">Found an abusive or malicious shortened link? Report it to our moderators.</p>
 
-        <form id="reportForm" style="display: flex; flex-direction: column; gap: 15px;">
-            <div class="input-group">
-                <label for="shortCode">Short Code or Full URL *</label>
-                <input type="text" id="shortCode" name="shortCode" placeholder="abc123 or https://example.com/abc123" required>
-                <small class="input-hint">Enter the short code or paste the full shortened URL</small>
-            </div>
+            <form id="reportForm" style="display: flex; flex-direction: column; gap: 15px;">
+                <div class="input-group">
+                    <label for="shortCode">Short Code or Full URL *</label>
+                    <input type="text" id="shortCode" name="shortCode" placeholder="abc123 or https://example.com/abc123" required>
+                    <small class="input-hint">Enter the short code or paste the full shortened URL</small>
+                </div>
 
-            <div class="input-group">
-                <label for="reason">Reason for Report *</label>
-                <select id="reason" name="reason" required style="width: 100%; padding: 15px; border: 2px solid var(--border-color); border-radius: 10px; font-size: 16px; background: var(--bg-dark); color: var(--text-primary);">
-                    <option value="">Select a reason</option>
-                    <option value="spam">Spam</option>
-                    <option value="phishing">Phishing / Scam</option>
-                    <option value="malware">Malware / Virus</option>
-                    <option value="illegal">Illegal Content</option>
-                    <option value="harassment">Harassment / Abuse</option>
-                    <option value="other">Other</option>
-                </select>
-            </div>
+                <div class="input-group">
+                    <label for="reason">Reason for Report *</label>
+                    <select id="reason" name="reason" required style="width: 100%; padding: 15px; border: 2px solid var(--border-color); border-radius: 10px; font-size: 16px; background: var(--bg-dark); color: var(--text-primary);">
+                        <option value="">Select a reason</option>
+                        <option value="spam">Spam</option>
+                        <option value="phishing">Phishing / Scam</option>
+                        <option value="malware">Malware / Virus</option>
+                        <option value="illegal">Illegal Content</option>
+                        <option value="harassment">Harassment / Abuse</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
 
-            <div class="input-group">
-                <label for="description">Description</label>
-                <textarea id="description" name="description" rows="3" placeholder="Please provide additional details about why you're reporting this link..." style="width: 100%; padding: 15px; border: 2px solid var(--border-color); border-radius: 10px; font-size: 16px; background: var(--bg-dark); color: var(--text-primary); font-family: inherit; resize: vertical;"></textarea>
-            </div>
+                <div class="input-group">
+                    <label for="description">Description</label>
+                    <textarea id="description" name="description" rows="3" placeholder="Please provide additional details about why you're reporting this link..." style="width: 100%; padding: 15px; border: 2px solid var(--border-color); border-radius: 10px; font-size: 16px; background: var(--bg-dark); color: var(--text-primary); font-family: inherit; resize: vertical;"></textarea>
+                </div>
 
-            <div class="input-group">
-                <label for="reporterEmail">Your Email (optional)</label>
-                <input type="email" id="reporterEmail" name="reporterEmail" placeholder="your@email.com">
-                <small class="input-hint">Optional - only if you want us to contact you about this report</small>
-            </div>
+                <div class="input-group">
+                    <label for="reporterEmail">Your Email (optional)</label>
+                    <input type="email" id="reporterEmail" name="reporterEmail" placeholder="your@email.com">
+                    <small class="input-hint">Optional - only if you want us to contact you about this report</small>
+                </div>
 
-            <div class="error" id="reportError"></div>
-            <div class="success" id="reportSuccess"></div>
+                <div class="error" id="reportError"></div>
+                <div class="success" id="reportSuccess"></div>
 
-            <button type="submit" class="action-btn btn-primary" id="submitReportBtn">Submit Report</button>
-        </form>
-    </div>
+                <button type="submit" class="action-btn btn-primary" id="submitReportBtn">Submit Report</button>
+            </form>
+        </div>
 
-    <div class="footer">
-        Made with ❤️ using <a href="https://www.rust-lang.org/" target="_blank">Rust</a>
+        <div class="footer">
+            Made with ❤️ using <a href="https://www.rust-lang.org/" target="_blank">Rust</a>
+        </div>
     </div>
 
     <script src="auth.js"></script>
