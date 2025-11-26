@@ -240,7 +240,10 @@
                 <td>${createdDate}</td>
                 <td>
                     ${!user.is_admin ?
-                        `<button class="delete-user-btn" onclick="deleteUser(${user.user_id}, '${user.username}')">Delete</button>` :
+                        `<div style="display: flex; gap: 5px;">
+                            <button class="promote-user-btn" onclick="promoteUser(${user.user_id}, '${user.username}')" title="Promote to Admin">👑 Promote</button>
+                            <button class="delete-user-btn" onclick="deleteUser(${user.user_id}, '${user.username}')">Delete</button>
+                        </div>` :
                         '<span class="text-muted">Protected</span>'
                     }
                 </td>
@@ -283,6 +286,43 @@
 
             } catch (error) {
                 showError('Failed to delete user: ' + error.message);
+            }
+        };
+
+        // Promote user to admin
+        window.promoteUser = async function(userId, username) {
+            if (!confirm(`Are you sure you want to promote user "${username}" to admin?\n\nAdmins have full access to manage users, URLs, and reports.`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}/promote`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to promote user');
+                }
+
+                // Show success message
+                successDiv.innerHTML = `<strong>✓ ${data.message}</strong>`;
+                successDiv.classList.add('show');
+
+                // Reload data
+                await loadUsers();
+                await loadStats();
+
+                setTimeout(() => {
+                    successDiv.classList.remove('show');
+                }, 3000);
+
+            } catch (error) {
+                showError('Failed to promote user: ' + error.message);
             }
         };
 
@@ -539,6 +579,23 @@
 
         .users-table tr:hover {
             background: var(--bg-card-hover);
+        }
+
+        .promote-user-btn {
+            background: linear-gradient(135deg, var(--rust-orange) 0%, var(--rust-orange-dark) 100%);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .promote-user-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(247, 76, 0, 0.5);
         }
 
         .delete-user-btn {

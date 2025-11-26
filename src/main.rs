@@ -1435,6 +1435,57 @@ async fn admin_delete_user(
     }
 }
 
+// Admin endpoint to promote a user to admin
+async fn admin_promote_user(
+    data: web::Data<AppState>,
+    user_id: web::Path<i64>,
+    http_req: HttpRequest,
+) -> Result<HttpResponse> {
+    let claims = match get_claims(&http_req) {
+        Some(c) => c,
+        None => {
+            return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Unauthorized"
+            })));
+        }
+    };
+
+    let db = data.db.lock().unwrap();
+
+    // Check if user exists and is not already an admin
+    let user_check: rusqlite::Result<(String, i32)> = db.query_row(
+        "SELECT username, is_admin FROM users WHERE userID = ?1",
+        params![*user_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    );
+
+    match user_check {
+        Ok((username, is_admin)) => {
+            if is_admin != 0 {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": "User is already an admin"
+                })));
+            }
+
+            // Promote user to admin
+            match db.execute(
+                "UPDATE users SET is_admin = 1 WHERE userID = ?1",
+                params![*user_id],
+            ) {
+                Ok(_) => Ok(HttpResponse::Ok().json(serde_json::json!({
+                    "message": format!("User '{}' promoted to admin successfully", username)
+                }))),
+                Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to promote user"
+                }))),
+            }
+        }
+        Err(_) => Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": "User not found"
+        }))),
+    }
+}
+
 // Admin endpoint to get system statistics
 async fn admin_get_stats(
     data: web::Data<AppState>,
@@ -1754,6 +1805,7 @@ async fn main() -> std::io::Result<()> {
                     .wrap(admin_auth)
                     .route("/users", web::get().to(admin_list_users))
                     .route("/users/{user_id}", web::delete().to(admin_delete_user))
+                    .route("/users/{user_id}/promote", web::post().to(admin_promote_user))
                     .route("/stats", web::get().to(admin_get_stats))
                     .route("/reports", web::get().to(admin_list_reports))
                     .route("/reports/{report_id}", web::post().to(admin_resolve_report))
