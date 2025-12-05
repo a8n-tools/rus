@@ -1,0 +1,20 @@
+---
+# Build RUS images and push to Forgejo container registry.
+name: Build RUS container
+
+on:
+  push:
+    paths:
+      - "build/**"
+      - "build-publish.yml"
+
+jobs:
+  build:
+    name: Build RUS image
+    uses: ./.github/workflows/build-and-push-image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      image-name: rus
+      image-type: base
