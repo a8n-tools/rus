@@ -1,0 +1,31 @@
+---
+# The variables are separated out to make it easier to configure.
+
+# Docker URL and version to build the application
+builder:
+  name: rust
+  url: "docker.io/library/rust"
+  version: "1.91.1-alpine3.22"
+  dir: /build
+
+# Docker URL and version to run the application
+runtime:
+  name: rust
+  # url: "docker.io/library/rust"
+  # version: "1.91.1-alpine3.22"
+  url: "docker.io/library/alpine"
+  version: "3.22"
+  dir: /app
+  cfg:
+    port: 3000
+    env:
+      - HOST=0.0.0.0
+      - RUST_LOG=info
+    labels:
+      - org.opencontainers.image.source=https://github.com/joshrandall8478/rus
+
+published:
+  # Published image name and version
+  name: "rus"
+  version: "v0.1.0"
+
