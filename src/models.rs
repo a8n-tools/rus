@@ -94,6 +94,12 @@ pub struct HealthResponse {
     pub uptime_seconds: u64,
 }
 
+/// Version response
+#[derive(Serialize)]
+pub struct VersionResponse {
+    pub version: String,
+}
+
 /// Public configuration response
 #[derive(Serialize)]
 pub struct ConfigResponse {

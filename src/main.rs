@@ -49,6 +49,7 @@ async fn main() -> std::io::Result<()> {
             .route("/api/login", web::post().to(login))
             .route("/api/refresh", web::post().to(refresh_token))
             .route("/api/config", web::get().to(get_config))
+            .route("/api/version", web::get().to(get_version))
             .route("/api/setup/required", web::get().to(check_setup_required))
             .route("/api/report-abuse", web::post().to(submit_abuse_report))
             // Admin-only routes - MUST BE BEFORE /api scope

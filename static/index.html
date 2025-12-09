@@ -1,368 +1,420 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Rust URL Shortener</title>
-    <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="styles.css?v=2" />
     <style>
+      .home-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 30px;
+        max-width: 1400px;
+        margin: 40px auto;
+        padding: 0 20px;
+      }
+
+      .home-container {
+        background: var(--bg-card);
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        padding: 40px;
+        border: 1px solid var(--border-color);
+      }
+
+      .rust-icon {
+        text-align: center;
+        font-size: 3em;
+        margin-bottom: 20px;
+      }
+
+      .home-container h1 {
+        color: var(--text-primary);
+        margin-bottom: 10px;
+        font-size: 2.5em;
+        text-align: center;
+      }
+
+      .home-container h2 {
+        color: var(--text-primary);
+        margin-bottom: 10px;
+        font-size: 2em;
+        text-align: center;
+      }
+
+      .action-buttons {
+        display: flex;
+        gap: 15px;
+        margin-top: 30px;
+      }
+
+      .action-btn {
+        flex: 1;
+        padding: 15px;
+        border-radius: 10px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+        text-align: center;
+        text-decoration: none;
+        display: block;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, var(--rust-orange) 0%, var(--rust-orange-dark) 100%);
+        color: white;
+        border: none;
+      }
+
+      .btn-secondary {
+        background: var(--bg-dark);
+        color: var(--rust-orange);
+        border: 2px solid var(--rust-orange);
+      }
+
+      .action-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(247, 76, 0, 0.4);
+      }
+
+      .features {
+        margin-top: 40px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 20px;
+      }
+
+      .feature {
+        background: var(--bg-dark);
+        padding: 20px;
+        border-radius: 12px;
+        border: 1px solid var(--border-color);
+      }
+
+      .feature-icon {
+        font-size: 2em;
+        margin-bottom: 10px;
+      }
+
+      .feature h3 {
+        color: var(--text-primary);
+        margin-bottom: 5px;
+      }
+
+      .feature p {
+        color: var(--text-secondary);
+        font-size: 0.95em;
+      }
+
+      .footer {
+        margin-top: 30px;
+        text-align: center;
+        color: var(--text-secondary);
+        font-size: 14px;
+        grid-column: 1 / -1;
+      }
+
+      .footer a {
+        color: var(--rust-orange);
+        text-decoration: underline;
+      }
+
+      @media (max-width: 1024px) {
         .home-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
-            max-width: 1400px;
-            margin: 40px auto;
-            padding: 0 20px;
-        }
-
-        .home-container {
-            background: var(--bg-card);
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-            padding: 40px;
-            border: 1px solid var(--border-color);
-        }
-
-        .rust-icon {
-            text-align: center;
-            font-size: 3em;
-            margin-bottom: 20px;
-        }
-
-        .home-container h1 {
-            color: var(--text-primary);
-            margin-bottom: 10px;
-            font-size: 2.5em;
-            text-align: center;
-        }
-
-        .home-container h2 {
-            color: var(--text-primary);
-            margin-bottom: 10px;
-            font-size: 2em;
-            text-align: center;
+          grid-template-columns: 1fr;
+          max-width: 700px;
         }
 
         .action-buttons {
-            display: flex;
-            gap: 15px;
-            margin-top: 30px;
+          flex-direction: column;
         }
-
-        .action-btn {
-            flex: 1;
-            padding: 15px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-            text-align: center;
-            text-decoration: none;
-            display: block;
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, var(--rust-orange) 0%, var(--rust-orange-dark) 100%);
-            color: white;
-            border: none;
-        }
-
-        .btn-secondary {
-            background: var(--bg-dark);
-            color: var(--rust-orange);
-            border: 2px solid var(--rust-orange);
-        }
-
-        .action-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(247, 76, 0, 0.4);
-        }
-
-        .features {
-            margin-top: 40px;
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 20px;
-        }
-
-        .feature {
-            background: var(--bg-dark);
-            padding: 20px;
-            border-radius: 12px;
-            border: 1px solid var(--border-color);
-        }
-
-        .feature-icon {
-            font-size: 2em;
-            margin-bottom: 10px;
-        }
-
-        .feature h3 {
-            color: var(--text-primary);
-            margin-bottom: 5px;
-        }
-
-        .feature p {
-            color: var(--text-secondary);
-            font-size: 0.95em;
-        }
-
-        .footer {
-            margin-top: 30px;
-            text-align: center;
-            color: var(--text-secondary);
-            font-size: 14px;
-            grid-column: 1 / -1;
-        }
-
-        .footer a {
-            color: var(--rust-orange);
-            text-decoration: underline;
-        }
-
-        @media (max-width: 1024px) {
-            .home-grid {
-                grid-template-columns: 1fr;
-                max-width: 700px;
-            }
-
-            .action-buttons {
-                flex-direction: column;
-            }
-        }
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <nav class="navbar">
-        <div class="nav-content">
-            <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
-            <div class="nav-links" id="navLinks">
-                <a href="/">Home</a>
-                <a href="login.html">Log In</a>
-                <a href="signup.html">Sign Up</a>
-            </div>
+      <div class="nav-content">
+        <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
+        <div class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="login.html">Log In</a>
+          <a href="signup.html">Sign Up</a>
         </div>
+      </div>
     </nav>
 
     <div class="home-grid">
-        <div class="home-container">
-            <div class="rust-icon">🦀</div>
-            <h1>Rust URL Shortener</h1>
-            <p class="subtitle">Fast, secure, and efficient URL shortening service built with Rust</p>
+      <div class="home-container">
+        <div class="rust-icon">🦀</div>
+        <h1>Rust URL Shortener</h1>
+        <p class="subtitle">Fast, secure, and efficient URL shortening service built with Rust</p>
 
-            <div class="action-buttons" id="actionButtons">
-                <a href="signup.html" class="action-btn btn-primary" id="getStartedBtn">Get Started</a>
-                <a href="login.html" class="action-btn btn-secondary">Log In</a>
-            </div>
-
-            <div class="features">
-                <div class="feature">
-                    <div class="feature-icon">🔒</div>
-                    <h3>Secure Authentication</h3>
-                    <p>Your URLs are protected with JWT-based authentication and bcrypt password hashing</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">📊</div>
-                    <h3>Track Your Links</h3>
-                    <p>Monitor click statistics and manage all your shortened URLs in one place</p>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">⚡</div>
-                    <h3>Lightning Fast</h3>
-                    <p>Built with Rust and Actix-web for blazing fast performance and reliability</p>
-                </div>
-            </div>
+        <div class="action-buttons" id="actionButtons">
+          <a href="signup.html" class="action-btn btn-primary" id="getStartedBtn">Get Started</a>
+          <a href="login.html" class="action-btn btn-secondary">Log In</a>
         </div>
 
-        <div class="home-container">
-            <h2 style="color: var(--text-primary); text-align: center; margin-bottom: 15px;">🚨 Report Abuse</h2>
-            <p class="subtitle" style="margin-bottom: 25px;">Found an abusive or malicious shortened link? Report it to our moderators.</p>
-
-            <form id="reportForm" style="display: flex; flex-direction: column; gap: 15px;">
-                <div class="input-group">
-                    <label for="shortCode">Short Code or Full URL *</label>
-                    <input type="text" id="shortCode" name="shortCode" placeholder="abc123 or https://example.com/abc123" required>
-                    <small class="input-hint">Enter the short code or paste the full shortened URL</small>
-                </div>
-
-                <div class="input-group">
-                    <label for="reason">Reason for Report *</label>
-                    <select id="reason" name="reason" required style="width: 100%; padding: 15px; border: 2px solid var(--border-color); border-radius: 10px; font-size: 16px; background: var(--bg-dark); color: var(--text-primary);">
-                        <option value="">Select a reason</option>
-                        <option value="spam">Spam</option>
-                        <option value="phishing">Phishing / Scam</option>
-                        <option value="malware">Malware / Virus</option>
-                        <option value="illegal">Illegal Content</option>
-                        <option value="harassment">Harassment / Abuse</option>
-                        <option value="other">Other</option>
-                    </select>
-                </div>
-
-                <div class="input-group">
-                    <label for="description">Description</label>
-                    <textarea id="description" name="description" rows="3" placeholder="Please provide additional details about why you're reporting this link..." style="width: 100%; padding: 15px; border: 2px solid var(--border-color); border-radius: 10px; font-size: 16px; background: var(--bg-dark); color: var(--text-primary); font-family: inherit; resize: vertical;"></textarea>
-                </div>
-
-                <div class="input-group">
-                    <label for="reporterEmail">Your Email (optional)</label>
-                    <input type="email" id="reporterEmail" name="reporterEmail" placeholder="your@email.com">
-                    <small class="input-hint">Optional - only if you want us to contact you about this report</small>
-                </div>
-
-                <div class="error" id="reportError"></div>
-                <div class="success" id="reportSuccess"></div>
-
-                <button type="submit" class="action-btn btn-primary" id="submitReportBtn">Submit Report</button>
-            </form>
+        <div class="features">
+          <div class="feature">
+            <div class="feature-icon">🔒</div>
+            <h3>Secure Authentication</h3>
+            <p>Your URLs are protected with JWT-based authentication and bcrypt password hashing</p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">📊</div>
+            <h3>Track Your Links</h3>
+            <p>Monitor click statistics and manage all your shortened URLs in one place</p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">⚡</div>
+            <h3>Lightning Fast</h3>
+            <p>Built with Rust and Actix-web for blazing fast performance and reliability</p>
+          </div>
         </div>
+      </div>
 
-        <div class="footer">
-            Made with ❤️ using <a href="https://www.rust-lang.org/" target="_blank">Rust</a>
-        </div>
+      <div class="home-container">
+        <h2 style="color: var(--text-primary); text-align: center; margin-bottom: 15px">🚨 Report Abuse</h2>
+        <p class="subtitle" style="margin-bottom: 25px">
+          Found an abusive or malicious shortened link? Report it to our moderators.
+        </p>
+
+        <form id="reportForm" style="display: flex; flex-direction: column; gap: 15px">
+          <div class="input-group">
+            <label for="shortCode">Short Code or Full URL *</label>
+            <input
+              type="text"
+              id="shortCode"
+              name="shortCode"
+              placeholder="abc123 or https://example.com/abc123"
+              required
+            />
+            <small class="input-hint">Enter the short code or paste the full shortened URL</small>
+          </div>
+
+          <div class="input-group">
+            <label for="reason">Reason for Report *</label>
+            <select
+              id="reason"
+              name="reason"
+              required
+              style="
+                width: 100%;
+                padding: 15px;
+                border: 2px solid var(--border-color);
+                border-radius: 10px;
+                font-size: 16px;
+                background: var(--bg-dark);
+                color: var(--text-primary);
+              "
+            >
+              <option value="">Select a reason</option>
+              <option value="spam">Spam</option>
+              <option value="phishing">Phishing / Scam</option>
+              <option value="malware">Malware / Virus</option>
+              <option value="illegal">Illegal Content</option>
+              <option value="harassment">Harassment / Abuse</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="description">Description</label>
+            <textarea
+              id="description"
+              name="description"
+              rows="3"
+              placeholder="Please provide additional details about why you're reporting this link..."
+              style="
+                width: 100%;
+                padding: 15px;
+                border: 2px solid var(--border-color);
+                border-radius: 10px;
+                font-size: 16px;
+                background: var(--bg-dark);
+                color: var(--text-primary);
+                font-family: inherit;
+                resize: vertical;
+              "
+            ></textarea>
+          </div>
+
+          <div class="input-group">
+            <label for="reporterEmail">Your Email (optional)</label>
+            <input type="email" id="reporterEmail" name="reporterEmail" placeholder="your@email.com" />
+            <small class="input-hint">Optional - only if you want us to contact you about this report</small>
+          </div>
+
+          <div class="error" id="reportError"></div>
+          <div class="success" id="reportSuccess"></div>
+
+          <button type="submit" class="action-btn btn-primary" id="submitReportBtn">Submit Report</button>
+        </form>
+      </div>
+
+      <div class="footer">
+        Made with ❤️ using <a href="https://www.rust-lang.org/" target="_blank">Rust</a>
+        <br />
+        <span id="version" style="opacity: 0.7; font-size: 12px"></span>
+      </div>
     </div>
 
     <script src="auth.js"></script>
     <script>
-        // Check if setup is required
-        async function checkSetup() {
-            try {
-                const response = await fetch('/api/setup/required');
-                const data = await response.json();
+      // Check if setup is required
+      async function checkSetup() {
+        try {
+          const response = await fetch("/api/setup/required");
+          const data = await response.json();
 
-                if (data.setup_required) {
-                    window.location.href = 'setup.html';
-                }
-            } catch (error) {
-                console.error('Failed to check setup status:', error);
-            }
+          if (data.setup_required) {
+            window.location.href = "setup.html";
+          }
+        } catch (error) {
+          console.error("Failed to check setup status:", error);
         }
+      }
 
-        checkSetup();
+      checkSetup();
 
-        // Update nav based on auth status and registration config
-        const navLinks = document.getElementById('navLinks');
+      // Fetch and display version
+      async function loadVersion() {
+        try {
+          const response = await fetch("/api/version");
+          const data = await response.json();
+          document.getElementById("version").textContent = `v${data.version}`;
+        } catch (error) {
+          console.error("Failed to load version:", error);
+        }
+      }
 
-        async function updateNavLinks() {
-            if (isAuthenticated()) {
-                navLinks.innerHTML = `
+      loadVersion();
+
+      // Update nav based on auth status and registration config
+      const navLinks = document.getElementById("navLinks");
+
+      async function updateNavLinks() {
+        if (isAuthenticated()) {
+          navLinks.innerHTML = `
                     <a href="/">Home</a>
                     <a href="dashboard.html">Dashboard</a>
                     <button class="logout-btn" onclick="handleLogout()">Log Out</button>
                 `;
-            } else {
-                // Check if registration is enabled
-                try {
-                    const response = await fetch('/api/config');
-                    const data = await response.json();
+        } else {
+          // Check if registration is enabled
+          try {
+            const response = await fetch("/api/config");
+            const data = await response.json();
 
-                    if (data.allow_registration) {
-                        navLinks.innerHTML = `
+            if (data.allow_registration) {
+              navLinks.innerHTML = `
                             <a href="/">Home</a>
                             <a href="login.html">Log In</a>
                             <a href="signup.html">Sign Up</a>
                         `;
-                    } else {
-                        navLinks.innerHTML = `
+            } else {
+              navLinks.innerHTML = `
                             <a href="/">Home</a>
                             <a href="login.html">Log In</a>
                         `;
-                        // Also hide the "Get Started" button
-                        const getStartedBtn = document.getElementById('getStartedBtn');
-                        if (getStartedBtn) {
-                            getStartedBtn.style.display = 'none';
-                        }
-                    }
-                } catch (error) {
-                    console.error('Failed to check config:', error);
-                    // Default to showing signup link if config check fails
-                    navLinks.innerHTML = `
+              // Also hide the "Get Started" button
+              const getStartedBtn = document.getElementById("getStartedBtn");
+              if (getStartedBtn) {
+                getStartedBtn.style.display = "none";
+              }
+            }
+          } catch (error) {
+            console.error("Failed to check config:", error);
+            // Default to showing signup link if config check fails
+            navLinks.innerHTML = `
                         <a href="/">Home</a>
                         <a href="login.html">Log In</a>
                         <a href="signup.html">Sign Up</a>
                     `;
-                }
-            }
+          }
+        }
+      }
+
+      updateNavLinks();
+
+      function handleLogout() {
+        logout();
+        window.location.reload();
+      }
+
+      // Handle report form submission
+      const reportForm = document.getElementById("reportForm");
+      const reportError = document.getElementById("reportError");
+      const reportSuccess = document.getElementById("reportSuccess");
+      const submitReportBtn = document.getElementById("submitReportBtn");
+
+      reportForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        // Clear previous messages
+        reportError.classList.remove("show");
+        reportSuccess.classList.remove("show");
+
+        // Get form values
+        let shortCode = document.getElementById("shortCode").value.trim();
+        const reason = document.getElementById("reason").value;
+        const description = document.getElementById("description").value.trim();
+        const reporterEmail = document.getElementById("reporterEmail").value.trim();
+
+        // Extract short code from URL if full URL is provided
+        if (shortCode.includes("/")) {
+          const parts = shortCode.split("/");
+          shortCode = parts[parts.length - 1];
         }
 
-        updateNavLinks();
-
-        function handleLogout() {
-            logout();
-            window.location.reload();
+        // Validate
+        if (!shortCode || !reason) {
+          reportError.textContent = "Please fill in all required fields";
+          reportError.classList.add("show");
+          return;
         }
 
-        // Handle report form submission
-        const reportForm = document.getElementById('reportForm');
-        const reportError = document.getElementById('reportError');
-        const reportSuccess = document.getElementById('reportSuccess');
-        const submitReportBtn = document.getElementById('submitReportBtn');
+        // Disable button during submission
+        submitReportBtn.disabled = true;
+        submitReportBtn.textContent = "Submitting...";
 
-        reportForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
+        try {
+          const response = await fetch("/api/report-abuse", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              short_code: shortCode,
+              reason: reason,
+              description: description || null,
+              reporter_email: reporterEmail || null,
+            }),
+          });
 
-            // Clear previous messages
-            reportError.classList.remove('show');
-            reportSuccess.classList.remove('show');
+          const data = await response.json();
 
-            // Get form values
-            let shortCode = document.getElementById('shortCode').value.trim();
-            const reason = document.getElementById('reason').value;
-            const description = document.getElementById('description').value.trim();
-            const reporterEmail = document.getElementById('reporterEmail').value.trim();
+          if (response.ok) {
+            reportSuccess.textContent = data.message;
+            reportSuccess.classList.add("show");
+            reportForm.reset();
 
-            // Extract short code from URL if full URL is provided
-            if (shortCode.includes('/')) {
-                const parts = shortCode.split('/');
-                shortCode = parts[parts.length - 1];
-            }
-
-            // Validate
-            if (!shortCode || !reason) {
-                reportError.textContent = 'Please fill in all required fields';
-                reportError.classList.add('show');
-                return;
-            }
-
-            // Disable button during submission
-            submitReportBtn.disabled = true;
-            submitReportBtn.textContent = 'Submitting...';
-
-            try {
-                const response = await fetch('/api/report-abuse', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        short_code: shortCode,
-                        reason: reason,
-                        description: description || null,
-                        reporter_email: reporterEmail || null
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    reportSuccess.textContent = data.message;
-                    reportSuccess.classList.add('show');
-                    reportForm.reset();
-
-                    // Scroll to success message
-                    reportSuccess.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                } else {
-                    reportError.textContent = data.error || 'Failed to submit report';
-                    reportError.classList.add('show');
-                }
-            } catch (error) {
-                reportError.textContent = 'Network error. Please try again.';
-                reportError.classList.add('show');
-            } finally {
-                submitReportBtn.disabled = false;
-                submitReportBtn.textContent = 'Submit Report';
-            }
-        });
+            // Scroll to success message
+            reportSuccess.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          } else {
+            reportError.textContent = data.error || "Failed to submit report";
+            reportError.classList.add("show");
+          }
+        } catch (error) {
+          reportError.textContent = "Network error. Please try again.";
+          reportError.classList.add("show");
+        } finally {
+          submitReportBtn.disabled = false;
+          submitReportBtn.textContent = "Submit Report";
+        }
+      });
     </script>
-</body>
+  </body>
 </html>

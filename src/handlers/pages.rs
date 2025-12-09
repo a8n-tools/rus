@@ -1,7 +1,7 @@
 use actix_web::{web, HttpResponse, Result};
 
 use crate::db::AppState;
-use crate::models::{ConfigResponse, HealthResponse, SetupCheckResponse};
+use crate::models::{ConfigResponse, HealthResponse, SetupCheckResponse, VersionResponse};
 
 /// Serve static HTML pages
 pub async fn index() -> Result<HttpResponse> {
@@ -82,5 +82,12 @@ pub async fn check_setup_required(data: web::Data<AppState>) -> Result<HttpRespo
 
     Ok(HttpResponse::Ok().json(SetupCheckResponse {
         setup_required: user_count == 0,
+    }))
+}
+
+/// Get application version
+pub async fn get_version() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok().json(VersionResponse {
+        version: env!("CARGO_PKG_VERSION").to_string(),
     }))
 }
