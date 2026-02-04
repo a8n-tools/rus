@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Report Abuse - RUS</title>
+    <link rel="stylesheet" href="styles.css?v=3" />
+  </head>
+  <body>
+    <nav class="navbar">
+      <div class="nav-content">
+        <a href="/" class="nav-brand">🦀 RUS</a>
+        <div class="nav-links" id="navLinks">
+          <a href="/">Home</a>
+          <a href="login.html">Log In</a>
+          <a href="signup.html" id="signupLink">Sign Up</a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container">
+      <div class="auth-card" style="max-width: 600px">
+        <h1>Report Abuse</h1>
+        <p class="subtitle">
+          Found an abusive or malicious shortened link? Report it to our moderators.
+        </p>
+
+        <form id="reportForm" style="display: flex; flex-direction: column; gap: 15px">
+          <div class="input-group">
+            <label for="shortCode">Short Code or Full URL *</label>
+            <input
+              type="text"
+              id="shortCode"
+              name="shortCode"
+              placeholder="abc123 or https://example.com/abc123"
+              required
+            />
+            <small class="input-hint">Enter the short code or paste the full shortened URL</small>
+          </div>
+
+          <div class="input-group">
+            <label for="reason">Reason for Report *</label>
+            <select
+              id="reason"
+              name="reason"
+              required
+              style="
+                width: 100%;
+                padding: 15px;
+                border: 2px solid var(--border-color);
+                border-radius: 10px;
+                font-size: 16px;
+                background: var(--bg-dark);
+                color: var(--text-primary);
+              "
+            >
+              <option value="">Select a reason</option>
+              <option value="spam">Spam</option>
+              <option value="phishing">Phishing / Scam</option>
+              <option value="malware">Malware / Virus</option>
+              <option value="illegal">Illegal Content</option>
+              <option value="harassment">Harassment / Abuse</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+
+          <div class="input-group">
+            <label for="description">Description</label>
+            <textarea
+              id="description"
+              name="description"
+              rows="3"
+              placeholder="Please provide additional details about why you're reporting this link..."
+              style="
+                width: 100%;
+                padding: 15px;
+                border: 2px solid var(--border-color);
+                border-radius: 10px;
+                font-size: 16px;
+                background: var(--bg-dark);
+                color: var(--text-primary);
+                font-family: inherit;
+                resize: vertical;
+              "
+            ></textarea>
+          </div>
+
+          <div class="input-group">
+            <label for="reporterEmail">Your Email (optional)</label>
+            <input type="email" id="reporterEmail" name="reporterEmail" placeholder="your@email.com" />
+            <small class="input-hint">Optional - only if you want us to contact you about this report</small>
+          </div>
+
+          <div class="error" id="reportError"></div>
+          <div class="success" id="reportSuccess"></div>
+
+          <button type="submit" id="submitReportBtn">Submit Report</button>
+        </form>
+
+        <p class="auth-switch" style="margin-top: 30px">
+          <a href="/">← Back to Home</a>
+        </p>
+      </div>
+    </div>
+
+    <script src="auth.js"></script>
+    <script>
+      // Update nav based on auth status
+      async function updateNavLinks() {
+        const navLinks = document.getElementById('navLinks');
+
+        if (isAuthenticated()) {
+          navLinks.innerHTML = `
+            <a href="/">Home</a>
+            <a href="dashboard.html">Dashboard</a>
+            <button class="logout-btn" onclick="handleLogout()">Log Out</button>
+          `;
+        } else {
+          try {
+            const response = await fetch('/api/config');
+            const data = await response.json();
+
+            if (!data.allow_registration) {
+              const signupLink = document.getElementById('signupLink');
+              if (signupLink) signupLink.style.display = 'none';
+            }
+          } catch (error) {
+            console.error('Failed to check config:', error);
+          }
+        }
+      }
+
+      updateNavLinks();
+
+      function handleLogout() {
+        logout();
+        window.location.reload();
+      }
+
+      // Handle report form submission
+      const reportForm = document.getElementById('reportForm');
+      const reportError = document.getElementById('reportError');
+      const reportSuccess = document.getElementById('reportSuccess');
+      const submitReportBtn = document.getElementById('submitReportBtn');
+
+      reportForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        // Clear previous messages
+        reportError.classList.remove('show');
+        reportSuccess.classList.remove('show');
+
+        // Get form values
+        let shortCode = document.getElementById('shortCode').value.trim();
+        const reason = document.getElementById('reason').value;
+        const description = document.getElementById('description').value.trim();
+        const reporterEmail = document.getElementById('reporterEmail').value.trim();
+
+        // Extract short code from URL if full URL is provided
+        if (shortCode.includes('/')) {
+          const parts = shortCode.split('/');
+          shortCode = parts[parts.length - 1];
+        }
+
+        // Validate
+        if (!shortCode || !reason) {
+          reportError.textContent = 'Please fill in all required fields';
+          reportError.classList.add('show');
+          return;
+        }
+
+        // Disable button during submission
+        submitReportBtn.disabled = true;
+        submitReportBtn.textContent = 'Submitting...';
+
+        try {
+          const response = await fetch('/api/report-abuse', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              short_code: shortCode,
+              reason: reason,
+              description: description || null,
+              reporter_email: reporterEmail || null,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            reportSuccess.textContent = data.message;
+            reportSuccess.classList.add('show');
+            reportForm.reset();
+
+            // Scroll to success message
+            reportSuccess.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          } else {
+            reportError.textContent = data.error || 'Failed to submit report';
+            reportError.classList.add('show');
+          }
+        } catch (error) {
+          reportError.textContent = 'Network error. Please try again.';
+          reportError.classList.add('show');
+        } finally {
+          submitReportBtn.disabled = false;
+          submitReportBtn.textContent = 'Submit Report';
+        }
+      });
+    </script>
+  </body>
+</html>
