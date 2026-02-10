@@ -3,8 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
+    # No need for ports since Traefik will handle the routing
+    # ports:
+      # - "8080:8080"
     volumes:
       - rus-data:/app/data
     environment:
@@ -13,20 +14,18 @@ services:
     env_file: .env
     restart: unless-stopped
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.rus.rule=Host(`rus.a8n.test`)"
-      - "traefik.http.services.rus.loadbalancer.server.port=8080"
+      traefik.enable: true
+      traefik.http.routers.child-rus.rule: Host(`rus.a8n.run`)
+      traefik.http.routers.child-rus.service: child-rus@docker
+      traefik.http.routers.child-rus.entrypoints: web-secure
+      traefik.http.routers.child-rus.tls.certresolver: cert-cloudflare
+      traefik.http.services.child-rus.loadbalancer.server.port: 8080
     networks:
-      # - default
-      - saas
+      - network-traefik-public
 
 networks:
-  default:
-  saas:
+  network-traefik-public:
     external: true
-    name: a8n-saas_default
-  # rus-network:
-  #   driver: bridge
 
 volumes:
   rus-data:
