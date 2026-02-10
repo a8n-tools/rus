@@ -12,12 +12,21 @@ services:
       - RUST_LOG=info
     env_file: .env
     restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.rus.rule=Host(`rus.a8n.test`)"
+      - "traefik.http.services.rus.loadbalancer.server.port=8080"
     networks:
-      - rus-network
+      # - default
+      - saas
 
 networks:
-  rus-network:
-    driver: bridge
+  default:
+  saas:
+    external: true
+    name: a8n-saas_default
+  # rus-network:
+  #   driver: bridge
 
 volumes:
   rus-data:
