@@ -3,132 +3,262 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Rust URL Shortener</title>
-    <link rel="stylesheet" href="styles.css?v=2" />
+    <title>RUS - URL Shortener | Part of a8n-tools</title>
+    <link rel="stylesheet" href="styles.css?v=3" />
     <style>
-      .home-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 30px;
-        max-width: 1400px;
-        margin: 40px auto;
-        padding: 0 20px;
+      .landing-hero {
+        min-height: calc(100vh - 80px);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        padding: 60px 20px;
+        position: relative;
       }
 
-      .home-container {
+      .affiliate-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
         background: var(--bg-card);
-        border-radius: 20px;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-        padding: 40px;
         border: 1px solid var(--border-color);
+        border-radius: 50px;
+        padding: 8px 20px;
+        margin-bottom: 30px;
+        font-size: 0.9em;
+        color: var(--text-secondary);
       }
 
-      .rust-icon {
-        text-align: center;
-        font-size: 3em;
+      .affiliate-badge a {
+        color: var(--rust-orange);
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .affiliate-badge a:hover {
+        text-decoration: underline;
+      }
+
+      .hero-icon {
+        font-size: 5em;
         margin-bottom: 20px;
+        filter: drop-shadow(0 10px 30px rgba(247, 76, 0, 0.3));
       }
 
-      .home-container h1 {
+      .hero-title {
+        font-size: 3.5em;
+        font-weight: 800;
         color: var(--text-primary);
         margin-bottom: 10px;
-        font-size: 2.5em;
-        text-align: center;
+        letter-spacing: -1px;
       }
 
-      .home-container h2 {
-        color: var(--text-primary);
-        margin-bottom: 10px;
-        font-size: 2em;
-        text-align: center;
+      .hero-title span {
+        color: var(--rust-orange);
       }
 
-      .action-buttons {
+      .hero-subtitle {
+        font-size: 1.4em;
+        color: var(--text-secondary);
+        max-width: 600px;
+        margin: 0 auto 40px;
+        line-height: 1.6;
+      }
+
+      .hero-cta {
         display: flex;
         gap: 15px;
-        margin-top: 30px;
+        justify-content: center;
+        flex-wrap: wrap;
       }
 
-      .action-btn {
-        flex: 1;
-        padding: 15px;
-        border-radius: 10px;
-        font-size: 16px;
+      .cta-btn {
+        padding: 16px 32px;
+        border-radius: 12px;
+        font-size: 1.1em;
         font-weight: 600;
         cursor: pointer;
         transition: transform 0.2s, box-shadow 0.2s;
-        text-align: center;
         text-decoration: none;
-        display: block;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
       }
 
-      .btn-primary {
+      .cta-primary {
         background: linear-gradient(135deg, var(--rust-orange) 0%, var(--rust-orange-dark) 100%);
         color: white;
         border: none;
       }
 
-      .btn-secondary {
-        background: var(--bg-dark);
-        color: var(--rust-orange);
-        border: 2px solid var(--rust-orange);
+      .cta-secondary {
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 2px solid var(--border-color);
       }
 
-      .action-btn:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 20px rgba(247, 76, 0, 0.4);
+      .cta-btn:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
       }
 
-      .features {
-        margin-top: 40px;
+      .cta-primary:hover {
+        box-shadow: 0 10px 30px rgba(247, 76, 0, 0.4);
+      }
+
+      /* Features Section */
+      .features-section {
+        padding: 80px 20px;
+        background: var(--bg-card);
+        border-top: 1px solid var(--border-color);
+      }
+
+      .features-container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      .section-title {
+        text-align: center;
+        font-size: 2.5em;
+        color: var(--text-primary);
+        margin-bottom: 50px;
+      }
+
+      .features-grid {
         display: grid;
-        grid-template-columns: 1fr;
-        gap: 20px;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 30px;
       }
 
-      .feature {
+      .feature-card {
         background: var(--bg-dark);
-        padding: 20px;
-        border-radius: 12px;
+        border-radius: 16px;
+        padding: 30px;
         border: 1px solid var(--border-color);
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+
+      .feature-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
       }
 
       .feature-icon {
-        font-size: 2em;
+        font-size: 2.5em;
+        margin-bottom: 15px;
+      }
+
+      .feature-card h3 {
+        font-size: 1.3em;
+        color: var(--text-primary);
         margin-bottom: 10px;
       }
 
-      .feature h3 {
-        color: var(--text-primary);
-        margin-bottom: 5px;
-      }
-
-      .feature p {
+      .feature-card p {
         color: var(--text-secondary);
-        font-size: 0.95em;
+        line-height: 1.6;
       }
 
-      .footer {
-        margin-top: 30px;
+      /* About Section */
+      .about-section {
+        padding: 80px 20px;
+      }
+
+      .about-container {
+        max-width: 800px;
+        margin: 0 auto;
         text-align: center;
-        color: var(--text-secondary);
-        font-size: 14px;
-        grid-column: 1 / -1;
       }
 
-      .footer a {
+      .about-section h2 {
+        font-size: 2em;
+        color: var(--text-primary);
+        margin-bottom: 20px;
+      }
+
+      .about-section p {
+        color: var(--text-secondary);
+        font-size: 1.1em;
+        line-height: 1.8;
+        margin-bottom: 30px;
+      }
+
+      .a8n-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
         color: var(--rust-orange);
+        font-weight: 600;
+        text-decoration: none;
+        font-size: 1.1em;
+        transition: opacity 0.2s;
+      }
+
+      .a8n-link:hover {
+        opacity: 0.8;
         text-decoration: underline;
       }
 
-      @media (max-width: 1024px) {
-        .home-grid {
-          grid-template-columns: 1fr;
-          max-width: 700px;
+      /* Footer */
+      .landing-footer {
+        padding: 40px 20px;
+        text-align: center;
+        border-top: 1px solid var(--border-color);
+        color: var(--text-secondary);
+      }
+
+      .footer-links {
+        display: flex;
+        justify-content: center;
+        gap: 30px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+      }
+
+      .footer-links a {
+        color: var(--text-secondary);
+        text-decoration: none;
+        transition: color 0.2s;
+      }
+
+      .footer-links a:hover {
+        color: var(--rust-orange);
+      }
+
+      .footer-brand {
+        font-size: 0.9em;
+        opacity: 0.7;
+      }
+
+      .footer-brand a {
+        color: var(--rust-orange);
+        text-decoration: none;
+      }
+
+      @media (max-width: 768px) {
+        .hero-title {
+          font-size: 2.5em;
         }
 
-        .action-buttons {
+        .hero-subtitle {
+          font-size: 1.1em;
+        }
+
+        .hero-cta {
           flex-direction: column;
+          align-items: center;
+        }
+
+        .cta-btn {
+          width: 100%;
+          max-width: 300px;
+          justify-content: center;
+        }
+
+        .section-title {
+          font-size: 2em;
         }
       }
     </style>
@@ -136,144 +266,126 @@
   <body>
     <nav class="navbar">
       <div class="nav-content">
-        <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
+        <a href="/" class="nav-brand">🦀 RUS</a>
         <div class="nav-links" id="navLinks">
-          <a href="/">Home</a>
+          <a href="#features">Features</a>
+          <a href="#about">About</a>
           <a href="login.html">Log In</a>
-          <a href="signup.html">Sign Up</a>
+          <a href="signup.html" id="signupLink">Sign Up</a>
         </div>
       </div>
     </nav>
 
-    <div class="home-grid">
-      <div class="home-container">
-        <div class="rust-icon">🦀</div>
-        <h1>Rust URL Shortener</h1>
-        <p class="subtitle">Fast, secure, and efficient URL shortening service built with Rust</p>
+    <!-- Hero Section -->
+    <section class="landing-hero">
+      <div class="affiliate-badge">
+        Part of <a href="#" id="a8nLink">a8n-tools</a> suite
+      </div>
+      <div class="hero-icon">🔗</div>
+      <h1 class="hero-title">
+        <span>RUS</span> - URL Shortener
+      </h1>
+      <p class="hero-subtitle">
+        Create short, trackable links in seconds. Built with Rust for blazing fast performance and rock-solid reliability.
+      </p>
+      <div class="hero-cta" id="heroCta">
+        <a href="signup.html" class="cta-btn cta-primary" id="getStartedBtn">
+          Get Started Free
+        </a>
+        <a href="login.html" class="cta-btn cta-secondary">
+          Log In
+        </a>
+      </div>
+    </section>
 
-        <div class="action-buttons" id="actionButtons">
-          <a href="signup.html" class="action-btn btn-primary" id="getStartedBtn">Get Started</a>
-          <a href="login.html" class="action-btn btn-secondary">Log In</a>
-        </div>
-
-        <div class="features">
-          <div class="feature">
-            <div class="feature-icon">🔒</div>
-            <h3>Secure Authentication</h3>
-            <p>Your URLs are protected with JWT-based authentication and bcrypt password hashing</p>
-          </div>
-          <div class="feature">
-            <div class="feature-icon">📊</div>
-            <h3>Track Your Links</h3>
-            <p>Monitor click statistics and manage all your shortened URLs in one place</p>
-          </div>
-          <div class="feature">
+    <!-- Features Section -->
+    <section class="features-section" id="features">
+      <div class="features-container">
+        <h2 class="section-title">Why RUS?</h2>
+        <div class="features-grid">
+          <div class="feature-card">
             <div class="feature-icon">⚡</div>
             <h3>Lightning Fast</h3>
-            <p>Built with Rust and Actix-web for blazing fast performance and reliability</p>
+            <p>Built with Rust and Actix-web, RUS delivers sub-millisecond redirects. Your links load instantly, every time.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">📊</div>
+            <h3>Click Analytics</h3>
+            <p>Track how your links perform. See click counts and monitor engagement across all your shortened URLs.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🔒</div>
+            <h3>Secure by Design</h3>
+            <p>JWT authentication and bcrypt password hashing keep your account and links protected.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🏷️</div>
+            <h3>Custom Names</h3>
+            <p>Organize your links with custom names. Easily find and manage URLs in your dashboard.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">📱</div>
+            <h3>QR Codes</h3>
+            <p>Generate QR codes for any shortened URL. Perfect for print materials and offline sharing.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">🚀</div>
+            <h3>Self-Hostable</h3>
+            <p>Deploy on your own infrastructure with Docker. Full control over your data and branding.</p>
           </div>
         </div>
       </div>
+    </section>
 
-      <div class="home-container">
-        <h2 style="color: var(--text-primary); text-align: center; margin-bottom: 15px">🚨 Report Abuse</h2>
-        <p class="subtitle" style="margin-bottom: 25px">
-          Found an abusive or malicious shortened link? Report it to our moderators.
+    <!-- About Section -->
+    <section class="about-section" id="about">
+      <div class="about-container">
+        <h2>Part of the a8n-tools Suite</h2>
+        <p>
+          RUS is a powerful URL shortening service that integrates seamlessly with the a8n-tools ecosystem.
+          Whether you're managing marketing campaigns, sharing resources, or tracking link engagement,
+          RUS provides the speed and reliability you need.
         </p>
-
-        <form id="reportForm" style="display: flex; flex-direction: column; gap: 15px">
-          <div class="input-group">
-            <label for="shortCode">Short Code or Full URL *</label>
-            <input
-              type="text"
-              id="shortCode"
-              name="shortCode"
-              placeholder="abc123 or https://example.com/abc123"
-              required
-            />
-            <small class="input-hint">Enter the short code or paste the full shortened URL</small>
-          </div>
-
-          <div class="input-group">
-            <label for="reason">Reason for Report *</label>
-            <select
-              id="reason"
-              name="reason"
-              required
-              style="
-                width: 100%;
-                padding: 15px;
-                border: 2px solid var(--border-color);
-                border-radius: 10px;
-                font-size: 16px;
-                background: var(--bg-dark);
-                color: var(--text-primary);
-              "
-            >
-              <option value="">Select a reason</option>
-              <option value="spam">Spam</option>
-              <option value="phishing">Phishing / Scam</option>
-              <option value="malware">Malware / Virus</option>
-              <option value="illegal">Illegal Content</option>
-              <option value="harassment">Harassment / Abuse</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-
-          <div class="input-group">
-            <label for="description">Description</label>
-            <textarea
-              id="description"
-              name="description"
-              rows="3"
-              placeholder="Please provide additional details about why you're reporting this link..."
-              style="
-                width: 100%;
-                padding: 15px;
-                border: 2px solid var(--border-color);
-                border-radius: 10px;
-                font-size: 16px;
-                background: var(--bg-dark);
-                color: var(--text-primary);
-                font-family: inherit;
-                resize: vertical;
-              "
-            ></textarea>
-          </div>
-
-          <div class="input-group">
-            <label for="reporterEmail">Your Email (optional)</label>
-            <input type="email" id="reporterEmail" name="reporterEmail" placeholder="your@email.com" />
-            <small class="input-hint">Optional - only if you want us to contact you about this report</small>
-          </div>
-
-          <div class="error" id="reportError"></div>
-          <div class="success" id="reportSuccess"></div>
-
-          <button type="submit" class="action-btn btn-primary" id="submitReportBtn">Submit Report</button>
-        </form>
+        <a href="#" class="a8n-link" id="a8nLinkFooter">
+          Explore a8n-tools →
+        </a>
       </div>
+    </section>
 
-      <div class="footer">
-        Made with ❤️ using <a href="https://www.rust-lang.org/" target="_blank">Rust</a>
+    <!-- Footer -->
+    <footer class="landing-footer">
+      <div class="footer-links">
+        <a href="report.html">Report Abuse</a>
+        <a href="#" id="a8nLinkNav">a8n-tools</a>
+      </div>
+      <p class="footer-brand">
+        Made with 🦀 using <a href="https://www.rust-lang.org/" target="_blank">Rust</a>
         <br />
-        <span id="version" style="opacity: 0.7; font-size: 12px"></span>
-      </div>
-    </div>
+        <span id="version"></span>
+      </p>
+    </footer>
 
     <script src="auth.js"></script>
     <script>
+      // Configuration - Update this when you have the a8n-tools domain
+      const A8N_TOOLS_URL = '#'; // TODO: Replace with actual a8n-tools URL
+
+      // Update all a8n-tools links
+      document.querySelectorAll('#a8nLink, #a8nLinkFooter, #a8nLinkNav').forEach(link => {
+        link.href = A8N_TOOLS_URL;
+      });
+
       // Check if setup is required
       async function checkSetup() {
         try {
-          const response = await fetch("/api/setup/required");
+          const response = await fetch('/api/setup/required');
           const data = await response.json();
 
           if (data.setup_required) {
-            window.location.href = "setup.html";
+            window.location.href = 'setup.html';
           }
         } catch (error) {
-          console.error("Failed to check setup status:", error);
+          console.error('Failed to check setup status:', error);
         }
       }
 
@@ -282,138 +394,72 @@
       // Fetch and display version
       async function loadVersion() {
         try {
-          const response = await fetch("/api/version");
+          const response = await fetch('/api/version');
           const data = await response.json();
-          document.getElementById("version").textContent = `v${data.version}`;
+          document.getElementById('version').textContent = `v${data.version}`;
         } catch (error) {
-          console.error("Failed to load version:", error);
+          console.error('Failed to load version:', error);
         }
       }
 
       loadVersion();
 
-      // Update nav based on auth status and registration config
-      const navLinks = document.getElementById("navLinks");
+      // Update nav and CTA based on auth status and registration config
+      async function updateUI() {
+        const navLinks = document.getElementById('navLinks');
+        const heroCta = document.getElementById('heroCta');
 
-      async function updateNavLinks() {
         if (isAuthenticated()) {
+          // User is logged in - show dashboard link
           navLinks.innerHTML = `
-                    <a href="/">Home</a>
-                    <a href="dashboard.html">Dashboard</a>
-                    <button class="logout-btn" onclick="handleLogout()">Log Out</button>
-                `;
+            <a href="#features">Features</a>
+            <a href="#about">About</a>
+            <a href="dashboard.html">Dashboard</a>
+            <button class="logout-btn" onclick="handleLogout()">Log Out</button>
+          `;
+          heroCta.innerHTML = `
+            <a href="dashboard.html" class="cta-btn cta-primary">
+              Go to Dashboard
+            </a>
+          `;
         } else {
           // Check if registration is enabled
           try {
-            const response = await fetch("/api/config");
+            const response = await fetch('/api/config');
             const data = await response.json();
 
-            if (data.allow_registration) {
-              navLinks.innerHTML = `
-                            <a href="/">Home</a>
-                            <a href="login.html">Log In</a>
-                            <a href="signup.html">Sign Up</a>
-                        `;
-            } else {
-              navLinks.innerHTML = `
-                            <a href="/">Home</a>
-                            <a href="login.html">Log In</a>
-                        `;
-              // Also hide the "Get Started" button
-              const getStartedBtn = document.getElementById("getStartedBtn");
-              if (getStartedBtn) {
-                getStartedBtn.style.display = "none";
-              }
+            if (!data.allow_registration) {
+              // Hide signup options
+              const signupLink = document.getElementById('signupLink');
+              const getStartedBtn = document.getElementById('getStartedBtn');
+              if (signupLink) signupLink.style.display = 'none';
+              if (getStartedBtn) getStartedBtn.style.display = 'none';
             }
           } catch (error) {
-            console.error("Failed to check config:", error);
-            // Default to showing signup link if config check fails
-            navLinks.innerHTML = `
-                        <a href="/">Home</a>
-                        <a href="login.html">Log In</a>
-                        <a href="signup.html">Sign Up</a>
-                    `;
+            console.error('Failed to check config:', error);
           }
         }
       }
 
-      updateNavLinks();
+      updateUI();
 
       function handleLogout() {
         logout();
         window.location.reload();
       }
 
-      // Handle report form submission
-      const reportForm = document.getElementById("reportForm");
-      const reportError = document.getElementById("reportError");
-      const reportSuccess = document.getElementById("reportSuccess");
-      const submitReportBtn = document.getElementById("submitReportBtn");
+      // Smooth scroll for anchor links
+      document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function(e) {
+          const href = this.getAttribute('href');
+          if (href === '#') return; // Skip placeholder links
 
-      reportForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-
-        // Clear previous messages
-        reportError.classList.remove("show");
-        reportSuccess.classList.remove("show");
-
-        // Get form values
-        let shortCode = document.getElementById("shortCode").value.trim();
-        const reason = document.getElementById("reason").value;
-        const description = document.getElementById("description").value.trim();
-        const reporterEmail = document.getElementById("reporterEmail").value.trim();
-
-        // Extract short code from URL if full URL is provided
-        if (shortCode.includes("/")) {
-          const parts = shortCode.split("/");
-          shortCode = parts[parts.length - 1];
-        }
-
-        // Validate
-        if (!shortCode || !reason) {
-          reportError.textContent = "Please fill in all required fields";
-          reportError.classList.add("show");
-          return;
-        }
-
-        // Disable button during submission
-        submitReportBtn.disabled = true;
-        submitReportBtn.textContent = "Submitting...";
-
-        try {
-          const response = await fetch("/api/report-abuse", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              short_code: shortCode,
-              reason: reason,
-              description: description || null,
-              reporter_email: reporterEmail || null,
-            }),
-          });
-
-          const data = await response.json();
-
-          if (response.ok) {
-            reportSuccess.textContent = data.message;
-            reportSuccess.classList.add("show");
-            reportForm.reset();
-
-            // Scroll to success message
-            reportSuccess.scrollIntoView({ behavior: "smooth", block: "nearest" });
-          } else {
-            reportError.textContent = data.error || "Failed to submit report";
-            reportError.classList.add("show");
+          e.preventDefault();
+          const target = document.querySelector(href);
+          if (target) {
+            target.scrollIntoView({ behavior: 'smooth' });
           }
-        } catch (error) {
-          reportError.textContent = "Network error. Please try again.";
-          reportError.classList.add("show");
-        } finally {
-          submitReportBtn.disabled = false;
-          submitReportBtn.textContent = "Submit Report";
-        }
+        });
       });
     </script>
   </body>

@@ -1,4 +1,5 @@
-use actix_web::{web, HttpResponse, Result};
+use actix_web::{web, HttpRequest, HttpResponse, Result};
+use base64::Engine;
 
 use crate::db::AppState;
 use crate::models::{ConfigResponse, HealthResponse, SetupCheckResponse, VersionResponse};
@@ -22,7 +23,53 @@ pub async fn signup_page() -> Result<HttpResponse> {
         .body(include_str!("../../static/signup.html")))
 }
 
-pub async fn dashboard_page() -> Result<HttpResponse> {
+pub async fn dashboard_page(req: HttpRequest) -> Result<HttpResponse> {
+    let redirect_url = "https://app.a8n.run";
+
+    // Check for access_token cookie from parent app
+    let should_redirect = match req.cookie("access_token") {
+        None => true,
+        Some(cookie) => {
+            let parts: Vec<&str> = cookie.value().split('.').collect();
+            if parts.len() != 3 {
+                true
+            } else {
+                match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
+                    Ok(bytes) => {
+                        match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                            Ok(payload) => {
+                                payload.get("membership_status")
+                                    .and_then(|v| v.as_str())
+                                    == Some("canceled")
+                            }
+                            Err(_) => true,
+                        }
+                    }
+                    // Try standard base64 as fallback
+                    Err(_) => match base64::engine::general_purpose::STANDARD.decode(parts[1]) {
+                        Ok(bytes) => {
+                            match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                                Ok(payload) => {
+                                    payload.get("membership_status")
+                                        .and_then(|v| v.as_str())
+                                        == Some("canceled")
+                                }
+                                Err(_) => true,
+                            }
+                        }
+                        Err(_) => true,
+                    },
+                }
+            }
+        }
+    };
+
+    if should_redirect {
+        return Ok(HttpResponse::Found()
+            .append_header(("Location", redirect_url))
+            .finish());
+    }
+
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(include_str!("../../static/dashboard.html")))
