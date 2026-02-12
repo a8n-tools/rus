@@ -1,10 +1,16 @@
-use actix_web::{web, HttpRequest, HttpResponse, Result};
+use actix_web::{web, HttpResponse, Result};
+#[cfg(feature = "standalone")]
+use actix_web::HttpRequest;
+#[cfg(feature = "standalone")]
 use chrono::Utc;
 use rusqlite::params;
 
+#[cfg(feature = "standalone")]
 use crate::auth::get_claims;
 use crate::db::AppState;
-use crate::models::{AbuseReport, ResolveReportRequest, SubmitReportRequest};
+#[cfg(feature = "standalone")]
+use crate::models::{AbuseReport, ResolveReportRequest};
+use crate::models::SubmitReportRequest;
 
 /// Public endpoint to submit an abuse report
 pub async fn submit_abuse_report(
@@ -70,7 +76,8 @@ pub async fn submit_abuse_report(
     }
 }
 
-/// Admin endpoint to list all abuse reports
+/// Admin endpoint to list all abuse reports - standalone only
+#[cfg(feature = "standalone")]
 pub async fn admin_list_reports(data: web::Data<AppState>) -> Result<HttpResponse> {
     let db = data.db.lock().unwrap();
 
@@ -117,7 +124,8 @@ pub async fn admin_list_reports(data: web::Data<AppState>) -> Result<HttpRespons
     Ok(HttpResponse::Ok().json(reports))
 }
 
-/// Admin endpoint to resolve an abuse report
+/// Admin endpoint to resolve an abuse report - standalone only
+#[cfg(feature = "standalone")]
 pub async fn admin_resolve_report(
     data: web::Data<AppState>,
     report_id: web::Path<i64>,

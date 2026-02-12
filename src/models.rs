@@ -23,21 +23,24 @@ pub struct UrlEntry {
     pub clicks: u64,
 }
 
-/// User registration request
+/// User registration request - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Serialize, Deserialize)]
 pub struct RegisterRequest {
     pub username: String,
     pub password: String,
 }
 
-/// User login request
+/// User login request - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Serialize, Deserialize)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
 }
 
-/// Authentication response with tokens
+/// Authentication response with tokens - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Serialize, Deserialize)]
 pub struct AuthResponse {
     pub token: String,
@@ -51,13 +54,15 @@ pub struct UpdateUrlNameRequest {
     pub name: Option<String>,
 }
 
-/// Token refresh request
+/// Token refresh request - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Serialize, Deserialize)]
 pub struct RefreshRequest {
     pub refresh_token: String,
 }
 
-/// Token refresh response
+/// Token refresh response - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Serialize, Deserialize)]
 pub struct RefreshResponse {
     pub token: String,
@@ -77,7 +82,8 @@ pub struct ClickStats {
     pub history: Vec<ClickHistoryEntry>,
 }
 
-/// JWT claims structure
+/// JWT claims structure - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,      // username
@@ -108,13 +114,15 @@ pub struct ConfigResponse {
     pub allow_registration: bool,
 }
 
-/// Setup check response
+/// Setup check response - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Serialize)]
 pub struct SetupCheckResponse {
     pub setup_required: bool,
 }
 
-/// User information
+/// User information - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Serialize)]
 pub struct UserInfo {
     pub user_id: i64,
@@ -124,7 +132,8 @@ pub struct UserInfo {
     pub url_count: i64,
 }
 
-/// Current user response
+/// Current user response - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Serialize)]
 pub struct CurrentUserResponse {
     pub user_id: i64,
@@ -132,7 +141,8 @@ pub struct CurrentUserResponse {
     pub is_admin: bool,
 }
 
-/// Admin statistics response
+/// Admin statistics response - standalone only
+#[cfg(feature = "standalone")]
 #[derive(Serialize)]
 pub struct AdminStatsResponse {
     pub total_users: i64,
