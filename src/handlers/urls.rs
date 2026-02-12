@@ -1,15 +1,31 @@
 use actix_web::{web, HttpRequest, HttpResponse, Result};
+#[cfg(feature = "standalone")]
 use rand::Rng;
 use rusqlite::params;
 
+#[cfg(feature = "standalone")]
 use crate::auth::get_claims;
+#[cfg(feature = "saas")]
+use super::saas_auth::get_user_from_cookie;
 use crate::db::AppState;
 use crate::models::{
     ClickHistoryEntry, ClickStats, ShortenRequest, ShortenResponse, UpdateUrlNameRequest,
     UrlEntry,
 };
+#[cfg(feature = "standalone")]
 use crate::security::cleanup_old_clicks;
 use crate::url::{generate_qr_code_png, generate_qr_code_svg, generate_short_code, validate_url};
+
+/// Helper to get user_id from request based on mode
+#[cfg(feature = "standalone")]
+fn get_user_id(http_req: &HttpRequest) -> Option<i64> {
+    get_claims(http_req).map(|c| c.user_id)
+}
+
+#[cfg(feature = "saas")]
+fn get_user_id(http_req: &HttpRequest) -> Option<i64> {
+    get_user_from_cookie(http_req).map(|c| c.user_id)
+}
 
 /// Protected API endpoint to shorten a URL
 pub async fn shorten_url(
@@ -17,9 +33,9 @@ pub async fn shorten_url(
     req_payload: web::Json<ShortenRequest>,
     http_req: HttpRequest,
 ) -> Result<HttpResponse> {
-    // Get user claims from JWT
-    let claims = match get_claims(&http_req) {
-        Some(c) => c,
+    // Get user_id from JWT (standalone) or cookie (SaaS)
+    let user_id = match get_user_id(&http_req) {
+        Some(id) => id,
         None => {
             return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
                 "error": "Unauthorized"
@@ -49,7 +65,7 @@ pub async fn shorten_url(
         .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 
     if let Ok(short_code) = stmt.query_row(
-        params![claims.user_id, &req_payload.url],
+        params![user_id, &req_payload.url],
         |row| row.get::<_, String>(0),
     ) {
         return Ok(HttpResponse::Ok().json(ShortenResponse {
@@ -80,7 +96,7 @@ pub async fn shorten_url(
     // Insert URL into database
     match db.execute(
         "INSERT INTO urls (user_id, original_url, short_code) VALUES (?1, ?2, ?3)",
-        params![claims.user_id, &req_payload.url, &short_code],
+        params![user_id, &req_payload.url, &short_code],
     ) {
         Ok(_) => Ok(HttpResponse::Ok().json(ShortenResponse {
             short_code: short_code.clone(),
@@ -121,7 +137,8 @@ pub async fn redirect_url(
                 params![url_id],
             );
 
-            // Cleanup old clicks periodically (1% chance)
+            // Cleanup old clicks periodically (1% chance) - standalone only
+            #[cfg(feature = "standalone")]
             if rand::thread_rng().gen_range(0..100) == 0 {
                 cleanup_old_clicks(&db, data.config.click_retention_days);
             }
@@ -146,9 +163,9 @@ pub async fn get_stats(
     code: web::Path<String>,
     http_req: HttpRequest,
 ) -> Result<HttpResponse> {
-    // Get user claims from JWT
-    let claims = match get_claims(&http_req) {
-        Some(c) => c,
+    // Get user_id from JWT (standalone) or cookie (SaaS)
+    let user_id = match get_user_id(&http_req) {
+        Some(id) => id,
         None => {
             return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
                 "error": "Unauthorized"
@@ -161,7 +178,7 @@ pub async fn get_stats(
     // Get URL entry for this user
     let result: rusqlite::Result<UrlEntry> = db.query_row(
         "SELECT original_url, short_code, name, clicks FROM urls WHERE short_code = ?1 AND user_id = ?2",
-        params![code.as_str(), claims.user_id],
+        params![code.as_str(), user_id],
         |row| {
             Ok(UrlEntry {
                 original_url: row.get(0)?,
@@ -185,8 +202,8 @@ pub async fn get_user_urls(
     data: web::Data<AppState>,
     http_req: HttpRequest,
 ) -> Result<HttpResponse> {
-    let claims = match get_claims(&http_req) {
-        Some(c) => c,
+    let user_id = match get_user_id(&http_req) {
+        Some(id) => id,
         None => {
             return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
                 "error": "Unauthorized"
@@ -203,7 +220,7 @@ pub async fn get_user_urls(
         .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
 
     let urls: Vec<UrlEntry> = stmt
-        .query_map(params![claims.user_id], |row| {
+        .query_map(params![user_id], |row| {
             Ok(UrlEntry {
                 original_url: row.get(0)?,
                 short_code: row.get(1)?,
@@ -224,8 +241,8 @@ pub async fn delete_url(
     code: web::Path<String>,
     http_req: HttpRequest,
 ) -> Result<HttpResponse> {
-    let claims = match get_claims(&http_req) {
-        Some(c) => c,
+    let user_id = match get_user_id(&http_req) {
+        Some(id) => id,
         None => {
             return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
                 "error": "Unauthorized"
@@ -238,7 +255,7 @@ pub async fn delete_url(
     // Delete the URL only if it belongs to the current user
     match db.execute(
         "DELETE FROM urls WHERE short_code = ?1 AND user_id = ?2",
-        params![code.as_str(), claims.user_id],
+        params![code.as_str(), user_id],
     ) {
         Ok(rows_affected) => {
             if rows_affected > 0 {
@@ -264,8 +281,8 @@ pub async fn update_url_name(
     req_payload: web::Json<UpdateUrlNameRequest>,
     http_req: HttpRequest,
 ) -> Result<HttpResponse> {
-    let claims = match get_claims(&http_req) {
-        Some(c) => c,
+    let user_id = match get_user_id(&http_req) {
+        Some(id) => id,
         None => {
             return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
                 "error": "Unauthorized"
@@ -281,7 +298,7 @@ pub async fn update_url_name(
         params![
             req_payload.name.as_deref(),
             code.as_str(),
-            claims.user_id
+            user_id
         ],
     ) {
         Ok(rows_affected) => {
@@ -307,8 +324,8 @@ pub async fn get_click_history(
     code: web::Path<String>,
     http_req: HttpRequest,
 ) -> Result<HttpResponse> {
-    let claims = match get_claims(&http_req) {
-        Some(c) => c,
+    let user_id = match get_user_id(&http_req) {
+        Some(id) => id,
         None => {
             return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
                 "error": "Unauthorized"
@@ -321,7 +338,7 @@ pub async fn get_click_history(
     // First verify ownership
     let url_id: rusqlite::Result<i64> = db.query_row(
         "SELECT id FROM urls WHERE short_code = ?1 AND user_id = ?2",
-        params![code.as_str(), claims.user_id],
+        params![code.as_str(), user_id],
         |row| row.get(0),
     );
 
@@ -374,8 +391,8 @@ pub async fn get_qr_code(
 ) -> Result<HttpResponse> {
     let (code, format) = path.into_inner();
 
-    let claims = match get_claims(&http_req) {
-        Some(c) => c,
+    let user_id = match get_user_id(&http_req) {
+        Some(id) => id,
         None => {
             return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
                 "error": "Unauthorized"
@@ -389,7 +406,7 @@ pub async fn get_qr_code(
     let exists: bool = db
         .query_row(
             "SELECT COUNT(*) FROM urls WHERE short_code = ?1 AND user_id = ?2",
-            params![&code, claims.user_id],
+            params![&code, user_id],
             |row| row.get::<_, i64>(0),
         )
         .map(|count| count > 0)

@@ -1,14 +1,18 @@
 use actix_web::{middleware, web, App, HttpServer};
+#[cfg(feature = "standalone")]
 use actix_web_httpauth::middleware::HttpAuthentication;
 
+#[cfg(feature = "standalone")]
 mod auth;
 mod config;
 mod db;
 mod handlers;
 mod models;
+#[cfg(feature = "standalone")]
 mod security;
 mod url;
 
+#[cfg(feature = "standalone")]
 use auth::middleware::{admin_validator, jwt_validator};
 use config::Config;
 use db::AppState;
@@ -38,12 +42,18 @@ async fn main() -> std::io::Result<()> {
     println!("🚀 Starting server on {}:{}", bind_host, bind_port);
 
     HttpServer::new(move || {
+        #[cfg(feature = "standalone")]
         let auth = HttpAuthentication::bearer(jwt_validator);
+        #[cfg(feature = "standalone")]
         let admin_auth = HttpAuthentication::bearer(admin_validator);
 
-        App::new()
+        let app = App::new()
             .app_data(app_state.clone())
-            .wrap(middleware::Logger::default())
+            .wrap(middleware::Logger::default());
+
+        // Configure routes based on feature
+        #[cfg(feature = "standalone")]
+        let app = app
             // Public API routes - MUST BE BEFORE scoped /api routes
             .route("/api/register", web::post().to(register))
             .route("/api/login", web::post().to(login))
@@ -87,7 +97,34 @@ async fn main() -> std::io::Result<()> {
             .route("/auth.js", web::get().to(serve_auth_js))
             .route("/health", web::get().to(health_check))
             // Catch-all route for short code redirects (MUST BE LAST)
-            .route("/{code}", web::get().to(redirect_url))
+            .route("/{code}", web::get().to(redirect_url));
+
+        #[cfg(feature = "saas")]
+        let app = app
+            // SaaS mode: minimal public API routes
+            .route("/api/config", web::get().to(get_config))
+            .route("/api/version", web::get().to(get_version))
+            .route("/api/report-abuse", web::post().to(submit_abuse_report))
+            // SaaS mode: protected routes use cookie-based auth
+            .service(
+                web::scope("/api")
+                    .route("/shorten", web::post().to(shorten_url))
+                    .route("/stats/{code}", web::get().to(get_stats))
+                    .route("/urls", web::get().to(get_user_urls))
+                    .route("/urls/{code}", web::delete().to(delete_url))
+                    .route("/urls/{code}/name", web::patch().to(update_url_name))
+                    .route("/urls/{code}/clicks", web::get().to(get_click_history))
+                    .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code))
+            )
+            // Public page routes
+            .route("/", web::get().to(index))
+            .route("/dashboard.html", web::get().to(dashboard_page))
+            .route("/styles.css", web::get().to(serve_css))
+            .route("/health", web::get().to(health_check))
+            // Catch-all route for short code redirects (MUST BE LAST)
+            .route("/{code}", web::get().to(redirect_url));
+
+        app
     })
     .bind((bind_host.as_str(), bind_port))?
     .run()

@@ -1,4 +1,4 @@
-# Build stage - Standalone version
+# Build stage - SaaS version
 FROM rust:1.91 AS builder
 
 LABEL org.opencontainers.image.source=https://github.com/joshrandall8478/rus
@@ -10,8 +10,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY static ./static
 
-# Build the standalone application
-RUN cargo build --release --features standalone
+# Build the SaaS application
+RUN cargo build --release --no-default-features --features saas
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -24,7 +24,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Copy the binary from builder
-COPY --from=builder /app/target/release/rus /app/rus
+COPY --from=builder /app/target/release/rus-saas /app/rus-saas
 
 # Copy static files
 COPY static ./static
@@ -40,4 +40,4 @@ ENV HOST=0.0.0.0
 ENV RUST_LOG=info
 
 # Run the application
-CMD ["/app/rus"]
+CMD ["/app/rus-saas"]
