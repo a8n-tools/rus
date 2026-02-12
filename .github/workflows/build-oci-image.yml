@@ -1,0 +1,21 @@
+---
+# Build OCI image and push to GHCR.
+name: Build OCI container
+
+on:
+  push:
+    paths:
+      - "oci-build/**"
+      - ".github/workflows/build-oci-image.yml"
+
+jobs:
+  build-base:
+    name: Build OCI image
+    uses: ./.github/workflows/build-and-push-image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      dir-name: oci-build
+      image-name: saas
+      image-type: base
