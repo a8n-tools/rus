@@ -20,7 +20,8 @@ impl AppState {
 
         let conn = Connection::open(&config.db_path)?;
 
-        // Initialize database schema
+        // Initialize database schema based on feature
+        #[cfg(feature = "standalone")]
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS users (
@@ -86,6 +87,49 @@ impl AppState {
             CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
             CREATE INDEX IF NOT EXISTS idx_login_attempts_username ON login_attempts(username);
             CREATE INDEX IF NOT EXISTS idx_login_attempts_attempted_at ON login_attempts(attempted_at);
+            CREATE INDEX IF NOT EXISTS idx_abuse_reports_short_code ON abuse_reports(short_code);
+            CREATE INDEX IF NOT EXISTS idx_abuse_reports_status ON abuse_reports(status);
+            CREATE INDEX IF NOT EXISTS idx_abuse_reports_created_at ON abuse_reports(created_at);
+            "
+        )?;
+
+        // SaaS mode: simplified schema without user management tables
+        #[cfg(feature = "saas")]
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS urls (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                original_url TEXT NOT NULL,
+                short_code TEXT NOT NULL UNIQUE,
+                name TEXT,
+                clicks INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS click_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url_id INTEGER NOT NULL,
+                clicked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (url_id) REFERENCES urls(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS abuse_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                short_code TEXT NOT NULL,
+                reporter_email TEXT,
+                reason TEXT NOT NULL,
+                description TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                resolved_at DATETIME,
+                resolved_by INTEGER
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_short_code ON urls(short_code);
+            CREATE INDEX IF NOT EXISTS idx_user_id ON urls(user_id);
+            CREATE INDEX IF NOT EXISTS idx_click_history_url_id ON click_history(url_id);
+            CREATE INDEX IF NOT EXISTS idx_click_history_clicked_at ON click_history(clicked_at);
             CREATE INDEX IF NOT EXISTS idx_abuse_reports_short_code ON abuse_reports(short_code);
             CREATE INDEX IF NOT EXISTS idx_abuse_reports_status ON abuse_reports(status);
             CREATE INDEX IF NOT EXISTS idx_abuse_reports_created_at ON abuse_reports(created_at);

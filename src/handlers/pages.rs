@@ -1,8 +1,13 @@
-use actix_web::{web, HttpRequest, HttpResponse, Result};
+use actix_web::{web, HttpResponse, Result};
+#[cfg(feature = "saas")]
+use actix_web::HttpRequest;
+#[cfg(feature = "saas")]
 use base64::Engine;
 
 use crate::db::AppState;
-use crate::models::{ConfigResponse, HealthResponse, SetupCheckResponse, VersionResponse};
+#[cfg(feature = "standalone")]
+use crate::models::SetupCheckResponse;
+use crate::models::{ConfigResponse, HealthResponse, VersionResponse};
 
 /// Serve static HTML pages
 pub async fn index() -> Result<HttpResponse> {
@@ -11,18 +16,30 @@ pub async fn index() -> Result<HttpResponse> {
         .body(include_str!("../../static/index.html")))
 }
 
+#[cfg(feature = "standalone")]
 pub async fn login_page() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(include_str!("../../static/login.html")))
 }
 
+#[cfg(feature = "standalone")]
 pub async fn signup_page() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(include_str!("../../static/signup.html")))
 }
 
+/// Dashboard page for standalone mode - no cookie check needed
+#[cfg(feature = "standalone")]
+pub async fn dashboard_page() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../../static/dashboard.html")))
+}
+
+/// Dashboard page for SaaS mode - checks access_token cookie from parent app
+#[cfg(feature = "saas")]
 pub async fn dashboard_page(req: HttpRequest) -> Result<HttpResponse> {
     let redirect_url = "https://app.a8n.run";
 
@@ -75,12 +92,14 @@ pub async fn dashboard_page(req: HttpRequest) -> Result<HttpResponse> {
         .body(include_str!("../../static/dashboard.html")))
 }
 
+#[cfg(feature = "standalone")]
 pub async fn setup_page() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(include_str!("../../static/setup.html")))
 }
 
+#[cfg(feature = "standalone")]
 pub async fn admin_page() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -93,6 +112,7 @@ pub async fn serve_css() -> Result<HttpResponse> {
         .body(include_str!("../../static/styles.css")))
 }
 
+#[cfg(feature = "standalone")]
 pub async fn serve_auth_js() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("application/javascript; charset=utf-8")
@@ -119,7 +139,8 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
     }))
 }
 
-/// Check if initial setup is required (no users exist)
+/// Check if initial setup is required (no users exist) - standalone only
+#[cfg(feature = "standalone")]
 pub async fn check_setup_required(data: web::Data<AppState>) -> Result<HttpResponse> {
     let db = data.db.lock().unwrap();
 

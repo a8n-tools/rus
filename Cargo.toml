@@ -3,6 +3,21 @@ name = "rus"
 version = "0.15.1"
 edition = "2021"
 
+[[bin]]
+name = "rus"
+path = "src/main.rs"
+required-features = ["standalone"]
+
+[[bin]]
+name = "rus-saas"
+path = "src/main.rs"
+required-features = ["saas"]
+
+[features]
+default = ["standalone"]
+standalone = ["dep:bcrypt", "dep:actix-web-httpauth"]
+saas = []
+
 [dependencies]
 actix-web = "4.4"
 actix-files = "0.6"
@@ -11,10 +26,10 @@ serde_json = "1.0"
 tokio = { version = "1.35", features = ["full", "time"] }
 rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
-bcrypt = "0.15"
+bcrypt = { version = "0.15", optional = true }
 jsonwebtoken = "9.2"
 chrono = { version = "0.4", features = ["serde"] }
-actix-web-httpauth = "0.8"
+actix-web-httpauth = { version = "0.8", optional = true }
 dotenvy = "0.15"
 qrcode = "0.14"
 image = "0.25"
