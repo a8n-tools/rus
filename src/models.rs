@@ -151,6 +151,7 @@ pub struct SubmitReportRequest {
 
 /// Abuse report details
 #[derive(Serialize)]
+#[allow(dead_code)]
 pub struct AbuseReport {
     pub id: i64,
     pub short_code: String,
@@ -169,6 +170,7 @@ pub struct AbuseReport {
 
 /// Request to resolve an abuse report
 #[derive(Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ResolveReportRequest {
     pub action: String, // "dismiss", "delete_url", "ban_user"
 }
