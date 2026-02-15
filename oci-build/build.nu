@@ -151,6 +151,10 @@ def runtime-stage []: any -> any {
         }
     }
 
+    # Create data directory for SQLite database
+    log info "[runtime-stage] Creating data directory..."
+    mkdir ($runtime_dir | path join "data")
+
     # Set ownership
     log info "[runtime-stage] Setting ownership to appuser..."
     ^buildah run $runtime -- chown -R appuser:appuser $app_dir

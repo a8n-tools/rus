@@ -4,25 +4,24 @@
 builder:
   name: rust-alpine
   url: "docker.io/library/rust"
-  version: "1.88-alpine"
+  version: "1.91-alpine"
   dir: /build
 
 # Docker image for running the application
 runtime:
   name: alpine
   url: "docker.io/library/alpine"
-  version: "3.19"
+  version: "3.21"
   dir: /app
   cfg:
-    port: 3000
+    port: 8080
     env:
-      - NODE_ENV=production
-      - HOSTNAME=0.0.0.0
+      - HOST=0.0.0.0
       - RUST_LOG=info
     labels:
-      - org.opencontainers.image.source=https://github.com/a8n-tools/rus
+      - org.opencontainers.image.source=https://dev.a8n.run/a8n-tools/rus
 
 # Published image configuration
 published:
   name: "rus"
-  version: "v0.1.0"
+  version: "v0.15.1"
