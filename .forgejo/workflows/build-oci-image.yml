@@ -4,11 +4,8 @@ name: Build OCI container
 
 on:
   push:
-    branches:
-      - "main"
-    #paths:
-    #  - "oci-build/**"
-    #  - ".forgejo/workflows/build-oci-image.yml"
+    tags:
+      - "v*"
 
 # TODO: Remove debug env vars once CI is stable.
 env:
@@ -44,6 +41,8 @@ jobs:
       - name: Build image
         id: build-image
         shell: nu {0}
+        env:
+          BUILD_VERSION: ${{ github.ref_name }}
         run: |
           cd oci-build
           ./build.nu

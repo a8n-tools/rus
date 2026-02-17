@@ -24,4 +24,3 @@ runtime:
 # Published image configuration
 published:
   name: "rus"
-  version: "v0.15.1"
