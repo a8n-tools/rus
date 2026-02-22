@@ -1,9 +1,15 @@
 ---
 # Build OCI image and push to Forgejo Container Registry.
+#
+# Tagging strategy:
+#   - Push to main        → latest
+#   - Push tag v1.2.3     → v1.2.3, latest
 name: Build OCI container
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -32,26 +38,45 @@ jobs:
           $"REGISTRY_USER=($owner)\n" | save --append $env.GITHUB_ENV
           $"IMAGE_REGISTRY=($env.REGISTRY_PROVIDER)/($owner)\n" | save --append $env.GITHUB_ENV
 
+      - name: Determine image tags
+        shell: nu {0}
+        run: |
+          let registry = $env.IMAGE_REGISTRY
+          let ref = "${{ github.ref }}"
+          let ref_name = "${{ github.ref_name }}"
+
+          # Always tag as latest
+          mut tags = [$"($registry)/rus:latest"]
+
+          # Add version tag for git tag pushes
+          if ($ref | str starts-with "refs/tags/v") {
+              $tags = ($tags | append $"($registry)/rus:($ref_name)")
+          }
+
+          let tags_str = ($tags | str join "\n")
+          print $"Image tags:\n($tags_str)"
+          $"IMAGE_TAGS=($tags_str)\n" | save --append $env.GITHUB_ENV
+
       - name: Build image
         shell: nu {0}
-        env:
-          BUILD_VERSION: ${{ github.ref_name }}
         run: |
-          let tag = ($env.BUILD_VERSION | str trim)
-          let registry = $env.IMAGE_REGISTRY
-          let image_name = $"($registry)/rus:($tag)"
-          print $"Building image: ($image_name)"
-          ^docker build --build-arg BUILD_MODE=standalone -t $image_name .
-          $"IMAGE_NAME=($image_name)\n" | save --append $env.GITHUB_ENV
+          let tags = ($env.IMAGE_TAGS | lines | where { $in | is-not-empty })
+          let tag_args = ($tags | each { ["-t" $in] } | flatten)
+          print $"Building with tags: ($tags)"
+          ^docker build --build-arg BUILD_MODE=standalone ...$tag_args .
 
       - name: Push image to Forgejo Container Registry
         shell: nu {0}
         run: |
           ^docker login --username $env.REGISTRY_USER --password $env.REGISTRY_PASSWORD $env.REGISTRY_PROVIDER
-          print $"Pushing image: ($env.IMAGE_NAME)"
-          ^docker push $env.IMAGE_NAME
+          let tags = ($env.IMAGE_TAGS | lines | where { $in | is-not-empty })
+          for tag in $tags {
+              print $"Pushing: ($tag)"
+              ^docker push $tag
+          }
 
-      - name: Print image URL
+      - name: Print image URLs
         shell: nu {0}
         run: |
-          print $"Image pushed to ($env.IMAGE_NAME)"
+          let tags = ($env.IMAGE_TAGS | lines | where { $in | is-not-empty })
+          print $"Images pushed:\n($tags | str join "\n")"
