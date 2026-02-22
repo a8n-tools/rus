@@ -49,17 +49,14 @@ cargo run --no-default-features --features saas
 cargo build --release --no-default-features --features saas
 cargo test --no-default-features --features saas
 
-# Docker deployment (standalone)
-docker build -t rus:standalone .
+# Docker deployment (standalone - default)
+docker build --build-arg BUILD_MODE=standalone -t rus:standalone .
 docker compose up --build              # Build and start
 
 # Docker deployment (saas)
-docker build -f Dockerfile.saas -t rus:saas .
+docker build --build-arg BUILD_MODE=saas -t rus:saas .
 
 docker compose down                    # Stop containers
-
-# Database initialization (first time)
-docker compose -f compose-sqlite.yml run sqlite
 ```
 
 ## Architecture
@@ -163,3 +160,14 @@ curl -X POST http://localhost:8080/api/shorten \
   -H "Authorization: Bearer {TOKEN}" \
   -d '{"url":"https://example.com"}'
 ```
+
+## Build System
+
+The Docker build uses a unified `Dockerfile` with a `setup.nu` script:
+
+- **Dockerfile**: Multi-stage build with BuildKit cache mounts for fast incremental builds. Uses `rust:<version>-alpine` for building and `alpine:<version>` for runtime.
+- **oci-build/setup.nu**: Nushell script that runs inside the builder stage. Installs build deps, runs `cargo build` with the correct feature flags, and copies the binary to `/build/output/app`.
+- **BUILD_MODE**: ARG that selects `standalone` (default) or `saas` mode.
+- **Cache mounts**: Cargo registry, git, and target directory are cached across builds via `--mount=type=cache`.
+
+Build args: `RUST_VERSION`, `ALPINE_VERSION`, `NU_VERSION`, `BUILD_MODE`.

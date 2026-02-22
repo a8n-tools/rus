@@ -27,12 +27,14 @@
 # Documentation
 README.md
 LICENSE
-*.md
+
+# CI/CD
+.forgejo/
+.github/
+
 
 # Docker
-Dockerfile
 .dockerignore
-docker-compose.yml
 compose.yml
 
 # Logs
