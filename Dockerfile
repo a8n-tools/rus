@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # Unified Dockerfile for RUS (Rust URL Shortener)
 # Supports both standalone and saas modes via BUILD_MODE arg.
 #
@@ -7,42 +5,50 @@
 #   docker build --build-arg BUILD_MODE=standalone -t rus:standalone .
 #   docker build --build-arg BUILD_MODE=saas -t rus:saas .
 
-ARG RUST_VERSION=1.91
-ARG ALPINE_VERSION=3.21
-
-# === Builder stage ===
-FROM rust:${RUST_VERSION}-alpine AS builder
-
-ARG NU_VERSION=0.110.0
 ARG BUILD_MODE=standalone
+
+# Build stage
+FROM rust:1.93-alpine AS builder
+
+ARG BUILD_MODE
 
 WORKDIR /build
 
-# Install nushell binary
-RUN wget -qO- "https://github.com/nushell/nushell/releases/download/${NU_VERSION}/nu-${NU_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
-    | tar xz -C /usr/local/bin --strip-components=1 "nu-${NU_VERSION}-x86_64-unknown-linux-musl/nu"
+# Install build dependencies
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static
 
-# Copy source files
+# Copy cargo files for dependency caching
 COPY Cargo.toml Cargo.lock ./
+
+# Create dummy src for dependency compilation
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+
+# Build dependencies only
+RUN cargo build --release && rm -rf src target/release/deps/rus*
+
+# Copy actual source code
 COPY src ./src
 COPY static ./static
-COPY oci-build/setup.nu ./
 
-# Build using setup.nu with BuildKit cache mounts
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/build/target \
-    nu setup.nu ${BUILD_MODE}
+# Build the correct binary based on build mode and copy to a stable path
+RUN set -e; \
+    if [ "$BUILD_MODE" = "standalone" ]; then \
+      cargo build --release --features standalone; \
+      cp target/release/rus /build/rus; \
+    else \
+      cargo build --release --no-default-features --features saas; \
+      cp target/release/rus-saas /build/rus; \
+    fi
 
-# === Runtime stage ===
-FROM alpine:${ALPINE_VERSION}
+# Runtime stage
+FROM alpine:3.21
+
+WORKDIR /app
 
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -u 1001 appuser
 
-WORKDIR /app
-
-COPY --from=builder /build/output/app /app/app
+COPY --from=builder /build/rus /app/rus
 COPY static ./static
 
 RUN mkdir -p /app/data && chown -R appuser:appuser /app
@@ -56,4 +62,4 @@ ENV RUST_LOG=info
 
 EXPOSE 8080
 
-CMD ["/app/app"]
+ENTRYPOINT ["/app/rus"]
