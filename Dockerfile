@@ -25,6 +25,7 @@ RUN wget -qO- "https://github.com/nushell/nushell/releases/download/${NU_VERSION
 # Copy source files
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY static ./static
 COPY oci-build/setup.nu ./
 
 # Build using setup.nu with BuildKit cache mounts
