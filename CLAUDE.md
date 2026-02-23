@@ -66,7 +66,7 @@ docker compose down                    # Stop containers
 - **Database**: SQLite via rusqlite (bundled)
 - **Auth (standalone)**: JWT tokens with bcrypt password hashing
 - **Auth (saas)**: Cookie-based auth from parent application
-- **Storage**: `./data/rus.db` (auto-created)
+- **Storage**: `./data/rus.db` locally (auto-created), `/data/rus.db` in Docker (set via `ENV DB_PATH`)
 
 ### Source Structure
 ```
@@ -119,7 +119,7 @@ JWT_SECRET=<base64-encoded-32-bytes>
 
 ### Optional (both modes)
 ```
-DB_PATH=./data/rus.db       # Database location
+DB_PATH=./data/rus.db       # Database location (Docker default: /data/rus.db)
 HOST=0.0.0.0                # Bind address
 PORT=8080                   # Server port
 HOST_URL=http://localhost:8080  # Public URL for shortened links
@@ -173,3 +173,8 @@ The Docker build uses a unified `Dockerfile` with a `setup.nu` script:
 - **Cache mounts**: Cargo registry, git, and target directory are cached across builds via `--mount=type=cache`.
 
 Build args: `RUST_VERSION`, `ALPINE_VERSION`, `NU_VERSION`, `BUILD_MODE`.
+
+### Container Directory Layout
+- `/app` — binary and static files (`WORKDIR`)
+- `/data` — persistent database storage (mount volume here)
+- `/config` — reserved mount point for future configuration files (e.g., `/config/.env`)

@@ -35,7 +35,7 @@ async fn main() -> std::io::Result<()> {
     // Initialize database connection
     let app_state = web::Data::new(
         AppState::new(config)
-            .expect("Failed to connect to database. Make sure the SQLite container is running and ./data/rus.db exists.")
+            .expect("Failed to connect to database. Check that DB_PATH is set to a valid, writable location.")
     );
 
     println!("✓ Database connection established");

@@ -51,7 +51,8 @@ RUN apk add --no-cache ca-certificates tzdata \
 COPY --from=builder /build/rus /app/rus
 COPY static ./static
 
-RUN mkdir -p /app/data && chown -R appuser:appuser /app
+RUN mkdir -p /data /config \
+    && chown -R appuser:appuser /app /data /config
 
 USER appuser
 
@@ -59,6 +60,7 @@ LABEL org.opencontainers.image.source=https://dev.a8n.run/a8n-tools/rus
 
 ENV HOST=0.0.0.0
 ENV RUST_LOG=info
+ENV DB_PATH=/data/rus.db
 
 EXPOSE 8080
 

@@ -9,7 +9,7 @@ services:
     # ports:
       # - "8080:8080"
     volumes:
-      - rus-data:/app/data
+      - rus-data:/data
     environment:
       - HOST=0.0.0.0
       - RUST_LOG=info
