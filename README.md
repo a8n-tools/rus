@@ -339,4 +339,10 @@ This project is open source and available under the MIT License.
 
 ---
 
+## TODO
+
+- [ ] Delete `oci-build/setup.nu` — it is orphaned now that the Dockerfile uses the dummy-src pattern instead of Nushell + setup.nu for building.
+
+---
+
 **Made with 🦀 and Rust**

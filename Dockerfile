@@ -1,9 +1,8 @@
-# Unified Dockerfile for RUS (Rust URL Shortener)
-# Supports both standalone and saas modes via BUILD_MODE arg.
+# Dockerfile for RUS (Rust URL Shortener)
 #
 # Usage:
-#   docker build --build-arg BUILD_MODE=standalone -t rus:standalone .
-#   docker build --build-arg BUILD_MODE=saas -t rus:saas .
+#   docker build -t rus .                                        # standalone (default)
+#   docker build --build-arg BUILD_MODE=saas -t rus-saas .       # saas
 
 ARG BUILD_MODE=standalone
 
@@ -23,21 +22,21 @@ COPY Cargo.toml Cargo.lock ./
 # Create dummy src for dependency compilation
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Build dependencies only
+# Build dependencies only (default features covers standalone deps)
 RUN cargo build --release && rm -rf src target/release/deps/rus*
 
 # Copy actual source code
 COPY src ./src
 COPY static ./static
 
-# Build the correct binary based on build mode and copy to a stable path
+# Build the binary for the selected mode and copy to a stable path
 RUN set -e; \
     if [ "$BUILD_MODE" = "standalone" ]; then \
       cargo build --release --features standalone; \
-      cp target/release/rus /build/rus; \
+      cp target/release/rus /build/app; \
     else \
       cargo build --release --no-default-features --features saas; \
-      cp target/release/rus-saas /build/rus; \
+      cp target/release/rus-saas /build/app; \
     fi
 
 # Runtime stage
@@ -48,7 +47,7 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata \
     && adduser -D -u 1001 appuser
 
-COPY --from=builder /build/rus /app/rus
+COPY --from=builder /build/app /app/app
 COPY static ./static
 
 RUN mkdir -p /data /config \
@@ -64,4 +63,4 @@ ENV DB_PATH=/data/rus.db
 
 EXPOSE 8080
 
-ENTRYPOINT ["/app/rus"]
+ENTRYPOINT ["/app/app"]

@@ -3,8 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        BUILD_MODE: standalone
     # No need for ports since Traefik will handle the routing
     # ports:
       # - "8080:8080"

@@ -50,11 +50,11 @@ cargo build --release --no-default-features --features saas
 cargo test --no-default-features --features saas
 
 # Docker deployment (standalone - default)
-docker build --build-arg BUILD_MODE=standalone -t rus:standalone .
+docker build -t rus .
 docker compose up --build              # Build and start
 
 # Docker deployment (saas)
-docker build --build-arg BUILD_MODE=saas -t rus:saas .
+docker build --build-arg BUILD_MODE=saas -t rus-saas .
 
 docker compose down                    # Stop containers
 ```
@@ -165,14 +165,17 @@ curl -X POST http://localhost:8080/api/shorten \
 
 ## Build System
 
-The Docker build uses a unified `Dockerfile` with a `setup.nu` script:
+A single `Dockerfile` builds both modes via `BUILD_MODE` ARG (`standalone` default, `saas`). The binary is copied to `/app/app` inside the container regardless of mode.
 
-- **Dockerfile**: Multi-stage build with BuildKit cache mounts for fast incremental builds. Uses `rust:<version>-alpine` for building and `alpine:<version>` for runtime.
-- **oci-build/setup.nu**: Nushell script that runs inside the builder stage. Installs build deps, runs `cargo build` with the correct feature flags, and copies the binary to `/build/output/app`.
-- **BUILD_MODE**: ARG that selects `standalone` (default) or `saas` mode.
-- **Cache mounts**: Cargo registry, git, and target directory are cached across builds via `--mount=type=cache`.
+- **`docker build -t rus .`** — standalone image
+- **`docker build --build-arg BUILD_MODE=saas -t rus-saas .`** — saas image
 
-Build args: `RUST_VERSION`, `ALPINE_VERSION`, `NU_VERSION`, `BUILD_MODE`.
+### Supporting scripts
+- **`oci-build/setup.nu`**: Nushell build script (alternative to Dockerfile inline builds). Accepts `standalone` or `saas` as argument.
+- **`oci-build/get-tags.nu`**: Derives image tags from `git describe`.
+
+### CI
+The Forgejo workflow builds both `rus` and `rus-saas` images in parallel via a matrix strategy.
 
 ### Container Directory Layout
 - `/app` — binary and static files (`WORKDIR`)

@@ -29,7 +29,7 @@ def main [build_mode: string] {
     let binary_name = if $build_mode == "standalone" { "rus" } else { "rus-saas" }
     let binary_src = $"/build/target/release/($binary_name)"
 
-    # Copy to output location (cache mounts don't persist in layers)
+    # Copy to stable output path (cache mounts don't persist in layers)
     print $"Copying ($binary_src) to /build/output/app"
     mkdir /build/output
     cp $binary_src /build/output/app
