@@ -78,7 +78,7 @@ jobs:
           let registry = $env.IMAGE_REGISTRY
           let tag_args = ($tags | each {|tag| [-t $"($registry)/($image):($tag)"]} | flatten)
           let cache_from = $"type=registry,ref=($registry)/($image):latest"
-          print $"Building and pushing ($image) (($build_mode) mode) with tags: ($tags_str)"
+          print $"Building and pushing ($image) [($build_mode) mode] with tags: ($tags_str)"
           ^docker buildx build --push --build-arg $"BUILD_MODE=($build_mode)" --cache-from $cache_from --cache-to type=inline ...$tag_args .
 
       - name: Print image URLs
