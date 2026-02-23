@@ -111,6 +111,7 @@ pub struct VersionResponse {
 pub struct ConfigResponse {
     pub host_url: String,
     pub max_url_length: usize,
+    #[cfg(feature = "standalone")]
     pub allow_registration: bool,
 }
 

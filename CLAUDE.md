@@ -125,7 +125,6 @@ PORT=8080                   # Server port
 HOST_URL=http://localhost:8080  # Public URL for shortened links
 MAX_URL_LENGTH=2048         # Maximum URL length
 CLICK_RETENTION_DAYS=30     # Days to retain click history
-ALLOW_REGISTRATION=true     # Allow public signups (default: true)
 ```
 
 ### Standalone-only options
@@ -134,7 +133,10 @@ JWT_EXPIRY=1                # JWT expiry in hours (default: 1)
 REFRESH_TOKEN_EXPIRY=7      # Refresh token expiry in days (default: 7)
 ACCOUNT_LOCKOUT_ATTEMPTS=5  # Failed attempts before lockout (default: 5)
 ACCOUNT_LOCKOUT_DURATION=30 # Lockout duration in minutes (default: 30)
+ALLOW_REGISTRATION=true     # Allow public signups (default: true)
 ```
+
+**Important:** When adding or changing environment variables, update both `.env.standalone` and `.env.saas` to keep them in sync. Shared variables go in both files; mode-specific variables go only in the relevant file.
 
 ## Database Schema
 

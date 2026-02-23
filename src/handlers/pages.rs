@@ -135,6 +135,7 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
     Ok(HttpResponse::Ok().json(ConfigResponse {
         host_url: data.config.host_url.clone(),
         max_url_length: data.config.max_url_length,
+        #[cfg(feature = "standalone")]
         allow_registration: data.config.allow_registration,
     }))
 }

@@ -19,6 +19,7 @@ pub struct Config {
     pub db_path: String,
     pub host: String,
     pub port: u16,
+    #[cfg(feature = "standalone")]
     pub allow_registration: bool,
 }
 
@@ -79,6 +80,7 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(8080);
 
+        #[cfg(feature = "standalone")]
         let allow_registration = env::var("ALLOW_REGISTRATION")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -101,6 +103,7 @@ impl Config {
             db_path,
             host,
             port,
+            #[cfg(feature = "standalone")]
             allow_registration,
         }
     }
