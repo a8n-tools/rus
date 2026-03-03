@@ -39,7 +39,7 @@ pub async fn submit_abuse_report(
         }
     }
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Check if short code exists
     let url_exists: bool = db
@@ -79,7 +79,7 @@ pub async fn submit_abuse_report(
 /// Admin endpoint to list all abuse reports - standalone only
 #[cfg(feature = "standalone")]
 pub async fn admin_list_reports(data: web::Data<AppState>) -> Result<HttpResponse> {
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     let mut stmt = db
         .prepare(
@@ -141,7 +141,7 @@ pub async fn admin_resolve_report(
         }
     };
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Get report details
     let report_result: rusqlite::Result<(String, String)> = db.query_row(

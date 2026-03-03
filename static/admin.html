@@ -233,21 +233,52 @@
             const roleText = user.is_admin ? '👑 Admin' : 'User';
             const createdDate = new Date(user.created_at).toLocaleDateString();
 
-            row.innerHTML = `
-                <td><strong>${user.username}</strong></td>
-                <td>${roleText}</td>
-                <td>${user.url_count}</td>
-                <td>${createdDate}</td>
-                <td>
-                    ${!user.is_admin ?
-                        `<div style="display: flex; gap: 5px;">
-                            <button class="promote-user-btn" onclick="promoteUser(${user.user_id}, '${user.username}')" title="Promote to Admin">👑 Promote</button>
-                            <button class="delete-user-btn" onclick="deleteUser(${user.user_id}, '${user.username}')">Delete</button>
-                        </div>` :
-                        '<span class="text-muted">Protected</span>'
-                    }
-                </td>
-            `;
+            const tdUsername = document.createElement('td');
+            const strong = document.createElement('strong');
+            strong.textContent = user.username;
+            tdUsername.appendChild(strong);
+
+            const tdRole = document.createElement('td');
+            tdRole.textContent = roleText;
+
+            const tdUrls = document.createElement('td');
+            tdUrls.textContent = user.url_count;
+
+            const tdDate = document.createElement('td');
+            tdDate.textContent = createdDate;
+
+            const tdActions = document.createElement('td');
+            if (!user.is_admin) {
+                const actionsDiv = document.createElement('div');
+                actionsDiv.style.display = 'flex';
+                actionsDiv.style.gap = '5px';
+
+                const promoteBtn = document.createElement('button');
+                promoteBtn.className = 'promote-user-btn';
+                promoteBtn.title = 'Promote to Admin';
+                promoteBtn.textContent = '👑 Promote';
+                promoteBtn.addEventListener('click', () => promoteUser(user.user_id, user.username));
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-user-btn';
+                deleteBtn.textContent = 'Delete';
+                deleteBtn.addEventListener('click', () => deleteUser(user.user_id, user.username));
+
+                actionsDiv.appendChild(promoteBtn);
+                actionsDiv.appendChild(deleteBtn);
+                tdActions.appendChild(actionsDiv);
+            } else {
+                const protectedSpan = document.createElement('span');
+                protectedSpan.className = 'text-muted';
+                protectedSpan.textContent = 'Protected';
+                tdActions.appendChild(protectedSpan);
+            }
+
+            row.appendChild(tdUsername);
+            row.appendChild(tdRole);
+            row.appendChild(tdUrls);
+            row.appendChild(tdDate);
+            row.appendChild(tdActions);
 
             return row;
         }
@@ -411,40 +442,103 @@
         function createReportRow(report) {
             const row = document.createElement('tr');
 
-            const statusBadge = report.status === 'pending'
-                ? '<span style="background: #f59e0b; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em;">⏳ Pending</span>'
-                : report.status === 'resolved'
-                ? '<span style="background: #22c55e; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em;">✓ Resolved</span>'
-                : '<span style="background: #6b7280; color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em;">Dismissed</span>';
+            // Status badge
+            const tdStatus = document.createElement('td');
+            const statusBadge = document.createElement('span');
+            statusBadge.style.cssText = 'color: white; padding: 4px 8px; border-radius: 4px; font-size: 0.85em;';
+            if (report.status === 'pending') {
+                statusBadge.style.background = '#f59e0b';
+                statusBadge.textContent = '⏳ Pending';
+            } else if (report.status === 'resolved') {
+                statusBadge.style.background = '#22c55e';
+                statusBadge.textContent = '✓ Resolved';
+            } else {
+                statusBadge.style.background = '#6b7280';
+                statusBadge.textContent = 'Dismissed';
+            }
+            tdStatus.appendChild(statusBadge);
 
-            const reportedDate = new Date(report.created_at).toLocaleDateString();
-            const reporterEmail = report.reporter_email || 'Anonymous';
-            const ownerInfo = report.url_owner_username || 'Unknown';
-            const originalUrl = report.original_url || 'URL deleted';
+            // Short code + original URL
+            const tdCode = document.createElement('td');
+            const codeStrong = document.createElement('strong');
+            codeStrong.style.color = 'var(--rust-orange)';
+            codeStrong.textContent = report.short_code;
+            tdCode.appendChild(codeStrong);
+            tdCode.appendChild(document.createElement('br'));
+            const urlSmall = document.createElement('small');
+            urlSmall.style.cssText = 'color: var(--text-muted); font-size: 0.85em;';
+            urlSmall.textContent = report.original_url || 'URL deleted';
+            tdCode.appendChild(urlSmall);
 
-            row.innerHTML = `
-                <td>${statusBadge}</td>
-                <td>
-                    <strong style="color: var(--rust-orange);">${report.short_code}</strong><br>
-                    <small style="color: var(--text-muted); font-size: 0.85em;">${originalUrl}</small>
-                </td>
-                <td>
-                    <strong>${report.reason}</strong><br>
-                    ${report.description ? `<small style="color: var(--text-secondary);">${report.description}</small>` : ''}
-                </td>
-                <td style="font-size: 0.9em;">${reporterEmail}</td>
-                <td style="font-size: 0.9em;">${reportedDate}</td>
-                <td>${ownerInfo}</td>
-                <td>
-                    ${report.status === 'pending' ? `
-                        <div style="display: flex; gap: 5px; flex-direction: column;">
-                            <button class="action-btn-small" style="background: #6b7280;" onclick="resolveReport(${report.id}, 'dismiss')">Dismiss</button>
-                            <button class="action-btn-small" style="background: var(--error);" onclick="resolveReport(${report.id}, 'delete_url')">Delete URL</button>
-                            <button class="action-btn-small" style="background: #dc2626;" onclick="resolveReport(${report.id}, 'ban_user')">Ban User</button>
-                        </div>
-                    ` : '<span class="text-muted">Resolved</span>'}
-                </td>
-            `;
+            // Reason + description
+            const tdReason = document.createElement('td');
+            const reasonStrong = document.createElement('strong');
+            reasonStrong.textContent = report.reason;
+            tdReason.appendChild(reasonStrong);
+            if (report.description) {
+                tdReason.appendChild(document.createElement('br'));
+                const descSmall = document.createElement('small');
+                descSmall.style.color = 'var(--text-secondary)';
+                descSmall.textContent = report.description;
+                tdReason.appendChild(descSmall);
+            }
+
+            // Reporter email
+            const tdReporter = document.createElement('td');
+            tdReporter.style.fontSize = '0.9em';
+            tdReporter.textContent = report.reporter_email || 'Anonymous';
+
+            // Date
+            const tdDate = document.createElement('td');
+            tdDate.style.fontSize = '0.9em';
+            tdDate.textContent = new Date(report.created_at).toLocaleDateString();
+
+            // Owner
+            const tdOwner = document.createElement('td');
+            tdOwner.textContent = report.url_owner_username || 'Unknown';
+
+            // Actions
+            const tdActions = document.createElement('td');
+            if (report.status === 'pending') {
+                const actionsDiv = document.createElement('div');
+                actionsDiv.style.cssText = 'display: flex; gap: 5px; flex-direction: column;';
+
+                const dismissBtn = document.createElement('button');
+                dismissBtn.className = 'action-btn-small';
+                dismissBtn.style.background = '#6b7280';
+                dismissBtn.textContent = 'Dismiss';
+                dismissBtn.addEventListener('click', () => resolveReport(report.id, 'dismiss'));
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'action-btn-small';
+                deleteBtn.style.background = 'var(--error)';
+                deleteBtn.textContent = 'Delete URL';
+                deleteBtn.addEventListener('click', () => resolveReport(report.id, 'delete_url'));
+
+                const banBtn = document.createElement('button');
+                banBtn.className = 'action-btn-small';
+                banBtn.style.background = '#dc2626';
+                banBtn.textContent = 'Ban User';
+                banBtn.addEventListener('click', () => resolveReport(report.id, 'ban_user'));
+
+                actionsDiv.appendChild(dismissBtn);
+                actionsDiv.appendChild(deleteBtn);
+                actionsDiv.appendChild(banBtn);
+                tdActions.appendChild(actionsDiv);
+            } else {
+                const resolvedSpan = document.createElement('span');
+                resolvedSpan.className = 'text-muted';
+                resolvedSpan.textContent = 'Resolved';
+                tdActions.appendChild(resolvedSpan);
+            }
+
+            row.appendChild(tdStatus);
+            row.appendChild(tdCode);
+            row.appendChild(tdReason);
+            row.appendChild(tdReporter);
+            row.appendChild(tdDate);
+            row.appendChild(tdOwner);
+            row.appendChild(tdActions);
 
             return row;
         }

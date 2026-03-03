@@ -6,6 +6,8 @@ pub mod auth;
 pub mod pages;
 #[cfg(feature = "saas")]
 pub mod saas_auth;
+#[cfg(feature = "saas")]
+pub use saas_auth::saas_cookie_validator;
 pub mod urls;
 
 // Re-export handlers for easier importing
@@ -20,7 +22,7 @@ pub use auth::{get_current_user, login, refresh_token, register};
 pub use pages::{
     admin_page, check_setup_required, login_page, serve_auth_js, setup_page, signup_page,
 };
-pub use pages::{dashboard_page, get_config, get_version, health_check, index, serve_css};
+pub use pages::{dashboard_page, get_config, get_version, health_check, index, report_page, serve_css};
 pub use urls::{
     delete_url, get_click_history, get_qr_code, get_stats, get_user_urls, redirect_url,
     shorten_url, update_url_name,

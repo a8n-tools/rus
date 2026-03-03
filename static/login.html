@@ -137,8 +137,8 @@
                     throw new Error(data.error || 'Login failed');
                 }
 
-                // Save token and username
-                saveAuth(data.token, data.username);
+                // Save token, username, and refresh token
+                saveAuth(data.token, data.username, data.refresh_token);
 
                 // Redirect to dashboard
                 window.location.href = 'dashboard.html';

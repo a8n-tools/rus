@@ -194,11 +194,13 @@
         errorDiv.classList.remove("show");
 
         try {
-          const response = await fetch("/api/urls", {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
+          const response = await authenticatedFetch("/api/urls");
+
+          if (!response) {
+            logout();
+            window.location.href = "login.html";
+            return;
+          }
 
           if (!response.ok) {
             if (response.status === 401) {
@@ -237,41 +239,131 @@
         const shortUrl = `${window.location.origin}/${urlEntry.short_code}`;
         const displayName = urlEntry.name || "Unnamed URL";
 
-        card.innerHTML = `
-                <div class="url-card-header">
-                    <div class="url-info">
-                        <div class="url-name-section">
-                            <span class="url-name" data-short-code="${urlEntry.short_code}">${displayName}</span>
-                            <button class="rename-btn" onclick="toggleRename('${
-                              urlEntry.short_code
-                            }')" title="Rename">✏️</button>
-                        </div>
-                        <div class="rename-form" id="rename-form-${urlEntry.short_code}" style="display: none;">
-                            <input type="text" class="rename-input" id="rename-input-${urlEntry.short_code}"
-                                   value="${urlEntry.name || ""}" placeholder="Enter URL name">
-                            <button class="save-rename-btn" onclick="saveRename('${urlEntry.short_code}')">Save</button>
-                            <button class="cancel-rename-btn" onclick="cancelRename('${
-                              urlEntry.short_code
-                            }')">Cancel</button>
-                        </div>
-                        <div class="short-code">/${urlEntry.short_code}</div>
-                        <div class="original-url">${urlEntry.original_url}</div>
-                    </div>
-                    <div class="url-stats">
-                        <div class="stat">
-                            <span class="stat-value">${urlEntry.clicks}</span>
-                            <span class="stat-label">Clicks</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="url-card-actions">
-                    <input type="text" value="${shortUrl}" readonly class="url-display">
-                    <button class="copy-btn" onclick="copyToClipboard('${shortUrl}', this)">Copy</button>
-                    <a href="/${urlEntry.short_code}" target="_blank" class="visit-btn">Visit</a>
-                    <button class="qr-btn" onclick="showQRCode('${urlEntry.short_code}')">🔲 QR Code</button>
-                    <button class="delete-btn" onclick="deleteUrl('${urlEntry.short_code}', this)">Delete</button>
-                </div>
-            `;
+        // Header
+        const header = document.createElement("div");
+        header.className = "url-card-header";
+
+        // URL info section
+        const urlInfo = document.createElement("div");
+        urlInfo.className = "url-info";
+
+        // Name section
+        const nameSection = document.createElement("div");
+        nameSection.className = "url-name-section";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "url-name";
+        nameSpan.setAttribute("data-short-code", urlEntry.short_code);
+        nameSpan.textContent = displayName;
+
+        const renameBtn = document.createElement("button");
+        renameBtn.className = "rename-btn";
+        renameBtn.title = "Rename";
+        renameBtn.textContent = "✏️";
+        renameBtn.addEventListener("click", () => toggleRename(urlEntry.short_code));
+
+        nameSection.appendChild(nameSpan);
+        nameSection.appendChild(renameBtn);
+
+        // Rename form
+        const renameForm = document.createElement("div");
+        renameForm.className = "rename-form";
+        renameForm.id = `rename-form-${urlEntry.short_code}`;
+        renameForm.style.display = "none";
+
+        const renameInput = document.createElement("input");
+        renameInput.type = "text";
+        renameInput.className = "rename-input";
+        renameInput.id = `rename-input-${urlEntry.short_code}`;
+        renameInput.value = urlEntry.name || "";
+        renameInput.placeholder = "Enter URL name";
+
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "save-rename-btn";
+        saveBtn.textContent = "Save";
+        saveBtn.addEventListener("click", () => saveRename(urlEntry.short_code));
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.className = "cancel-rename-btn";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.addEventListener("click", () => cancelRename(urlEntry.short_code));
+
+        renameForm.appendChild(renameInput);
+        renameForm.appendChild(saveBtn);
+        renameForm.appendChild(cancelBtn);
+
+        // Short code display
+        const shortCodeDiv = document.createElement("div");
+        shortCodeDiv.className = "short-code";
+        shortCodeDiv.textContent = `/${urlEntry.short_code}`;
+
+        // Original URL display
+        const originalUrlDiv = document.createElement("div");
+        originalUrlDiv.className = "original-url";
+        originalUrlDiv.textContent = urlEntry.original_url;
+
+        urlInfo.appendChild(nameSection);
+        urlInfo.appendChild(renameForm);
+        urlInfo.appendChild(shortCodeDiv);
+        urlInfo.appendChild(originalUrlDiv);
+
+        // Stats section
+        const urlStats = document.createElement("div");
+        urlStats.className = "url-stats";
+        const stat = document.createElement("div");
+        stat.className = "stat";
+        const statValue = document.createElement("span");
+        statValue.className = "stat-value";
+        statValue.textContent = urlEntry.clicks;
+        const statLabel = document.createElement("span");
+        statLabel.className = "stat-label";
+        statLabel.textContent = "Clicks";
+        stat.appendChild(statValue);
+        stat.appendChild(statLabel);
+        urlStats.appendChild(stat);
+
+        header.appendChild(urlInfo);
+        header.appendChild(urlStats);
+
+        // Actions section
+        const actions = document.createElement("div");
+        actions.className = "url-card-actions";
+
+        const urlDisplay = document.createElement("input");
+        urlDisplay.type = "text";
+        urlDisplay.value = shortUrl;
+        urlDisplay.readOnly = true;
+        urlDisplay.className = "url-display";
+
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "copy-btn";
+        copyBtn.textContent = "Copy";
+        copyBtn.addEventListener("click", function () { copyToClipboard(shortUrl, this); });
+
+        const visitLink = document.createElement("a");
+        visitLink.href = `/${urlEntry.short_code}`;
+        visitLink.target = "_blank";
+        visitLink.className = "visit-btn";
+        visitLink.textContent = "Visit";
+
+        const qrBtn = document.createElement("button");
+        qrBtn.className = "qr-btn";
+        qrBtn.textContent = "🔲 QR Code";
+        qrBtn.addEventListener("click", () => showQRCode(urlEntry.short_code));
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "delete-btn";
+        deleteBtn.textContent = "Delete";
+        deleteBtn.addEventListener("click", function () { deleteUrl(urlEntry.short_code, this); });
+
+        actions.appendChild(urlDisplay);
+        actions.appendChild(copyBtn);
+        actions.appendChild(visitLink);
+        actions.appendChild(qrBtn);
+        actions.appendChild(deleteBtn);
+
+        card.appendChild(header);
+        card.appendChild(actions);
 
         return card;
       }

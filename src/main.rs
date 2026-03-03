@@ -1,3 +1,4 @@
+use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware, web, App, HttpServer};
 #[cfg(feature = "standalone")]
 use actix_web_httpauth::middleware::HttpAuthentication;
@@ -47,21 +48,55 @@ async fn main() -> std::io::Result<()> {
         #[cfg(feature = "standalone")]
         let admin_auth = HttpAuthentication::bearer(admin_validator);
 
+        // Rate limiter: strict for auth endpoints (5 requests per minute)
+        let strict_rate_limit = GovernorConfigBuilder::default()
+            .seconds_per_request(12)
+            .burst_size(5)
+            .finish()
+            .unwrap();
+
+        // Rate limiter: moderate for public endpoints (30 requests per minute)
+        let moderate_rate_limit = GovernorConfigBuilder::default()
+            .seconds_per_request(2)
+            .burst_size(30)
+            .finish()
+            .unwrap();
+
         let app = App::new()
             .app_data(app_state.clone())
-            .wrap(middleware::Logger::default());
+            .wrap(middleware::Logger::default())
+            .wrap(
+                middleware::DefaultHeaders::new()
+                    .add(("X-Content-Type-Options", "nosniff"))
+                    .add(("X-Frame-Options", "DENY"))
+                    .add(("X-XSS-Protection", "1; mode=block"))
+                    .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
+            );
 
         // Configure routes based on feature
         #[cfg(feature = "standalone")]
         let app = app
+            // Rate-limited auth routes
+            .service(
+                web::resource("/api/register")
+                    .wrap(Governor::new(&strict_rate_limit))
+                    .route(web::post().to(register))
+            )
+            .service(
+                web::resource("/api/login")
+                    .wrap(Governor::new(&strict_rate_limit))
+                    .route(web::post().to(login))
+            )
             // Public API routes - MUST BE BEFORE scoped /api routes
-            .route("/api/register", web::post().to(register))
-            .route("/api/login", web::post().to(login))
             .route("/api/refresh", web::post().to(refresh_token))
             .route("/api/config", web::get().to(get_config))
             .route("/api/version", web::get().to(get_version))
             .route("/api/setup/required", web::get().to(check_setup_required))
-            .route("/api/report-abuse", web::post().to(submit_abuse_report))
+            .service(
+                web::resource("/api/report-abuse")
+                    .wrap(Governor::new(&moderate_rate_limit))
+                    .route(web::post().to(submit_abuse_report))
+            )
             // Admin-only routes - MUST BE BEFORE /api scope
             .service(
                 web::scope("/api/admin")
@@ -93,6 +128,7 @@ async fn main() -> std::io::Result<()> {
             .route("/dashboard.html", web::get().to(dashboard_page))
             .route("/setup.html", web::get().to(setup_page))
             .route("/admin.html", web::get().to(admin_page))
+            .route("/report.html", web::get().to(report_page))
             .route("/styles.css", web::get().to(serve_css))
             .route("/auth.js", web::get().to(serve_auth_js))
             .route("/health", web::get().to(health_check))
@@ -104,10 +140,15 @@ async fn main() -> std::io::Result<()> {
             // SaaS mode: minimal public API routes
             .route("/api/config", web::get().to(get_config))
             .route("/api/version", web::get().to(get_version))
-            .route("/api/report-abuse", web::post().to(submit_abuse_report))
-            // SaaS mode: protected routes use cookie-based auth
+            .service(
+                web::resource("/api/report-abuse")
+                    .wrap(Governor::new(&moderate_rate_limit))
+                    .route(web::post().to(submit_abuse_report))
+            )
+            // SaaS mode: protected routes use cookie-based auth with JWT verification
             .service(
                 web::scope("/api")
+                    .wrap(actix_web::middleware::from_fn(saas_cookie_validator))
                     .route("/shorten", web::post().to(shorten_url))
                     .route("/stats/{code}", web::get().to(get_stats))
                     .route("/urls", web::get().to(get_user_urls))
@@ -119,6 +160,7 @@ async fn main() -> std::io::Result<()> {
             // Public page routes
             .route("/", web::get().to(index))
             .route("/dashboard.html", web::get().to(dashboard_page))
+            .route("/report.html", web::get().to(report_page))
             .route("/styles.css", web::get().to(serve_css))
             .route("/health", web::get().to(health_check))
             // Catch-all route for short code redirects (MUST BE LAST)

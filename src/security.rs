@@ -50,14 +50,3 @@ pub fn record_login_attempt(db: &Connection, username: &str, success: bool) {
         params![username, success as i32],
     );
 }
-
-/// Cleanup old click history records
-pub fn cleanup_old_clicks(db: &Connection, retention_days: i64) {
-    let cutoff = Utc::now() - Duration::days(retention_days);
-    let cutoff_str = cutoff.format("%Y-%m-%d %H:%M:%S").to_string();
-
-    let _ = db.execute(
-        "DELETE FROM click_history WHERE clicked_at < ?1",
-        params![cutoff_str],
-    );
-}

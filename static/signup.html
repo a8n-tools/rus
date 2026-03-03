@@ -41,12 +41,12 @@
                     <input
                         type="password"
                         id="password"
-                        placeholder="Choose a password (min 6 characters)"
+                        placeholder="Choose a password (min 8 characters)"
                         required
                         autocomplete="new-password"
-                        minlength="6"
+                        minlength="8"
                     />
-                    <small class="input-hint">At least 6 characters</small>
+                    <small class="input-hint">At least 8 characters, with uppercase, number, and special character</small>
                 </div>
 
                 <div class="input-group">
@@ -57,7 +57,7 @@
                         placeholder="Confirm your password"
                         required
                         autocomplete="new-password"
-                        minlength="6"
+                        minlength="8"
                     />
                 </div>
 
@@ -153,8 +153,8 @@
                 return;
             }
 
-            if (password.length < 6) {
-                showError('Password must be at least 6 characters');
+            if (password.length < 8) {
+                showError('Password must be at least 8 characters');
                 return;
             }
 
@@ -182,8 +182,8 @@
                     throw new Error(data.error || 'Registration failed');
                 }
 
-                // Save token and username
-                saveAuth(data.token, data.username);
+                // Save token, username, and refresh token
+                saveAuth(data.token, data.username, data.refresh_token);
 
                 // Redirect to dashboard
                 window.location.href = 'dashboard.html';

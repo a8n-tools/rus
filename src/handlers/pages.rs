@@ -1,13 +1,13 @@
 use actix_web::{web, HttpResponse, Result};
 #[cfg(feature = "saas")]
 use actix_web::HttpRequest;
-#[cfg(feature = "saas")]
-use base64::Engine;
 
 use crate::db::AppState;
 #[cfg(feature = "standalone")]
 use crate::models::SetupCheckResponse;
 use crate::models::{ConfigResponse, HealthResponse, VersionResponse};
+#[cfg(feature = "saas")]
+use super::saas_auth::get_user_from_cookie;
 
 /// Serve static HTML pages
 pub async fn index() -> Result<HttpResponse> {
@@ -38,50 +38,13 @@ pub async fn dashboard_page() -> Result<HttpResponse> {
         .body(include_str!("../../static/dashboard.html")))
 }
 
-/// Dashboard page for SaaS mode - checks access_token cookie from parent app
+/// Dashboard page for SaaS mode - verifies access_token cookie signature
 #[cfg(feature = "saas")]
-pub async fn dashboard_page(req: HttpRequest) -> Result<HttpResponse> {
+pub async fn dashboard_page(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
     let redirect_url = "https://app.a8n.run";
 
-    // Check for access_token cookie from parent app
-    let should_redirect = match req.cookie("access_token") {
-        None => true,
-        Some(cookie) => {
-            let parts: Vec<&str> = cookie.value().split('.').collect();
-            if parts.len() != 3 {
-                true
-            } else {
-                match base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
-                    Ok(bytes) => {
-                        match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                            Ok(payload) => {
-                                payload.get("membership_status")
-                                    .and_then(|v| v.as_str())
-                                    == Some("canceled")
-                            }
-                            Err(_) => true,
-                        }
-                    }
-                    // Try standard base64 as fallback
-                    Err(_) => match base64::engine::general_purpose::STANDARD.decode(parts[1]) {
-                        Ok(bytes) => {
-                            match serde_json::from_slice::<serde_json::Value>(&bytes) {
-                                Ok(payload) => {
-                                    payload.get("membership_status")
-                                        .and_then(|v| v.as_str())
-                                        == Some("canceled")
-                                }
-                                Err(_) => true,
-                            }
-                        }
-                        Err(_) => true,
-                    },
-                }
-            }
-        }
-    };
-
-    if should_redirect {
+    // Verify JWT signature and check claims
+    if get_user_from_cookie(&req, &data.config.saas_jwt_secret).is_none() {
         return Ok(HttpResponse::Found()
             .append_header(("Location", redirect_url))
             .finish());
@@ -104,6 +67,12 @@ pub async fn admin_page() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(include_str!("../../static/admin.html")))
+}
+
+pub async fn report_page() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(include_str!("../../static/report.html")))
 }
 
 pub async fn serve_css() -> Result<HttpResponse> {
@@ -143,7 +112,7 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
 /// Check if initial setup is required (no users exist) - standalone only
 #[cfg(feature = "standalone")]
 pub async fn check_setup_required(data: web::Data<AppState>) -> Result<HttpResponse> {
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     let user_count: i64 = db
         .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))

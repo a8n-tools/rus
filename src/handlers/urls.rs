@@ -1,19 +1,16 @@
 use actix_web::{web, HttpRequest, HttpResponse, Result};
-#[cfg(feature = "standalone")]
 use rand::Rng;
 use rusqlite::params;
 
 #[cfg(feature = "standalone")]
 use crate::auth::get_claims;
 #[cfg(feature = "saas")]
-use super::saas_auth::get_user_from_cookie;
+use super::saas_auth::{get_user_from_cookie, SaasUserClaims};
 use crate::db::AppState;
 use crate::models::{
     ClickHistoryEntry, ClickStats, ShortenRequest, ShortenResponse, UpdateUrlNameRequest,
     UrlEntry,
 };
-#[cfg(feature = "standalone")]
-use crate::security::cleanup_old_clicks;
 use crate::url::{generate_qr_code_png, generate_qr_code_svg, generate_short_code, validate_url};
 
 /// Helper to get user_id from request based on mode
@@ -24,7 +21,11 @@ fn get_user_id(http_req: &HttpRequest) -> Option<i64> {
 
 #[cfg(feature = "saas")]
 fn get_user_id(http_req: &HttpRequest) -> Option<i64> {
-    get_user_from_cookie(http_req).map(|c| c.user_id)
+    // In SaaS mode with middleware, claims are stored in request extensions
+    http_req
+        .extensions()
+        .get::<SaasUserClaims>()
+        .map(|c| c.user_id)
 }
 
 /// Protected API endpoint to shorten a URL
@@ -57,7 +58,7 @@ pub async fn shorten_url(
         })));
     }
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Check if URL is already shortened by this user
     let mut stmt = db
@@ -114,7 +115,7 @@ pub async fn redirect_url(
     data: web::Data<AppState>,
     code: web::Path<String>,
 ) -> Result<HttpResponse> {
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Get URL ID and original URL
     let result: rusqlite::Result<(i64, String)> = db.query_row(
@@ -137,10 +138,9 @@ pub async fn redirect_url(
                 params![url_id],
             );
 
-            // Cleanup old clicks periodically (1% chance) - standalone only
-            #[cfg(feature = "standalone")]
+            // Cleanup old clicks periodically (1% chance)
             if rand::thread_rng().gen_range(0..100) == 0 {
-                cleanup_old_clicks(&db, data.config.click_retention_days);
+                crate::db::cleanup_old_clicks(&db, data.config.click_retention_days);
             }
 
             Ok(HttpResponse::Found()
@@ -173,7 +173,7 @@ pub async fn get_stats(
         }
     };
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Get URL entry for this user
     let result: rusqlite::Result<UrlEntry> = db.query_row(
@@ -211,7 +211,7 @@ pub async fn get_user_urls(
         }
     };
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     let mut stmt = db
         .prepare(
@@ -250,7 +250,7 @@ pub async fn delete_url(
         }
     };
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Delete the URL only if it belongs to the current user
     match db.execute(
@@ -290,7 +290,7 @@ pub async fn update_url_name(
         }
     };
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Update the URL name only if it belongs to the current user
     match db.execute(
@@ -333,7 +333,7 @@ pub async fn get_click_history(
         }
     };
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // First verify ownership
     let url_id: rusqlite::Result<i64> = db.query_row(
@@ -400,7 +400,7 @@ pub async fn get_qr_code(
         }
     };
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Verify ownership
     let exists: bool = db

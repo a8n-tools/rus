@@ -17,23 +17,7 @@ pub async fn register(
     data: web::Data<AppState>,
     req: web::Json<RegisterRequest>,
 ) -> Result<HttpResponse> {
-    // Check if registration is allowed
-    if !data.config.allow_registration {
-        // Check if this would be the first user (setup)
-        let db = data.db.lock().unwrap();
-        let user_count: i64 = db
-            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
-            .unwrap_or(0);
-
-        // Allow first user registration for setup, block all others
-        if user_count > 0 {
-            return Ok(HttpResponse::Forbidden().json(serde_json::json!({
-                "error": "New user registration is disabled. Please contact the administrator."
-            })));
-        }
-    }
-
-    // Validate input
+    // Validate input before acquiring the lock
     if req.username.is_empty() || req.password.is_empty() {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Username and password cannot be empty"
@@ -46,6 +30,13 @@ pub async fn register(
         })));
     }
 
+    // Validate username characters (alphanumeric, underscores, hyphens only)
+    if !req.username.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "error": "Username can only contain letters, numbers, underscores, and hyphens"
+        })));
+    }
+
     // Validate password complexity
     if let Err(error_message) = validate_password(&req.password) {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
@@ -53,7 +44,7 @@ pub async fn register(
         })));
     }
 
-    // Hash password
+    // Hash password before acquiring the lock (expensive operation)
     let hashed_password = match hash(&req.password, DEFAULT_COST) {
         Ok(h) => h,
         Err(_) => {
@@ -63,13 +54,19 @@ pub async fn register(
         }
     };
 
-    // Insert user into database
-    let db = data.db.lock().unwrap();
+    // Acquire lock once for all DB operations (prevents TOCTOU race)
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Check if this is the first user (will be admin)
+    // Check registration allowed + first user in a single lock scope
     let user_count: i64 = db
         .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
         .unwrap_or(0);
+
+    if !data.config.allow_registration && user_count > 0 {
+        return Ok(HttpResponse::Forbidden().json(serde_json::json!({
+            "error": "New user registration is disabled. Please contact the administrator."
+        })));
+    }
 
     let is_admin = user_count == 0;
 
@@ -131,7 +128,7 @@ pub async fn login(
     data: web::Data<AppState>,
     req: web::Json<LoginRequest>,
 ) -> Result<HttpResponse> {
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Check for account lockout BEFORE any other database operations
     // This prevents timing attacks that could reveal if a username exists
@@ -234,7 +231,7 @@ pub async fn refresh_token(
     data: web::Data<AppState>,
     req: web::Json<RefreshRequest>,
 ) -> Result<HttpResponse> {
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Find and validate refresh token
     let token_result: rusqlite::Result<(i64, i64, String, i32)> = db.query_row(

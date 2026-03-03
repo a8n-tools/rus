@@ -21,6 +21,8 @@ pub struct Config {
     pub port: u16,
     #[cfg(feature = "standalone")]
     pub allow_registration: bool,
+    #[cfg(feature = "saas")]
+    pub saas_jwt_secret: String,
 }
 
 impl Config {
@@ -86,6 +88,10 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(true);
 
+        #[cfg(feature = "saas")]
+        let saas_jwt_secret = env::var("SAAS_JWT_SECRET")
+            .expect("SAAS_JWT_SECRET must be set in SaaS mode");
+
         Config {
             #[cfg(feature = "standalone")]
             jwt_secret,
@@ -105,6 +111,8 @@ impl Config {
             port,
             #[cfg(feature = "standalone")]
             allow_registration,
+            #[cfg(feature = "saas")]
+            saas_jwt_secret,
         }
     }
 
@@ -149,6 +157,7 @@ impl Config {
             println!("Database Path: {}", self.db_path);
             println!("Max URL Length: {}", self.max_url_length);
             println!("Click Retention: {} days", self.click_retention_days);
+            println!("SAAS JWT Secret: [set]");
             println!("========================================");
         }
     }

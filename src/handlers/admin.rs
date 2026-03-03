@@ -7,7 +7,7 @@ use crate::models::{AdminStatsResponse, UserInfo};
 
 /// Admin endpoint to list all users
 pub async fn admin_list_users(data: web::Data<AppState>) -> Result<HttpResponse> {
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     let mut stmt = db
         .prepare(
@@ -57,7 +57,7 @@ pub async fn admin_delete_user(
         })));
     }
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Delete the user (CASCADE will handle related records)
     match db.execute("DELETE FROM users WHERE userID = ?1", params![*user_id]) {
@@ -93,7 +93,7 @@ pub async fn admin_promote_user(
         }
     };
 
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Check if user exists and is not already an admin
     let user_check: rusqlite::Result<(String, i32)> = db.query_row(
@@ -131,7 +131,7 @@ pub async fn admin_promote_user(
 
 /// Admin endpoint to get system statistics
 pub async fn admin_get_stats(data: web::Data<AppState>) -> Result<HttpResponse> {
-    let db = data.db.lock().unwrap();
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     let total_users: i64 = db
         .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
@@ -142,7 +142,7 @@ pub async fn admin_get_stats(data: web::Data<AppState>) -> Result<HttpResponse> 
         .unwrap_or(0);
 
     let total_clicks: i64 = db
-        .query_row("SELECT SUM(clicks) FROM urls", [], |row| row.get(0))
+        .query_row("SELECT COALESCE(SUM(clicks), 0) FROM urls", [], |row| row.get(0))
         .unwrap_or(0);
 
     Ok(HttpResponse::Ok().json(AdminStatsResponse {

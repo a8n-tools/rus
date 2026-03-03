@@ -1,5 +1,5 @@
 use actix_web::HttpRequest;
-use base64::Engine;
+use jsonwebtoken::{decode, DecodingKey, Validation};
 
 /// SaaS user claims extracted from access_token cookie
 #[derive(Debug, Clone)]
@@ -10,22 +10,31 @@ pub struct SaasUserClaims {
     pub membership_status: Option<String>,
 }
 
-/// Extract user claims from access_token cookie (SaaS mode)
-pub fn get_user_from_cookie(req: &HttpRequest) -> Option<SaasUserClaims> {
+/// Extract and verify user claims from access_token cookie (SaaS mode)
+pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserClaims> {
     let cookie = req.cookie("access_token")?;
-    let parts: Vec<&str> = cookie.value().split('.').collect();
+    let token = cookie.value();
 
-    if parts.len() != 3 {
-        return None;
-    }
+    // Verify JWT signature and decode
+    let mut validation = Validation::default();
+    // Allow multiple algorithms the parent app might use
+    validation.algorithms = vec![
+        jsonwebtoken::Algorithm::HS256,
+        jsonwebtoken::Algorithm::HS384,
+        jsonwebtoken::Algorithm::HS512,
+    ];
+    // Don't require specific claims beyond exp
+    validation.required_spec_claims.clear();
+    validation.required_spec_claims.insert("exp".to_string());
 
-    // Try URL-safe Base64 first, then standard
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(parts[1])
-        .or_else(|_| base64::engine::general_purpose::STANDARD.decode(parts[1]))
-        .ok()?;
+    let token_data = decode::<serde_json::Value>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .ok()?;
 
-    let payload: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let payload = token_data.claims;
 
     // Extract user_id from JWT payload
     // The parent app's JWT may have user_id as "sub", "user_id", or "id"
@@ -51,4 +60,23 @@ pub fn get_user_from_cookie(req: &HttpRequest) -> Option<SaasUserClaims> {
         email,
         membership_status,
     })
+}
+
+/// SaaS cookie authentication middleware
+pub async fn saas_cookie_validator(
+    req: actix_web::dev::ServiceRequest,
+    next: actix_web::middleware::Next<impl actix_web::body::MessageBody>,
+) -> Result<actix_web::dev::ServiceResponse<impl actix_web::body::MessageBody>, actix_web::Error> {
+    let state = req
+        .app_data::<actix_web::web::Data<crate::db::AppState>>()
+        .expect("AppState not found");
+    let secret = &state.config.saas_jwt_secret;
+
+    match get_user_from_cookie(req.request(), secret) {
+        Some(claims) => {
+            req.extensions_mut().insert(claims);
+            next.call(req).await
+        }
+        None => Err(actix_web::error::ErrorUnauthorized("Invalid or missing authentication")),
+    }
 }

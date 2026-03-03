@@ -1,4 +1,5 @@
-use rusqlite::Connection;
+use chrono::{Duration, Utc};
+use rusqlite::{params, Connection};
 use std::sync::Mutex;
 
 use crate::config::Config;
@@ -19,6 +20,9 @@ impl AppState {
         }
 
         let conn = Connection::open(&config.db_path)?;
+
+        // Enable foreign key enforcement (SQLite has this off by default)
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
         // Initialize database schema based on feature
         #[cfg(feature = "standalone")]
@@ -142,4 +146,15 @@ impl AppState {
             start_time: std::time::Instant::now(),
         })
     }
+}
+
+/// Cleanup old click history records
+pub fn cleanup_old_clicks(db: &Connection, retention_days: i64) {
+    let cutoff = Utc::now() - Duration::days(retention_days);
+    let cutoff_str = cutoff.format("%Y-%m-%d %H:%M:%S").to_string();
+
+    let _ = db.execute(
+        "DELETE FROM click_history WHERE clicked_at < ?1",
+        params![cutoff_str],
+    );
 }
