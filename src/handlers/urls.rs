@@ -5,7 +5,9 @@ use rusqlite::params;
 #[cfg(feature = "standalone")]
 use crate::auth::get_claims;
 #[cfg(feature = "saas")]
-use super::saas_auth::{get_user_from_cookie, SaasUserClaims};
+use actix_web::HttpMessage;
+#[cfg(feature = "saas")]
+use super::saas_auth::SaasUserClaims;
 use crate::db::AppState;
 use crate::models::{
     ClickHistoryEntry, ClickStats, ShortenRequest, ShortenResponse, UpdateUrlNameRequest,

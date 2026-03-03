@@ -49,6 +49,7 @@ async fn main() -> std::io::Result<()> {
         let admin_auth = HttpAuthentication::bearer(admin_validator);
 
         // Rate limiter: strict for auth endpoints (5 requests per minute)
+        #[cfg(feature = "standalone")]
         let strict_rate_limit = GovernorConfigBuilder::default()
             .seconds_per_request(12)
             .burst_size(5)

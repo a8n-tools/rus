@@ -1,4 +1,4 @@
-use actix_web::HttpRequest;
+use actix_web::{HttpMessage, HttpRequest};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 
 /// SaaS user claims extracted from access_token cookie
