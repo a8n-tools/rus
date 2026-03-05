@@ -1,5 +1,8 @@
 use actix_web::{web, HttpRequest, HttpResponse, Result};
-use bcrypt::{hash, verify, DEFAULT_COST};
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use chrono::{Duration, Utc};
 use rusqlite::params;
 
@@ -45,7 +48,7 @@ pub async fn register(
     }
 
     // Hash password before acquiring the lock (expensive operation)
-    let hashed_password = match hash(&req.password, DEFAULT_COST) {
+    let hashed_password = match hash_password(&req.password) {
         Ok(h) => h,
         Err(_) => {
             return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
@@ -166,9 +169,18 @@ pub async fn login(
     match user_result {
         Ok((user_id, username, hashed_password, is_admin_int)) => {
             let is_admin = is_admin_int != 0;
-            // Verify password
-            match verify(&req.password, &hashed_password) {
+            // Verify password (supports both Argon2id and legacy bcrypt hashes)
+            match verify_password(&req.password, &hashed_password) {
                 Ok(true) => {
+                    // Opportunistically rehash legacy bcrypt passwords to Argon2id
+                    if is_legacy_bcrypt_hash(&hashed_password) {
+                        if let Ok(new_hash) = hash_password(&req.password) {
+                            let _ = db.execute(
+                                "UPDATE users SET password = ?1 WHERE userID = ?2",
+                                params![&new_hash, user_id],
+                            );
+                        }
+                    }
                     // Record successful login attempt
                     record_login_attempt(&db, &req.username, true);
                     // Create JWT token
@@ -285,6 +297,31 @@ pub async fn refresh_token(
         Err(_) => Ok(HttpResponse::Unauthorized().json(serde_json::json!({
             "error": "Invalid or expired refresh token"
         }))),
+    }
+}
+
+/// Hash a password using Argon2id
+fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
+    let salt = SaltString::generate(&mut OsRng);
+    let argon2 = Argon2::default();
+    Ok(argon2.hash_password(password.as_bytes(), &salt)?.to_string())
+}
+
+/// Check if a stored hash is a legacy bcrypt hash
+fn is_legacy_bcrypt_hash(hash: &str) -> bool {
+    hash.starts_with("$2b$") || hash.starts_with("$2a$") || hash.starts_with("$2y$")
+}
+
+/// Verify a password against a hash, supporting both Argon2id and legacy bcrypt
+fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
+    if is_legacy_bcrypt_hash(hash) {
+        bcrypt::verify(password, hash).map_err(|e| e.to_string())
+    } else {
+        let parsed_hash =
+            PasswordHash::new(hash).map_err(|e| e.to_string())?;
+        Ok(Argon2::default()
+            .verify_password(password.as_bytes(), &parsed_hash)
+            .is_ok())
     }
 }
 

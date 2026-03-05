@@ -15,7 +15,7 @@ required-features = ["saas"]
 
 [features]
 default = ["standalone"]
-standalone = ["dep:bcrypt", "dep:actix-web-httpauth"]
+standalone = ["dep:bcrypt", "dep:argon2", "dep:actix-web-httpauth"]
 saas = []
 
 [dependencies]
@@ -27,6 +27,7 @@ tokio = { version = "1.35", features = ["full", "time"] }
 rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 bcrypt = { version = "0.15", optional = true }
+argon2 = { version = "0.5", optional = true }
 jsonwebtoken = "9.2"
 chrono = { version = "0.4", features = ["serde"] }
 actix-web-httpauth = { version = "0.8", optional = true }
