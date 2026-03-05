@@ -13,7 +13,7 @@ RUS supports two build modes controlled by Cargo feature flags:
 ### Standalone Mode (default)
 Full-featured URL shortener with built-in user management:
 - User registration and login with JWT authentication
-- Password hashing with bcrypt
+- Password hashing with Argon2id (legacy bcrypt hashes migrated on login)
 - Admin user management
 - Account lockout protection
 
@@ -64,7 +64,7 @@ docker compose down                    # Stop containers
 ### Backend (modular structure)
 - **Framework**: Actix-web 4.4 with Tokio async runtime
 - **Database**: SQLite via rusqlite (bundled)
-- **Auth (standalone)**: JWT tokens with bcrypt password hashing
+- **Auth (standalone)**: JWT tokens with Argon2id password hashing
 - **Auth (saas)**: Cookie-based auth from parent application
 - **Storage**: `./data/rus.db` locally (auto-created), `/data/rus.db` in Docker (set via `ENV DB_PATH`)
 
@@ -108,7 +108,7 @@ src/
 - Short codes: 6 chars (A-Za-z0-9), collision-checked
 - JWT claims: `sub` (username), `user_id`, `exp`
 - Database: Single Mutex-wrapped connection (not production-grade)
-- Password cost: bcrypt DEFAULT_COST (12 rounds)
+- Password hashing: Argon2id with default parameters (legacy bcrypt verified and rehashed on login)
 
 ## Environment Variables
 

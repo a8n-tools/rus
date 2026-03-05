@@ -6,7 +6,7 @@
 
 ## Features
 
-- **JWT Authentication** - Secure user registration and login with bcrypt password hashing
+- **JWT Authentication** - Secure user registration and login with Argon2id password hashing
 - **SQLite Persistence** - Reliable data storage with SQLite (bundled, zero setup)
 - **Click Tracking** - Per-click history with configurable retention and analytics
 - **QR Code Generation** - Generate QR codes for shortened URLs (PNG and SVG)
@@ -26,7 +26,7 @@
 
 Full-featured URL shortener with built-in user management:
 - User registration and login with JWT authentication
-- Password hashing with bcrypt
+- Password hashing with Argon2id (with automatic bcrypt migration)
 - Admin user management
 - Account lockout protection
 - Refresh token rotation
@@ -262,7 +262,7 @@ rus/
 ### users (standalone only)
 - `userID` - Primary key
 - `username` - Unique username
-- `password` - bcrypt hashed password
+- `password` - Argon2id hashed password (legacy bcrypt hashes migrated on login)
 - `is_admin` - Admin flag (0/1)
 - `created_at` - Account creation timestamp
 
@@ -306,7 +306,7 @@ rus/
 - **[Actix-web](https://actix.rs/)** - High-performance web framework
 - **[SQLite](https://www.sqlite.org/)** - Embedded database via rusqlite (bundled)
 - **[jsonwebtoken](https://github.com/Keats/jsonwebtoken)** - JWT authentication
-- **[bcrypt](https://en.wikipedia.org/wiki/Bcrypt)** - Password hashing (standalone)
+- **[Argon2id](https://en.wikipedia.org/wiki/Argon2)** - Password hashing (standalone)
 - **[actix-governor](https://github.com/AaronErber/actix-governor)** - Rate limiting
 - **[qrcode](https://github.com/kennytm/qrcode-rust)** - QR code generation
 - **[Serde](https://serde.rs/)** - Serialization/deserialization
@@ -333,7 +333,7 @@ cargo test --no-default-features --features saas
 ## Security
 
 - JWT-based authentication with short-lived tokens
-- bcrypt password hashing (cost factor 12)
+- Argon2id password hashing (with transparent bcrypt migration on login)
 - Refresh token rotation
 - Account lockout after configurable failed attempts
 - Rate limiting on API endpoints
