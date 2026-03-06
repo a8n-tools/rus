@@ -20,9 +20,9 @@ pub use admin::{admin_delete_user, admin_get_stats, admin_list_users, admin_prom
 pub use auth::{get_current_user, login, refresh_token, register};
 #[cfg(feature = "standalone")]
 pub use pages::{
-    admin_page, check_setup_required, login_page, serve_auth_js, setup_page, signup_page,
+    admin_page, check_setup_required, login_page, setup_page, signup_page,
 };
-pub use pages::{dashboard_page, get_config, get_version, health_check, index, report_page, serve_css};
+pub use pages::{dashboard_page, get_config, get_version, health_check, index, report_page, serve_auth_js, serve_css};
 pub use urls::{
     delete_url, get_click_history, get_qr_code, get_stats, get_user_urls, redirect_url,
     shorten_url, update_url_name,

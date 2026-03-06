@@ -98,7 +98,7 @@ src/
 - Vanilla HTML/CSS/JS (no frameworks)
 - JWT stored in localStorage
 - Pages: index.html (landing), login.html, signup.html, dashboard.html
-- auth.js handles token management
+- k9f3x2m7.js (auth.js) handles token management
 
 ### API Structure
 - **Public**: `/api/register`, `/api/login`, `/{short_code}` (redirect)

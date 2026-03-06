@@ -81,7 +81,6 @@ pub async fn serve_css() -> Result<HttpResponse> {
         .body(include_str!("../../static/styles.css")))
 }
 
-#[cfg(feature = "standalone")]
 pub async fn serve_auth_js() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("application/javascript; charset=utf-8")
