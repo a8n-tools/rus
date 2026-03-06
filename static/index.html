@@ -419,8 +419,9 @@
         }
 
         if (config.auth_mode === 'saas') {
-          // SaaS mode - redirect to parent app for auth
-          const loginUrl = config.login_url || '/';
+          // SaaS mode - redirect to parent app for auth, with redirect back to dashboard
+          const dashboardUrl = encodeURIComponent(`${window.location.origin}/dashboard.html`);
+          const loginUrl = `${config.login_url || '/'}?redirect=${dashboardUrl}`;
           navLinks.innerHTML = `
             <a href="#features">Features</a>
             <a href="#about">About</a>

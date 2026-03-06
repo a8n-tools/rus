@@ -43,8 +43,14 @@ pub async fn dashboard_page() -> Result<HttpResponse> {
 pub async fn dashboard_page(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
     // Verify JWT signature and check claims
     if get_user_from_cookie(&req, &data.config.saas_jwt_secret).is_none() {
+        let return_to = format!("{}/dashboard.html", data.config.host_url);
+        let redirect = url::Url::parse_with_params(
+            &data.config.saas_login_url,
+            &[("redirect", return_to.as_str())],
+        )
+        .unwrap_or_else(|_| url::Url::parse(&data.config.saas_login_url).unwrap());
         return Ok(HttpResponse::Found()
-            .append_header(("Location", data.config.saas_login_url.as_str()))
+            .append_header(("Location", redirect.to_string()))
             .finish());
     }
 

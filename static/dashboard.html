@@ -91,7 +91,8 @@
           const config = await configResp.json();
           authMode = config.auth_mode || 'standalone';
           if (authMode === 'saas' && config.login_url) {
-            loginRedirect = config.login_url;
+            const returnUrl = encodeURIComponent(window.location.href);
+            loginRedirect = `${config.login_url}?redirect=${returnUrl}`;
           }
         } catch (e) {
           console.error('Failed to load config:', e);
