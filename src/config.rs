@@ -25,6 +25,8 @@ pub struct Config {
     pub saas_jwt_secret: String,
     #[cfg(feature = "saas")]
     pub saas_login_url: String,
+    #[cfg(feature = "saas")]
+    pub saas_logout_url: String,
 }
 
 impl Config {
@@ -98,6 +100,10 @@ impl Config {
         let saas_login_url = env::var("SAAS_LOGIN_URL")
             .unwrap_or_else(|_| "https://app.a8n.run".to_string());
 
+        #[cfg(feature = "saas")]
+        let saas_logout_url = env::var("SAAS_LOGOUT_URL")
+            .unwrap_or_else(|_| "https://api.a8n.run/v1/auth/logout".to_string());
+
         Config {
             #[cfg(feature = "standalone")]
             jwt_secret,
@@ -121,6 +127,8 @@ impl Config {
             saas_jwt_secret,
             #[cfg(feature = "saas")]
             saas_login_url,
+            #[cfg(feature = "saas")]
+            saas_logout_url,
         }
     }
 

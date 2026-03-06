@@ -84,6 +84,7 @@
       // Determine auth mode and login redirect URL
       let authMode = 'standalone';
       let loginRedirect = 'login.html';
+      let logoutRedirect = 'login.html';
 
       async function initDashboard() {
         try {
@@ -93,6 +94,9 @@
           if (authMode === 'saas' && config.login_url) {
             const returnUrl = encodeURIComponent(window.location.href);
             loginRedirect = `${config.login_url}?redirect=${returnUrl}`;
+            if (config.logout_url) {
+              logoutRedirect = `${config.logout_url}?url=${returnUrl}`;
+            }
           }
         } catch (e) {
           console.error('Failed to load config:', e);
@@ -110,8 +114,6 @@
         } else {
           // SaaS mode: auth is cookie-based, server already validated on page load
           document.getElementById("username").textContent = "User";
-          // Hide logout button in SaaS mode (session managed by parent app)
-          if (logoutBtn) logoutBtn.style.display = "none";
         }
 
         loadUrls();
@@ -171,8 +173,8 @@
 
       // Logout handler
       logoutBtn.addEventListener("click", () => {
-        logout();
-        window.location.href = loginRedirect;
+        if (authMode === 'standalone') logout();
+        window.location.href = (authMode === 'saas') ? logoutRedirect : loginRedirect;
       });
 
       // Create URL handler

@@ -116,6 +116,8 @@ pub struct ConfigResponse {
     pub allow_registration: bool,
     #[cfg(feature = "saas")]
     pub login_url: String,
+    #[cfg(feature = "saas")]
+    pub logout_url: String,
 }
 
 /// Setup check response - standalone only

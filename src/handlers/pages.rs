@@ -115,6 +115,8 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
         allow_registration: data.config.allow_registration,
         #[cfg(feature = "saas")]
         login_url: data.config.saas_login_url.clone(),
+        #[cfg(feature = "saas")]
+        logout_url: data.config.saas_logout_url.clone(),
     }))
 }
 
