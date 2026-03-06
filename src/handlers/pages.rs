@@ -41,12 +41,10 @@ pub async fn dashboard_page() -> Result<HttpResponse> {
 /// Dashboard page for SaaS mode - verifies access_token cookie signature
 #[cfg(feature = "saas")]
 pub async fn dashboard_page(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
-    let redirect_url = "https://app.a8n.run";
-
     // Verify JWT signature and check claims
     if get_user_from_cookie(&req, &data.config.saas_jwt_secret).is_none() {
         return Ok(HttpResponse::Found()
-            .append_header(("Location", redirect_url))
+            .append_header(("Location", data.config.saas_login_url.as_str()))
             .finish());
     }
 
@@ -104,7 +102,13 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
         host_url: data.config.host_url.clone(),
         max_url_length: data.config.max_url_length,
         #[cfg(feature = "standalone")]
+        auth_mode: "standalone".to_string(),
+        #[cfg(feature = "saas")]
+        auth_mode: "saas".to_string(),
+        #[cfg(feature = "standalone")]
         allow_registration: data.config.allow_registration,
+        #[cfg(feature = "saas")]
+        login_url: data.config.saas_login_url.clone(),
     }))
 }
 

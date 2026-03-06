@@ -409,8 +409,34 @@
         const navLinks = document.getElementById('navLinks');
         const heroCta = document.getElementById('heroCta');
 
-        if (isAuthenticated()) {
-          // User is logged in - show dashboard link
+        // Fetch config to determine auth mode
+        let config = {};
+        try {
+          const response = await fetch('/api/config');
+          config = await response.json();
+        } catch (error) {
+          console.error('Failed to check config:', error);
+        }
+
+        if (config.auth_mode === 'saas') {
+          // SaaS mode - redirect to parent app for auth
+          const loginUrl = config.login_url || '/';
+          navLinks.innerHTML = `
+            <a href="#features">Features</a>
+            <a href="#about">About</a>
+            <a href="dashboard.html">Dashboard</a>
+            <a href="${loginUrl}">Log In</a>
+          `;
+          heroCta.innerHTML = `
+            <a href="dashboard.html" class="cta-btn cta-primary">
+              Go to Dashboard
+            </a>
+            <a href="${loginUrl}" class="cta-btn cta-secondary">
+              Log In
+            </a>
+          `;
+        } else if (isAuthenticated()) {
+          // Standalone mode - user is logged in
           navLinks.innerHTML = `
             <a href="#features">Features</a>
             <a href="#about">About</a>
@@ -423,20 +449,12 @@
             </a>
           `;
         } else {
-          // Check if registration is enabled
-          try {
-            const response = await fetch('/api/config');
-            const data = await response.json();
-
-            if (!data.allow_registration) {
-              // Hide signup options
-              const signupLink = document.getElementById('signupLink');
-              const getStartedBtn = document.getElementById('getStartedBtn');
-              if (signupLink) signupLink.style.display = 'none';
-              if (getStartedBtn) getStartedBtn.style.display = 'none';
-            }
-          } catch (error) {
-            console.error('Failed to check config:', error);
+          // Standalone mode - not logged in
+          if (config.allow_registration === false) {
+            const signupLink = document.getElementById('signupLink');
+            const getStartedBtn = document.getElementById('getStartedBtn');
+            if (signupLink) signupLink.style.display = 'none';
+            if (getStartedBtn) getStartedBtn.style.display = 'none';
           }
         }
       }

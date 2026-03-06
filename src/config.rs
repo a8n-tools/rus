@@ -23,6 +23,8 @@ pub struct Config {
     pub allow_registration: bool,
     #[cfg(feature = "saas")]
     pub saas_jwt_secret: String,
+    #[cfg(feature = "saas")]
+    pub saas_login_url: String,
 }
 
 impl Config {
@@ -92,6 +94,10 @@ impl Config {
         let saas_jwt_secret = env::var("SAAS_JWT_SECRET")
             .expect("SAAS_JWT_SECRET must be set in SaaS mode");
 
+        #[cfg(feature = "saas")]
+        let saas_login_url = env::var("SAAS_LOGIN_URL")
+            .unwrap_or_else(|_| "https://app.a8n.run".to_string());
+
         Config {
             #[cfg(feature = "standalone")]
             jwt_secret,
@@ -113,6 +119,8 @@ impl Config {
             allow_registration,
             #[cfg(feature = "saas")]
             saas_jwt_secret,
+            #[cfg(feature = "saas")]
+            saas_login_url,
         }
     }
 

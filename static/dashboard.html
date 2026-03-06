@@ -81,23 +81,47 @@
 
     <script src="k9f3x2m7.js"></script>
     <script>
-      // Check authentication
-      const token = getToken();
-      const username = getUsername();
+      // Determine auth mode and login redirect URL
+      let authMode = 'standalone';
+      let loginRedirect = 'login.html';
 
-      if (!token) {
-        window.location.href = "login.html";
+      async function initDashboard() {
+        try {
+          const configResp = await fetch('/api/config');
+          const config = await configResp.json();
+          authMode = config.auth_mode || 'standalone';
+          if (authMode === 'saas' && config.login_url) {
+            loginRedirect = config.login_url;
+          }
+        } catch (e) {
+          console.error('Failed to load config:', e);
+        }
+
+        // Check authentication
+        if (authMode === 'standalone') {
+          const token = getToken();
+          if (!token) {
+            window.location.href = loginRedirect;
+            return;
+          }
+          document.getElementById("username").textContent = getUsername();
+          checkAdminStatus();
+        } else {
+          // SaaS mode: auth is cookie-based, server already validated on page load
+          document.getElementById("username").textContent = "User";
+          // Hide logout button in SaaS mode (session managed by parent app)
+          if (logoutBtn) logoutBtn.style.display = "none";
+        }
+
+        loadUrls();
       }
-
-      // Display username
-      document.getElementById("username").textContent = username;
 
       // Check if user is admin and show admin link
       async function checkAdminStatus() {
         try {
           const response = await fetch("/api/me", {
             headers: {
-              Authorization: `Bearer ${token}`,
+              Authorization: `Bearer ${getToken()}`,
             },
           });
 
@@ -112,7 +136,25 @@
         }
       }
 
-      checkAdminStatus();
+      // Helper: returns auth headers for standalone mode, empty for SaaS (cookie-based)
+      function authHeaders(extra = {}) {
+        if (authMode === 'saas') return extra;
+        const token = getToken();
+        return token ? { ...extra, Authorization: `Bearer ${token}` } : extra;
+      }
+
+      // Helper: fetch with credentials (cookies for SaaS, Bearer token for standalone)
+      async function apiFetch(url, options = {}) {
+        options.headers = authHeaders(options.headers || {});
+        if (authMode === 'saas') options.credentials = 'include';
+        const response = await fetch(url, options);
+        if (response.status === 401) {
+          if (authMode === 'standalone') logout();
+          window.location.href = loginRedirect;
+          return null;
+        }
+        return response;
+      }
 
       // Elements
       const createForm = document.getElementById("createForm");
@@ -129,7 +171,7 @@
       // Logout handler
       logoutBtn.addEventListener("click", () => {
         logout();
-        window.location.href = "login.html";
+        window.location.href = loginRedirect;
       });
 
       // Create URL handler
@@ -145,23 +187,16 @@
         createBtn.textContent = "Shortening...";
 
         try {
-          const response = await fetch("/api/shorten", {
+          const response = await apiFetch("/api/shorten", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url }),
           });
+          if (!response) return;
 
           const data = await response.json();
 
           if (!response.ok) {
-            if (response.status === 401) {
-              logout();
-              window.location.href = "login.html";
-              return;
-            }
             throw new Error(data.error || "Failed to shorten URL");
           }
 
@@ -194,20 +229,10 @@
         errorDiv.classList.remove("show");
 
         try {
-          const response = await authenticatedFetch("/api/urls");
-
-          if (!response) {
-            logout();
-            window.location.href = "login.html";
-            return;
-          }
+          const response = await apiFetch("/api/urls");
+          if (!response) return;
 
           if (!response.ok) {
-            if (response.status === 401) {
-              logout();
-              window.location.href = "login.html";
-              return;
-            }
             throw new Error("Failed to load URLs");
           }
 
@@ -420,19 +445,12 @@
         button.textContent = "Deleting...";
 
         try {
-          const response = await fetch(`/api/urls/${shortCode}`, {
+          const response = await apiFetch(`/api/urls/${shortCode}`, {
             method: "DELETE",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
           });
+          if (!response) return;
 
           if (!response.ok) {
-            if (response.status === 401) {
-              logout();
-              window.location.href = "login.html";
-              return;
-            }
             const data = await response.json();
             throw new Error(data.error || "Failed to delete URL");
           }
@@ -492,21 +510,14 @@
         const newName = input.value.trim();
 
         try {
-          const response = await fetch(`/api/urls/${shortCode}/name`, {
+          const response = await apiFetch(`/api/urls/${shortCode}/name`, {
             method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: newName || null }),
           });
+          if (!response) return;
 
           if (!response.ok) {
-            if (response.status === 401) {
-              logout();
-              window.location.href = "login.html";
-              return;
-            }
             const data = await response.json();
             throw new Error(data.error || "Failed to update URL name");
           }
@@ -558,18 +569,10 @@
 
         try {
           // Fetch QR code PNG
-          const response = await fetch(`/api/urls/${shortCode}/qr/png`, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
+          const response = await apiFetch(`/api/urls/${shortCode}/qr/png`);
+          if (!response) return;
 
           if (!response.ok) {
-            if (response.status === 401) {
-              logout();
-              window.location.href = "login.html";
-              return;
-            }
             throw new Error("Failed to generate QR code");
           }
 
@@ -596,11 +599,7 @@
         if (!currentQRShortCode) return;
 
         try {
-          const response = await fetch(`/api/urls/${currentQRShortCode}/qr/${format}`, {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          });
+          const response = await apiFetch(`/api/urls/${currentQRShortCode}/qr/${format}`);
 
           if (!response.ok) {
             throw new Error("Failed to download QR code");
@@ -641,7 +640,7 @@
       });
 
       // Initial load
-      loadUrls();
+      initDashboard();
     </script>
   </body>
 </html>

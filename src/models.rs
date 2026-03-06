@@ -111,8 +111,11 @@ pub struct VersionResponse {
 pub struct ConfigResponse {
     pub host_url: String,
     pub max_url_length: usize,
+    pub auth_mode: String,
     #[cfg(feature = "standalone")]
     pub allow_registration: bool,
+    #[cfg(feature = "saas")]
+    pub login_url: String,
 }
 
 /// Setup check response - standalone only
