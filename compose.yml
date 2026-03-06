@@ -3,7 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    # No need for ports since Traefik will handle the routing
     # ports:
       # - "8080:8080"
     volumes:
