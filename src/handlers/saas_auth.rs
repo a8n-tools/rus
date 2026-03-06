@@ -37,11 +37,27 @@ pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserC
     let payload = token_data.claims;
 
     // Extract user_id from JWT payload
-    // The parent app's JWT may have user_id as "sub", "user_id", or "id"
+    // The parent app's JWT may have user_id as "sub" (UUID or integer), "user_id", or "id"
     let user_id = payload
         .get("user_id")
         .and_then(|v| v.as_i64())
-        .or_else(|| payload.get("sub").and_then(|v| v.as_str()?.parse().ok()))
+        .or_else(|| {
+            payload.get("sub").and_then(|v| {
+                let s = v.as_str()?;
+                // Try parsing as integer first
+                s.parse::<i64>().ok().or_else(|| {
+                    // If it's a UUID, derive a stable i64 from its hex bytes
+                    let hex: String = s.chars().filter(|c| *c != '-').collect();
+                    if hex.len() == 32 {
+                        u64::from_str_radix(&hex[..16], 16)
+                            .ok()
+                            .map(|v| (v & 0x7FFFFFFFFFFFFFFF) as i64)
+                    } else {
+                        None
+                    }
+                })
+            })
+        })
         .or_else(|| payload.get("id").and_then(|v| v.as_i64()))?;
 
     let email = payload.get("email").and_then(|v| v.as_str()).map(String::from);
