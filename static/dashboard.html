@@ -95,7 +95,7 @@
             const returnUrl = encodeURIComponent(window.location.href);
             loginRedirect = `${config.login_url}?redirect=${returnUrl}`;
             if (config.logout_url) {
-              logoutRedirect = `${config.logout_url}?redirect=${returnUrl}`;
+              logoutRedirect = `${config.logout_url}?url=${returnUrl}`;
             }
           }
         } catch (e) {
