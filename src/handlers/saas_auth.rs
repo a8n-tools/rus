@@ -122,7 +122,7 @@ pub async fn saas_cookie_validator(
             {
                 let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
                 db.execute(
-                    "INSERT OR IGNORE INTO users (userID, username) VALUES (?1, ?2)",
+                    "INSERT OR IGNORE INTO users (userID, username, password) VALUES (?1, ?2, '')",
                     rusqlite::params![claims.user_id, username],
                 )
                 .map_err(|e| {
