@@ -65,7 +65,10 @@ pub async fn shorten_url(
     // Check if URL is already shortened by this user
     let mut stmt = db
         .prepare("SELECT short_code FROM urls WHERE user_id = ?1 AND original_url = ?2")
-        .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?;
+        .map_err(|e| {
+            eprintln!("shorten_url: prepare failed: {e}");
+            actix_web::error::ErrorInternalServerError("Database error")
+        })?;
 
     if let Ok(short_code) = stmt.query_row(
         params![user_id, &req_payload.url],
@@ -106,9 +109,12 @@ pub async fn shorten_url(
             short_url: format!("{}/{}", data.config.host_url, short_code),
             original_url: req_payload.url.clone(),
         })),
-        Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": "Failed to create short URL"
-        }))),
+        Err(e) => {
+            eprintln!("shorten_url: INSERT failed for user_id={user_id}: {e}");
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to create short URL"
+            })))
+        }
     }
 }
 
