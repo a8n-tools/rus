@@ -113,6 +113,24 @@ pub async fn saas_cookie_validator(
 
     match get_user_from_cookie(req.request(), secret) {
         Some(claims) => {
+            // Auto-provision SaaS user in local DB so FK constraints are satisfied
+            let username = claims
+                .email
+                .clone()
+                .filter(|e| !e.is_empty())
+                .unwrap_or_else(|| format!("saas_{}", claims.user_id));
+            {
+                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+                db.execute(
+                    "INSERT OR IGNORE INTO users (userID, username) VALUES (?1, ?2)",
+                    rusqlite::params![claims.user_id, username],
+                )
+                .map_err(|e| {
+                    eprintln!("saas_auth: failed to provision user: {e}");
+                    actix_web::error::ErrorInternalServerError("Failed to provision user")
+                })?;
+            }
+
             req.extensions_mut().insert(claims);
             next.call(req).await
         }
