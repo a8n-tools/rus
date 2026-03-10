@@ -4,13 +4,20 @@
 default:
     @just --list
 
-# Compile-check standalone mode via Docker
-check-standalone:
-    docker buildx build --build-arg BUILD_MODE=standalone --target builder -t rus:standalone-check .
+# Run all checks
+check: check-docker
 
-# Compile-check saas mode via Docker
-check-saas:
-    docker buildx build --build-arg BUILD_MODE=saas --target builder -t rus:saas-check .
+# Build Docker image for validation (both modes)
+check-docker: check-docker-standalone check-docker-saas
 
-# Compile-check both modes
-check-all: check-standalone check-saas
+# Build Docker image for validation (standalone)
+check-docker-standalone:
+    docker buildx build --build-arg BUILD_MODE=standalone --target builder -t rus:standalone-check -f oci-build/Dockerfile .
+
+# Build Docker image for validation (saas)
+check-docker-saas:
+    docker buildx build --build-arg BUILD_MODE=saas --target builder -t rus:saas-check -f oci-build/Dockerfile .
+
+# Build Docker image (mode: standalone or saas)
+build-docker mode="standalone":
+    docker buildx build --build-arg BUILD_MODE={{ mode }} -t rus:local -f oci-build/Dockerfile .
