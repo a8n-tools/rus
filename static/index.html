@@ -467,11 +467,11 @@
         window.location.reload();
       }
 
-      // Smooth scroll for anchor links
+      // Smooth scroll for section anchor links (e.g. #features, #about)
       document.querySelectorAll('a[href^="#"]').forEach(anchor => {
         anchor.addEventListener('click', function(e) {
           const href = this.getAttribute('href');
-          if (href === '#') return; // Skip placeholder links
+          if (!href.startsWith('#') || href === '#') return;
 
           e.preventDefault();
           const target = document.querySelector(href);
