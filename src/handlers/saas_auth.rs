@@ -132,9 +132,11 @@ pub async fn saas_cookie_validator(
                     );
                     return Err(actix_web::error::InternalError::from_response(
                         "Membership required",
-                        actix_web::HttpResponse::Found()
-                            .insert_header(("Location", membership_url.as_str()))
-                            .finish(),
+                        actix_web::HttpResponse::Forbidden()
+                            .json(serde_json::json!({
+                                "error": "Membership required",
+                                "redirect": membership_url,
+                            })),
                     ).into());
                 }
             }
