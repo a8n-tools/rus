@@ -112,8 +112,19 @@
           document.getElementById("username").textContent = getUsername();
           checkAdminStatus();
         } else {
-          // SaaS mode: auth is cookie-based, server already validated on page load
-          document.getElementById("username").textContent = "User";
+          // SaaS mode: fetch username from server
+          try {
+            const meResp = await apiFetch('/api/me');
+            if (meResp) {
+              const me = await meResp.json();
+              document.getElementById("username").textContent = me.username || "User";
+              if (me.is_admin) {
+                document.getElementById("adminLink").style.display = "inline";
+              }
+            }
+          } catch (e) {
+            document.getElementById("username").textContent = "User";
+          }
         }
 
         loadUrls();

@@ -150,6 +150,7 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/api")
                     .wrap(actix_web::middleware::from_fn(saas_cookie_validator))
+                    .route("/me", web::get().to(saas_me))
                     .route("/shorten", web::post().to(shorten_url))
                     .route("/stats/{code}", web::get().to(get_stats))
                     .route("/urls", web::get().to(get_user_urls))

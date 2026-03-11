@@ -7,7 +7,7 @@ pub mod pages;
 #[cfg(feature = "saas")]
 pub mod saas_auth;
 #[cfg(feature = "saas")]
-pub use saas_auth::saas_cookie_validator;
+pub use saas_auth::{saas_cookie_validator, saas_me};
 pub mod urls;
 
 // Re-export handlers for easier importing
