@@ -12,4 +12,4 @@ COPY static ./static
 
 EXPOSE 8080
 
-CMD ["cargo", "watch", "-x", "run"]
+CMD ["sh", "-c", "find src -name '*.rs' -exec touch {} + && cargo watch -x run"]
