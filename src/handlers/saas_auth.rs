@@ -1,4 +1,4 @@
-use actix_web::{HttpMessage, HttpRequest};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, Result};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 
 /// SaaS user claims extracted from access_token cookie
@@ -104,6 +104,26 @@ pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserC
         membership_status,
         is_admin,
     })
+}
+
+/// Returns the current SaaS user's info (username derived from email)
+pub async fn saas_me(http_req: HttpRequest) -> Result<HttpResponse> {
+    let ext = http_req.extensions();
+    let claims = ext
+        .get::<SaasUserClaims>()
+        .ok_or_else(|| actix_web::error::ErrorInternalServerError("Missing claims"))?;
+
+    let username = claims
+        .email
+        .as_deref()
+        .and_then(|e| e.split('@').next())
+        .map(String::from)
+        .unwrap_or_else(|| format!("saas_{}", claims.user_id));
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "username": username,
+        "is_admin": claims.is_admin,
+    })))
 }
 
 /// SaaS cookie authentication middleware
