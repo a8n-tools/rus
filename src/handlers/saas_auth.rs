@@ -8,6 +8,7 @@ pub struct SaasUserClaims {
     pub user_id: i64,
     pub email: Option<String>,
     pub membership_status: Option<String>,
+    pub is_admin: bool,
 }
 
 /// Extract and verify user claims from access_token cookie (SaaS mode)
@@ -87,17 +88,23 @@ pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserC
         .and_then(|v| v.as_str())
         .map(String::from);
 
+    let is_admin = payload
+        .get("role")
+        .and_then(|v| v.as_str())
+        .is_some_and(|r| r.eq_ignore_ascii_case("admin"));
+
     // Reject if membership is canceled
     if membership_status.as_deref() == Some("canceled") {
         eprintln!("saas_auth: membership canceled, rejecting");
         return None;
     }
 
-    eprintln!("saas_auth: authentication successful, user_id={user_id}, email={email:?}, membership={membership_status:?}");
+    eprintln!("saas_auth: authentication successful, user_id={user_id}, email={email:?}, membership={membership_status:?}, is_admin={is_admin}");
     Some(SaasUserClaims {
         user_id,
         email,
         membership_status,
+        is_admin,
     })
 }
 
@@ -122,8 +129,9 @@ pub async fn saas_cookie_validator(
             {
                 let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
                 db.execute(
-                    "INSERT OR IGNORE INTO users (userID, username, password) VALUES (?1, ?2, '')",
-                    rusqlite::params![claims.user_id, username],
+                    "INSERT INTO users (userID, username, password, is_admin) VALUES (?1, ?2, '', ?3) \
+                     ON CONFLICT(userID) DO UPDATE SET is_admin = ?3",
+                    rusqlite::params![claims.user_id, username, claims.is_admin as i32],
                 )
                 .map_err(|e| {
                     eprintln!("saas_auth: failed to provision user: {e}");
