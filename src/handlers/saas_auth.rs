@@ -93,11 +93,9 @@ pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserC
         .and_then(|v| v.as_str())
         .is_some_and(|r| r.eq_ignore_ascii_case("admin"));
 
-    // Reject if membership is canceled
-    if membership_status.as_deref() == Some("canceled") {
-        eprintln!("saas_auth: membership canceled, rejecting");
-        return None;
-    }
+    // Note: membership access is enforced in the middleware, not here.
+    // All valid JWT holders are returned so the middleware can decide
+    // whether to redirect non-members to the membership page.
 
     eprintln!("saas_auth: authentication successful, user_id={user_id}, email={email:?}, membership={membership_status:?}, is_admin={is_admin}");
     Some(SaasUserClaims {
@@ -120,6 +118,27 @@ pub async fn saas_cookie_validator(
 
     match get_user_from_cookie(req.request(), secret) {
         Some(claims) => {
+            // Non-member, non-admin users get redirected to the membership page
+            if !claims.is_admin {
+                let has_access = matches!(
+                    claims.membership_status.as_deref(),
+                    Some("active") | Some("grace_period")
+                );
+                if !has_access {
+                    let membership_url = &state.config.saas_membership_url;
+                    eprintln!(
+                        "saas_auth: user_id={} membership_status={:?}, redirecting to membership page",
+                        claims.user_id, claims.membership_status
+                    );
+                    return Err(actix_web::error::InternalError::from_response(
+                        "Membership required",
+                        actix_web::HttpResponse::Found()
+                            .insert_header(("Location", membership_url.as_str()))
+                            .finish(),
+                    ).into());
+                }
+            }
+
             // Auto-provision SaaS user in local DB so FK constraints are satisfied
             let username = claims
                 .email
