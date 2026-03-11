@@ -98,9 +98,19 @@ impl AppState {
         )?;
 
         // SaaS mode: simplified schema without user management tables
+        // A minimal users table is required so that urls.user_id FK is satisfied
+        // when SaaS-authenticated users are auto-provisioned.
         #[cfg(feature = "saas")]
         conn.execute_batch(
             "
+            CREATE TABLE IF NOT EXISTS users (
+                userID INTEGER PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                password TEXT NOT NULL DEFAULT '',
+                is_admin INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS urls (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -108,7 +118,8 @@ impl AppState {
                 short_code TEXT NOT NULL UNIQUE,
                 name TEXT,
                 clicks INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(userID) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS click_history (

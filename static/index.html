@@ -367,13 +367,7 @@
 
     <script src="k9f3x2m7.js"></script>
     <script>
-      // Configuration - Update this when you have the a8n-tools domain
-      const A8N_TOOLS_URL = '#'; // TODO: Replace with actual a8n-tools URL
-
-      // Update all a8n-tools links
-      document.querySelectorAll('#a8nLink, #a8nLinkFooter, #a8nLinkNav').forEach(link => {
-        link.href = A8N_TOOLS_URL;
-      });
+      // a8n-tools links are updated after config is fetched in updateUI()
 
       // Check if setup is required
       async function checkSetup() {
@@ -417,6 +411,12 @@
         } catch (error) {
           console.error('Failed to check config:', error);
         }
+
+        // Update a8n-tools links to point to SaaS login (or '#' for standalone)
+        const a8nUrl = config.login_url || '#';
+        document.querySelectorAll('#a8nLink, #a8nLinkFooter, #a8nLinkNav').forEach(link => {
+          link.href = a8nUrl;
+        });
 
         if (config.auth_mode === 'saas') {
           // SaaS mode - redirect to parent app for auth, with redirect back to dashboard
@@ -467,11 +467,11 @@
         window.location.reload();
       }
 
-      // Smooth scroll for anchor links
+      // Smooth scroll for section anchor links (e.g. #features, #about)
       document.querySelectorAll('a[href^="#"]').forEach(anchor => {
         anchor.addEventListener('click', function(e) {
           const href = this.getAttribute('href');
-          if (href === '#') return; // Skip placeholder links
+          if (!href.startsWith('#') || href === '#') return;
 
           e.preventDefault();
           const target = document.querySelector(href);

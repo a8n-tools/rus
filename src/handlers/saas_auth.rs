@@ -8,6 +8,7 @@ pub struct SaasUserClaims {
     pub user_id: i64,
     pub email: Option<String>,
     pub membership_status: Option<String>,
+    pub is_admin: bool,
 }
 
 /// Extract and verify user claims from access_token cookie (SaaS mode)
@@ -87,17 +88,21 @@ pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserC
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    // Reject if membership is canceled
-    if membership_status.as_deref() == Some("canceled") {
-        eprintln!("saas_auth: membership canceled, rejecting");
-        return None;
-    }
+    let is_admin = payload
+        .get("role")
+        .and_then(|v| v.as_str())
+        .is_some_and(|r| r.eq_ignore_ascii_case("admin"));
 
-    eprintln!("saas_auth: authentication successful, user_id={user_id}, email={email:?}, membership={membership_status:?}");
+    // Note: membership access is enforced in the middleware, not here.
+    // All valid JWT holders are returned so the middleware can decide
+    // whether to redirect non-members to the membership page.
+
+    eprintln!("saas_auth: authentication successful, user_id={user_id}, email={email:?}, membership={membership_status:?}, is_admin={is_admin}");
     Some(SaasUserClaims {
         user_id,
         email,
         membership_status,
+        is_admin,
     })
 }
 
@@ -113,6 +118,48 @@ pub async fn saas_cookie_validator(
 
     match get_user_from_cookie(req.request(), secret) {
         Some(claims) => {
+            // Non-member, non-admin users get redirected to the membership page
+            if !claims.is_admin {
+                let has_access = matches!(
+                    claims.membership_status.as_deref(),
+                    Some("active") | Some("grace_period")
+                );
+                if !has_access {
+                    let membership_url = &state.config.saas_membership_url;
+                    eprintln!(
+                        "saas_auth: user_id={} membership_status={:?}, redirecting to membership page",
+                        claims.user_id, claims.membership_status
+                    );
+                    return Err(actix_web::error::InternalError::from_response(
+                        "Membership required",
+                        actix_web::HttpResponse::Forbidden()
+                            .json(serde_json::json!({
+                                "error": "Membership required",
+                                "redirect": membership_url,
+                            })),
+                    ).into());
+                }
+            }
+
+            // Auto-provision SaaS user in local DB so FK constraints are satisfied
+            let username = claims
+                .email
+                .clone()
+                .filter(|e| !e.is_empty())
+                .unwrap_or_else(|| format!("saas_{}", claims.user_id));
+            {
+                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+                db.execute(
+                    "INSERT INTO users (userID, username, password, is_admin) VALUES (?1, ?2, '', ?3) \
+                     ON CONFLICT(userID) DO UPDATE SET is_admin = ?3",
+                    rusqlite::params![claims.user_id, username, claims.is_admin as i32],
+                )
+                .map_err(|e| {
+                    eprintln!("saas_auth: failed to provision user: {e}");
+                    actix_web::error::ErrorInternalServerError("Failed to provision user")
+                })?;
+            }
+
             req.extensions_mut().insert(claims);
             next.call(req).await
         }
