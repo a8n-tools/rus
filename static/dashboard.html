@@ -118,9 +118,6 @@
             if (meResp) {
               const me = await meResp.json();
               document.getElementById("username").textContent = me.username || "User";
-              if (me.is_admin) {
-                document.getElementById("adminLink").style.display = "inline";
-              }
             }
           } catch (e) {
             document.getElementById("username").textContent = "User";
