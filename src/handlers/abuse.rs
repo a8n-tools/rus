@@ -244,3 +244,351 @@ pub async fn admin_resolve_report(
         }))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+    use serde_json::Value;
+
+    #[cfg(feature = "standalone")]
+    use {
+        actix_web_httpauth::middleware::HttpAuthentication,
+        crate::auth::middleware::admin_validator,
+        crate::testing::{insert_test_url, insert_test_user, make_test_state, make_test_token},
+    };
+
+    #[cfg(feature = "saas")]
+    use crate::testing::make_test_state;
+
+    macro_rules! setup_abuse_app {
+        ($state:expr) => {{
+            #[cfg(feature = "standalone")]
+            {
+                let admin_auth = HttpAuthentication::bearer(admin_validator);
+                test::init_service(
+                    App::new()
+                        .app_data($state.clone())
+                        .route("/api/report-abuse", web::post().to(submit_abuse_report))
+                        .service(
+                            web::scope("/api/admin")
+                                .wrap(admin_auth)
+                                .route("/reports", web::get().to(admin_list_reports))
+                                .route("/reports/{id}", web::post().to(admin_resolve_report)),
+                        ),
+                )
+                .await
+            }
+            #[cfg(feature = "saas")]
+            {
+                test::init_service(
+                    App::new()
+                        .app_data($state.clone())
+                        .route("/api/report-abuse", web::post().to(submit_abuse_report)),
+                )
+                .await
+            }
+        }};
+    }
+
+    // --- submit_abuse_report ---
+
+    #[actix_web::test]
+    async fn submit_report_for_existing_url_returns_201() {
+        let state = make_test_state();
+        #[cfg(feature = "standalone")]
+        {
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://bad.com", "bad123");
+        }
+        #[cfg(feature = "saas")]
+        {
+            let db = state.db.lock().unwrap();
+            db.execute(
+                "INSERT INTO users (userID, username, password) VALUES (1, 'u', '')",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO urls (user_id, original_url, short_code) VALUES (1, 'https://bad.com', 'bad123')",
+                [],
+            )
+            .unwrap();
+        }
+        let app = setup_abuse_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/api/report-abuse")
+            .set_json(serde_json::json!({
+                "short_code": "bad123",
+                "reason": "spam",
+                "reporter_email": "reporter@example.com"
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 201);
+    }
+
+    #[actix_web::test]
+    async fn submit_report_for_missing_url_returns_404() {
+        let state = make_test_state();
+        let app = setup_abuse_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/api/report-abuse")
+            .set_json(serde_json::json!({
+                "short_code": "noexist",
+                "reason": "spam"
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[actix_web::test]
+    async fn submit_report_empty_short_code_returns_400() {
+        let state = make_test_state();
+        let app = setup_abuse_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/api/report-abuse")
+            .set_json(serde_json::json!({"short_code": "", "reason": "spam"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn submit_report_empty_reason_returns_400() {
+        let state = make_test_state();
+        let app = setup_abuse_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/api/report-abuse")
+            .set_json(serde_json::json!({"short_code": "abc123", "reason": ""}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn submit_report_invalid_email_returns_400() {
+        let state = make_test_state();
+        let app = setup_abuse_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/api/report-abuse")
+            .set_json(serde_json::json!({
+                "short_code": "abc123",
+                "reason": "spam",
+                "reporter_email": "not-an-email"
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    // --- admin_list_reports / admin_resolve_report (standalone only) ---
+
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn admin_can_list_reports() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        insert_test_url(&state, uid, "https://bad.com", "bad123");
+        let token = make_test_token("admin", uid, true);
+        let app = setup_abuse_app!(state);
+
+        // Submit a report first
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/report-abuse")
+                .set_json(serde_json::json!({"short_code": "bad123", "reason": "spam"}))
+                .to_request(),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/admin/reports")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(body.as_array().unwrap().len(), 1);
+        assert_eq!(body[0]["short_code"], "bad123");
+    }
+
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn admin_can_dismiss_report() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        insert_test_url(&state, uid, "https://bad.com", "bad123");
+        let token = make_test_token("admin", uid, true);
+        let app = setup_abuse_app!(state);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/report-abuse")
+                .set_json(serde_json::json!({"short_code": "bad123", "reason": "spam"}))
+                .to_request(),
+        )
+        .await;
+
+        let report_id: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT id FROM abuse_reports LIMIT 1", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/admin/reports/{report_id}"))
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .set_json(serde_json::json!({"action": "dismiss"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+
+        let status: String = {
+            let db = state.db.lock().unwrap();
+            db.query_row(
+                "SELECT status FROM abuse_reports WHERE id=?1",
+                [report_id],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(status, "dismissed");
+    }
+
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn admin_can_delete_url_via_report() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        insert_test_url(&state, uid, "https://bad.com", "bad123");
+        let token = make_test_token("admin", uid, true);
+        let app = setup_abuse_app!(state);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/report-abuse")
+                .set_json(serde_json::json!({"short_code": "bad123", "reason": "spam"}))
+                .to_request(),
+        )
+        .await;
+
+        let report_id: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT id FROM abuse_reports LIMIT 1", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri(&format!("/api/admin/reports/{report_id}"))
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"action": "delete_url"}))
+                .to_request(),
+        )
+        .await;
+
+        let url_count: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row(
+                "SELECT COUNT(*) FROM urls WHERE short_code='bad123'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(url_count, 0);
+    }
+
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn resolving_already_resolved_report_returns_400() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        insert_test_url(&state, uid, "https://bad.com", "bad123");
+        let token = make_test_token("admin", uid, true);
+        let app = setup_abuse_app!(state);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/report-abuse")
+                .set_json(serde_json::json!({"short_code": "bad123", "reason": "spam"}))
+                .to_request(),
+        )
+        .await;
+
+        let report_id: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT id FROM abuse_reports LIMIT 1", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        // Dismiss once
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri(&format!("/api/admin/reports/{report_id}"))
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"action": "dismiss"}))
+                .to_request(),
+        )
+        .await;
+
+        // Dismiss again — should fail
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri(&format!("/api/admin/reports/{report_id}"))
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"action": "dismiss"}))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn resolve_invalid_action_returns_400() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        insert_test_url(&state, uid, "https://bad.com", "bad123");
+        let token = make_test_token("admin", uid, true);
+        let app = setup_abuse_app!(state);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/report-abuse")
+                .set_json(serde_json::json!({"short_code": "bad123", "reason": "spam"}))
+                .to_request(),
+        )
+        .await;
+
+        let report_id: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT id FROM abuse_reports LIMIT 1", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri(&format!("/api/admin/reports/{report_id}"))
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"action": "invalid_action"}))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 400);
+    }
+}

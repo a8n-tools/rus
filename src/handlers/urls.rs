@@ -468,3 +468,654 @@ pub async fn get_qr_code(
         }))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+    use serde_json::Value;
+
+    // -------------------------------------------------------------------------
+    // Standalone tests
+    // -------------------------------------------------------------------------
+    #[cfg(feature = "standalone")]
+    mod standalone {
+        use super::*;
+        use actix_web_httpauth::middleware::HttpAuthentication;
+        use crate::auth::middleware::jwt_validator;
+        use crate::testing::{
+            insert_test_url, insert_test_user, make_test_state, make_test_token,
+        };
+
+        macro_rules! setup_app {
+            ($state:expr) => {{
+                let jwt = HttpAuthentication::bearer(jwt_validator);
+                test::init_service(
+                    App::new()
+                        .app_data($state.clone())
+                        .service(
+                            web::scope("/api")
+                                .wrap(jwt)
+                                .route("/shorten", web::post().to(shorten_url))
+                                .route("/urls", web::get().to(get_user_urls))
+                                .route("/urls/{code}", web::delete().to(delete_url))
+                                .route("/urls/{code}/name", web::patch().to(update_url_name))
+                                .route("/stats/{code}", web::get().to(get_stats))
+                                .route("/urls/{code}/clicks", web::get().to(get_click_history))
+                                .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code)),
+                        )
+                        .route("/{code}", web::get().to(redirect_url)),
+                )
+                .await
+            }};
+        }
+
+        // --- shorten_url ---
+
+        #[actix_web::test]
+        async fn shorten_url_success() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"url": "https://example.com"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+
+            let body: Value = test::read_body_json(resp).await;
+            assert!(body["short_code"].is_string());
+            assert_eq!(body["original_url"], "https://example.com");
+        }
+
+        #[actix_web::test]
+        async fn shorten_url_short_code_is_6_chars() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"url": "https://example.com"}))
+                .to_request();
+            let body: Value = test::call_and_read_body_json(&app, req).await;
+            assert_eq!(body["short_code"].as_str().unwrap().len(), 6);
+        }
+
+        #[actix_web::test]
+        async fn shorten_same_url_twice_returns_same_code() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let shorten = |app: &_| {
+                test::TestRequest::post()
+                    .uri("/api/shorten")
+                    .insert_header(("Authorization", format!("Bearer {token}")))
+                    .set_json(serde_json::json!({"url": "https://example.com"}))
+                    .to_request()
+            };
+            let b1: Value = test::call_and_read_body_json(&app, shorten(&app)).await;
+            let b2: Value = test::call_and_read_body_json(&app, shorten(&app)).await;
+            assert_eq!(b1["short_code"], b2["short_code"]);
+        }
+
+        #[actix_web::test]
+        async fn shorten_url_empty_returns_400() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"url": ""}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 400);
+        }
+
+        #[actix_web::test]
+        async fn shorten_invalid_url_returns_400() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"url": "ftp://bad-scheme.com"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 400);
+        }
+
+        #[actix_web::test]
+        async fn shorten_url_without_auth_returns_401() {
+            let state = make_test_state();
+            let app = setup_app!(state);
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .set_json(serde_json::json!({"url": "https://example.com"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 401);
+        }
+
+        // --- redirect_url ---
+
+        #[actix_web::test]
+        async fn redirect_existing_code_returns_302() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get().uri("/abc123").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 302);
+            assert_eq!(
+                resp.headers().get("Location").unwrap(),
+                "https://example.com"
+            );
+        }
+
+        #[actix_web::test]
+        async fn redirect_nonexistent_code_returns_404() {
+            let state = make_test_state();
+            let app = setup_app!(state);
+            let req = test::TestRequest::get().uri("/xxxxxx").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 404);
+        }
+
+        #[actix_web::test]
+        async fn redirect_increments_click_counter() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let app = setup_app!(state);
+
+            // Visit twice
+            for _ in 0..2 {
+                test::call_service(
+                    &app,
+                    test::TestRequest::get().uri("/abc123").to_request(),
+                )
+                .await;
+            }
+
+            let clicks: i64 = {
+                let db = state.db.lock().unwrap();
+                db.query_row(
+                    "SELECT clicks FROM urls WHERE short_code = 'abc123'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+            };
+            assert_eq!(clicks, 2);
+        }
+
+        // --- get_user_urls ---
+
+        #[actix_web::test]
+        async fn get_user_urls_empty_list() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let body: Value = test::call_and_read_body_json(&app, req).await;
+            assert_eq!(body, serde_json::json!([]));
+        }
+
+        #[actix_web::test]
+        async fn get_user_urls_returns_own_urls_only() {
+            let state = make_test_state();
+            let uid_a = insert_test_user(&state, "alice", false);
+            let uid_b = insert_test_user(&state, "bob", false);
+            insert_test_url(&state, uid_a, "https://alice.com", "aaa111");
+            insert_test_url(&state, uid_b, "https://bob.com", "bbb222");
+            let token = make_test_token("alice", uid_a, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let body: Value = test::call_and_read_body_json(&app, req).await;
+            let arr = body.as_array().unwrap();
+            assert_eq!(arr.len(), 1);
+            assert_eq!(arr[0]["short_code"], "aaa111");
+        }
+
+        // --- get_stats ---
+
+        #[actix_web::test]
+        async fn get_stats_for_own_url() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/stats/abc123")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            let body: Value = test::read_body_json(resp).await;
+            assert_eq!(body["short_code"], "abc123");
+        }
+
+        #[actix_web::test]
+        async fn get_stats_for_other_users_url_returns_404() {
+            let state = make_test_state();
+            let uid_a = insert_test_user(&state, "alice", false);
+            let uid_b = insert_test_user(&state, "bob", false);
+            insert_test_url(&state, uid_b, "https://bob.com", "bbb222");
+            let token = make_test_token("alice", uid_a, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/stats/bbb222")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 404);
+        }
+
+        // --- delete_url ---
+
+        #[actix_web::test]
+        async fn delete_own_url_succeeds() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "del123");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::delete()
+                .uri("/api/urls/del123")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+        }
+
+        #[actix_web::test]
+        async fn delete_other_users_url_returns_404() {
+            let state = make_test_state();
+            let uid_a = insert_test_user(&state, "alice", false);
+            let uid_b = insert_test_user(&state, "bob", false);
+            insert_test_url(&state, uid_b, "https://bob.com", "bbb222");
+            let token = make_test_token("alice", uid_a, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::delete()
+                .uri("/api/urls/bbb222")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 404);
+        }
+
+        #[actix_web::test]
+        async fn delete_nonexistent_url_returns_404() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::delete()
+                .uri("/api/urls/xxxxxx")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 404);
+        }
+
+        // --- update_url_name ---
+
+        #[actix_web::test]
+        async fn update_name_success() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::patch()
+                .uri("/api/urls/abc123/name")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"name": "My Link"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+        }
+
+        #[actix_web::test]
+        async fn update_name_clears_name_when_null() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::patch()
+                .uri("/api/urls/abc123/name")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"name": null}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+        }
+
+        #[actix_web::test]
+        async fn update_name_for_other_users_url_returns_404() {
+            let state = make_test_state();
+            let uid_a = insert_test_user(&state, "alice", false);
+            let uid_b = insert_test_user(&state, "bob", false);
+            insert_test_url(&state, uid_b, "https://bob.com", "bbb222");
+            let token = make_test_token("alice", uid_a, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::patch()
+                .uri("/api/urls/bbb222/name")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"name": "Stolen"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 404);
+        }
+
+        // --- get_click_history ---
+
+        #[actix_web::test]
+        async fn click_history_empty_initially() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls/abc123/clicks")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let body: Value = test::call_and_read_body_json(&app, req).await;
+            assert_eq!(body["total_clicks"], 0);
+            assert_eq!(body["history"], serde_json::json!([]));
+        }
+
+        #[actix_web::test]
+        async fn click_history_reflects_redirects() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            // Two redirects
+            for _ in 0..2 {
+                test::call_service(
+                    &app,
+                    test::TestRequest::get().uri("/abc123").to_request(),
+                )
+                .await;
+            }
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls/abc123/clicks")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let body: Value = test::call_and_read_body_json(&app, req).await;
+            assert_eq!(body["total_clicks"], 2);
+            assert_eq!(body["history"].as_array().unwrap().len(), 2);
+        }
+
+        #[actix_web::test]
+        async fn click_history_for_other_users_url_returns_404() {
+            let state = make_test_state();
+            let uid_a = insert_test_user(&state, "alice", false);
+            let uid_b = insert_test_user(&state, "bob", false);
+            insert_test_url(&state, uid_b, "https://bob.com", "bbb222");
+            let token = make_test_token("alice", uid_a, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls/bbb222/clicks")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 404);
+        }
+
+        // --- get_qr_code ---
+
+        #[actix_web::test]
+        async fn qr_code_png_success() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls/abc123/qr/png")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            assert_eq!(resp.headers().get("content-type").unwrap(), "image/png");
+        }
+
+        #[actix_web::test]
+        async fn qr_code_svg_success() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls/abc123/qr/svg")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            assert_eq!(resp.headers().get("content-type").unwrap(), "image/svg+xml");
+        }
+
+        #[actix_web::test]
+        async fn qr_code_invalid_format_returns_400() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "abc123");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls/abc123/qr/gif")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 400);
+        }
+
+        #[actix_web::test]
+        async fn qr_code_for_other_users_url_returns_404() {
+            let state = make_test_state();
+            let uid_a = insert_test_user(&state, "alice", false);
+            let uid_b = insert_test_user(&state, "bob", false);
+            insert_test_url(&state, uid_b, "https://bob.com", "bbb222");
+            let token = make_test_token("alice", uid_a, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls/bbb222/qr/png")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 404);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // SaaS tests
+    // -------------------------------------------------------------------------
+    #[cfg(feature = "saas")]
+    mod saas {
+        use super::*;
+        use crate::handlers::saas_auth::saas_cookie_validator;
+        use crate::testing::{insert_saas_url, insert_saas_user, make_saas_jwt, make_test_state};
+
+        macro_rules! setup_app {
+            ($state:expr) => {{
+                test::init_service(
+                    App::new()
+                        .app_data($state.clone())
+                        .service(
+                            web::scope("/api")
+                                .wrap(actix_web::middleware::from_fn(saas_cookie_validator))
+                                .route("/shorten", web::post().to(shorten_url))
+                                .route("/urls", web::get().to(get_user_urls))
+                                .route("/urls/{code}", web::delete().to(delete_url))
+                                .route("/stats/{code}", web::get().to(get_stats)),
+                        )
+                        .route("/{code}", web::get().to(redirect_url)),
+                )
+                .await
+            }};
+        }
+
+        fn cookie(jwt: &str) -> String {
+            format!("access_token={jwt}")
+        }
+
+        #[actix_web::test]
+        async fn shorten_url_with_valid_member_cookie() {
+            let state = make_test_state();
+            let app = setup_app!(state);
+            let jwt = make_saas_jwt("42", "alice@example.com", "active", None);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Cookie", cookie(&jwt)))
+                .set_json(serde_json::json!({"url": "https://example.com"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+        }
+
+        #[actix_web::test]
+        async fn shorten_url_without_cookie_returns_401() {
+            let state = make_test_state();
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .set_json(serde_json::json!({"url": "https://example.com"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 401);
+        }
+
+        #[actix_web::test]
+        async fn non_member_gets_403_with_redirect() {
+            let state = make_test_state();
+            let app = setup_app!(state);
+            let jwt = make_saas_jwt("99", "noone@example.com", "none", None);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Cookie", cookie(&jwt)))
+                .set_json(serde_json::json!({"url": "https://example.com"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 403);
+            let body: Value = test::read_body_json(resp).await;
+            assert!(body["redirect"].is_string());
+        }
+
+        #[actix_web::test]
+        async fn admin_bypasses_membership_check() {
+            let state = make_test_state();
+            let app = setup_app!(state);
+            let jwt = make_saas_jwt("1", "admin@example.com", "none", Some("admin"));
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Cookie", cookie(&jwt)))
+                .set_json(serde_json::json!({"url": "https://example.com"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+        }
+
+        #[actix_web::test]
+        async fn grace_period_member_allowed() {
+            let state = make_test_state();
+            let app = setup_app!(state);
+            let jwt = make_saas_jwt("55", "grace@example.com", "grace_period", None);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Cookie", cookie(&jwt)))
+                .set_json(serde_json::json!({"url": "https://example.com"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+        }
+
+        #[actix_web::test]
+        async fn canceled_member_gets_403() {
+            let state = make_test_state();
+            let app = setup_app!(state);
+            let jwt = make_saas_jwt("77", "old@example.com", "canceled", None);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Cookie", cookie(&jwt)))
+                .set_json(serde_json::json!({"url": "https://example.com"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 403);
+        }
+
+        #[actix_web::test]
+        async fn saas_user_can_only_see_own_urls() {
+            let state = make_test_state();
+            insert_saas_user(&state, 42, "alice@example.com", false);
+            insert_saas_user(&state, 43, "bob@example.com", false);
+            insert_saas_url(&state, 42, "https://alice.com", "aaa111");
+            insert_saas_url(&state, 43, "https://bob.com", "bbb222");
+            let app = setup_app!(state);
+            let jwt = make_saas_jwt("42", "alice@example.com", "active", None);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls")
+                .insert_header(("Cookie", cookie(&jwt)))
+                .to_request();
+            let body: Value = test::call_and_read_body_json(&app, req).await;
+            let arr = body.as_array().unwrap();
+            assert_eq!(arr.len(), 1);
+            assert_eq!(arr[0]["short_code"], "aaa111");
+        }
+    }
+}

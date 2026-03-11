@@ -151,3 +151,240 @@ pub async fn admin_get_stats(data: web::Data<AppState>) -> Result<HttpResponse> 
         total_clicks,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+    use actix_web_httpauth::middleware::HttpAuthentication;
+    use crate::auth::middleware::admin_validator;
+    use crate::testing::{insert_test_url, insert_test_user, make_test_state, make_test_token};
+    use serde_json::Value;
+
+    macro_rules! setup_app {
+        ($state:expr) => {{
+            let admin_auth = HttpAuthentication::bearer(admin_validator);
+            test::init_service(
+                App::new()
+                    .app_data($state.clone())
+                    .service(
+                        web::scope("/api/admin")
+                            .wrap(admin_auth)
+                            .route("/users", web::get().to(admin_list_users))
+                            .route("/users/{user_id}", web::delete().to(admin_delete_user))
+                            .route("/users/{user_id}/promote", web::post().to(admin_promote_user))
+                            .route("/stats", web::get().to(admin_get_stats)),
+                    ),
+            )
+            .await
+        }};
+    }
+
+    // --- admin_list_users ---
+
+    #[actix_web::test]
+    async fn list_users_returns_all_users() {
+        let state = make_test_state();
+        insert_test_user(&state, "alice", true);
+        insert_test_user(&state, "bob", false);
+        let token = make_test_token("alice", 1, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::get()
+            .uri("/api/admin/users")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(body.as_array().unwrap().len(), 2);
+    }
+
+    #[actix_web::test]
+    async fn list_users_non_admin_returns_403() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "alice", false);
+        let token = make_test_token("alice", uid, false);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::get()
+            .uri("/api/admin/users")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 403);
+    }
+
+    #[actix_web::test]
+    async fn list_users_unauthenticated_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::get()
+            .uri("/api/admin/users")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn list_users_includes_url_count() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "alice", true);
+        insert_test_url(&state, uid, "https://example.com", "abc123");
+        let token = make_test_token("alice", uid, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::get()
+            .uri("/api/admin/users")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        let alice = &body.as_array().unwrap()[0];
+        assert_eq!(alice["url_count"], 1);
+    }
+
+    // --- admin_delete_user ---
+
+    #[actix_web::test]
+    async fn delete_user_success() {
+        let state = make_test_state();
+        let uid_admin = insert_test_user(&state, "admin", true);
+        let uid_bob = insert_test_user(&state, "bob", false);
+        let token = make_test_token("admin", uid_admin, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/admin/users/{uid_bob}"))
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+
+        // Verify user is gone
+        let count: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT COUNT(*) FROM users WHERE userID=?1", [uid_bob], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(count, 0);
+    }
+
+    #[actix_web::test]
+    async fn delete_user_cannot_delete_self() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        let token = make_test_token("admin", uid, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::delete()
+            .uri(&format!("/api/admin/users/{uid}"))
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn delete_user_cascades_their_urls() {
+        let state = make_test_state();
+        let uid_admin = insert_test_user(&state, "admin", true);
+        let uid_bob = insert_test_user(&state, "bob", false);
+        insert_test_url(&state, uid_bob, "https://bob.com", "bbb222");
+        let token = make_test_token("admin", uid_admin, true);
+        let app = setup_app!(state);
+
+        test::call_service(
+            &app,
+            test::TestRequest::delete()
+                .uri(&format!("/api/admin/users/{uid_bob}"))
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request(),
+        )
+        .await;
+
+        let url_count: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT COUNT(*) FROM urls WHERE user_id=?1", [uid_bob], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(url_count, 0);
+    }
+
+    // --- admin_promote_user ---
+
+    #[actix_web::test]
+    async fn promote_user_to_admin() {
+        let state = make_test_state();
+        let uid_admin = insert_test_user(&state, "admin", true);
+        let uid_bob = insert_test_user(&state, "bob", false);
+        let token = make_test_token("admin", uid_admin, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/admin/users/{uid_bob}/promote"))
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+
+        let is_admin: i32 = {
+            let db = state.db.lock().unwrap();
+            db.query_row(
+                "SELECT is_admin FROM users WHERE userID=?1",
+                [uid_bob],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(is_admin, 1);
+    }
+
+    #[actix_web::test]
+    async fn promote_already_admin_returns_400() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        let token = make_test_token("admin", uid, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri(&format!("/api/admin/users/{uid}/promote"))
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn promote_nonexistent_user_returns_404() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        let token = make_test_token("admin", uid, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/api/admin/users/9999/promote")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+    }
+
+    // --- admin_get_stats ---
+
+    #[actix_web::test]
+    async fn stats_returns_correct_counts() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        insert_test_user(&state, "bob", false);
+        insert_test_url(&state, uid, "https://example.com", "abc123");
+        let token = make_test_token("admin", uid, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::get()
+            .uri("/api/admin/stats")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(body["total_users"], 2);
+        assert_eq!(body["total_urls"], 1);
+        assert_eq!(body["total_clicks"], 0);
+    }
+}

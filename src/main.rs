@@ -13,6 +13,9 @@ mod models;
 mod security;
 mod url;
 
+#[cfg(test)]
+mod testing;
+
 #[cfg(feature = "standalone")]
 use auth::middleware::{admin_validator, jwt_validator};
 use config::Config;

@@ -342,3 +342,365 @@ pub async fn get_current_user(http_req: HttpRequest) -> Result<HttpResponse> {
         is_admin: claims.is_admin,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+    use actix_web_httpauth::middleware::HttpAuthentication;
+    use crate::auth::middleware::jwt_validator;
+    use crate::testing::{make_test_state, TEST_PASSWORD};
+    use serde_json::Value;
+
+    macro_rules! setup_app {
+        ($state:expr) => {{
+            let jwt = HttpAuthentication::bearer(jwt_validator);
+            test::init_service(
+                App::new()
+                    .app_data($state.clone())
+                    .route("/api/register", web::post().to(register))
+                    .route("/api/login", web::post().to(login))
+                    .route("/api/refresh", web::post().to(refresh_token))
+                    .service(
+                        web::scope("/api")
+                            .wrap(jwt)
+                            .route("/me", web::get().to(get_current_user)),
+                    ),
+            )
+            .await
+        }};
+    }
+
+    /// Register a user and return the token.
+    async fn do_register(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        username: &str,
+    ) -> Value {
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({"username": username, "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(app, req).await;
+        test::read_body_json(resp).await
+    }
+
+    // --- register ---
+
+    #[actix_web::test]
+    async fn register_success_returns_201() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({"username": "alice", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 201);
+    }
+
+    #[actix_web::test]
+    async fn register_returns_token_and_username() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        assert!(body["token"].is_string());
+        assert!(body["refresh_token"].is_string());
+        assert_eq!(body["username"], "alice");
+    }
+
+    #[actix_web::test]
+    async fn register_first_user_is_admin() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let me: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(me["is_admin"], true);
+    }
+
+    #[actix_web::test]
+    async fn register_second_user_not_admin() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+        let body = do_register(&app, "bob").await;
+        let token = body["token"].as_str().unwrap();
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let me: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(me["is_admin"], false);
+    }
+
+    #[actix_web::test]
+    async fn register_duplicate_username_returns_409() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({"username": "alice", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 409);
+    }
+
+    #[actix_web::test]
+    async fn register_empty_username_returns_400() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({"username": "", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn register_short_username_returns_400() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({"username": "ab", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn register_invalid_username_chars_returns_400() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({"username": "user@name", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn register_weak_password_returns_400() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({"username": "alice", "password": "weak"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn register_disabled_blocks_second_user() {
+        let mut config = crate::testing::test_config();
+        config.allow_registration = false;
+        let state = web::Data::new(crate::db::AppState::new(config).unwrap());
+        let app = setup_app!(state);
+
+        // First user always allowed
+        let resp_first = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/register")
+                .set_json(serde_json::json!({"username": "alice", "password": TEST_PASSWORD}))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp_first.status(), 201);
+
+        // Second user blocked
+        let resp_second = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/register")
+                .set_json(serde_json::json!({"username": "bob", "password": TEST_PASSWORD}))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp_second.status(), 403);
+    }
+
+    // --- login ---
+
+    #[actix_web::test]
+    async fn login_success_returns_token() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(serde_json::json!({"username": "alice", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: Value = test::read_body_json(resp).await;
+        assert!(body["token"].is_string());
+    }
+
+    #[actix_web::test]
+    async fn login_wrong_password_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(serde_json::json!({"username": "alice", "password": "WrongPass1!"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn login_unknown_user_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(serde_json::json!({"username": "nobody", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn login_account_lockout_after_five_failures() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+
+        for _ in 0..5 {
+            test::call_service(
+                &app,
+                test::TestRequest::post()
+                    .uri("/api/login")
+                    .set_json(serde_json::json!({"username": "alice", "password": "WrongPass1!"}))
+                    .to_request(),
+            )
+            .await;
+        }
+
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(serde_json::json!({"username": "alice", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 429);
+    }
+
+    // --- refresh_token ---
+
+    #[actix_web::test]
+    async fn refresh_token_rotation_works() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let old_refresh = body["refresh_token"].as_str().unwrap().to_string();
+
+        let req = test::TestRequest::post()
+            .uri("/api/refresh")
+            .set_json(serde_json::json!({"refresh_token": old_refresh}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        let body: Value = test::read_body_json(resp).await;
+        assert!(body["token"].is_string());
+        // New refresh token must differ (rotation)
+        assert_ne!(body["refresh_token"].as_str().unwrap(), old_refresh);
+    }
+
+    #[actix_web::test]
+    async fn refresh_token_invalid_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/refresh")
+            .set_json(serde_json::json!({"refresh_token": "invalid-refresh-token"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn refresh_token_cant_be_reused() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let old_refresh = body["refresh_token"].as_str().unwrap().to_string();
+
+        // Use it once
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/refresh")
+                .set_json(serde_json::json!({"refresh_token": old_refresh}))
+                .to_request(),
+        )
+        .await;
+
+        // Second use must fail
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/refresh")
+                .set_json(serde_json::json!({"refresh_token": old_refresh}))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    // --- get_current_user ---
+
+    #[actix_web::test]
+    async fn get_me_returns_username() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let me: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(me["username"], "alice");
+    }
+
+    #[actix_web::test]
+    async fn get_me_without_token_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::get().uri("/api/me").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn get_me_with_bad_token_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", "Bearer not.a.valid.token"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+}

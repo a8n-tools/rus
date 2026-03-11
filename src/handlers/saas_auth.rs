@@ -186,3 +186,299 @@ pub async fn saas_cookie_validator(
         None => Err(actix_web::error::ErrorUnauthorized("Invalid or missing authentication")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, web, App};
+    use crate::testing::{insert_saas_user, make_saas_jwt, make_test_state};
+    use serde_json::Value;
+
+    macro_rules! setup_app {
+        ($state:expr) => {{
+            test::init_service(
+                App::new()
+                    .app_data($state.clone())
+                    .service(
+                        web::scope("/api")
+                            .wrap(actix_web::middleware::from_fn(saas_cookie_validator))
+                            .route("/me", web::get().to(saas_me))
+                            .route("/ping", web::get().to(|| async { "pong" })),
+                    ),
+            )
+            .await
+        }};
+    }
+
+    fn cookie(jwt: &str) -> String {
+        format!("access_token={jwt}")
+    }
+
+    // --- saas_me ---
+
+    #[actix_web::test]
+    async fn me_returns_email_prefix_as_username() {
+        let state = make_test_state();
+        insert_saas_user(&state, 42, "alice@example.com", false);
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("42", "alice@example.com", "active", None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(body["username"], "alice");
+        assert_eq!(body["is_admin"], false);
+    }
+
+    #[actix_web::test]
+    async fn me_returns_admin_true_for_admin_role() {
+        let state = make_test_state();
+        insert_saas_user(&state, 1, "admin@example.com", true);
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("1", "admin@example.com", "none", Some("admin"));
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(body["is_admin"], true);
+    }
+
+    #[actix_web::test]
+    async fn me_uses_saas_id_as_fallback_username_when_no_email() {
+        let state = make_test_state();
+        insert_saas_user(&state, 99, "saas_99", false);
+        let app = setup_app!(state);
+
+        // JWT with no email
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        let exp = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp();
+        let claims = serde_json::json!({"sub": "99", "membership_status": "active", "exp": exp});
+        let jwt = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(crate::testing::TEST_SAAS_SECRET.as_bytes()),
+        )
+        .unwrap();
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(body["username"], "saas_99");
+    }
+
+    // --- saas_cookie_validator membership checks ---
+
+    #[actix_web::test]
+    async fn active_member_is_allowed() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("10", "user@example.com", "active", None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn grace_period_member_is_allowed() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("11", "grace@example.com", "grace_period", None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn none_membership_returns_403() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("20", "new@example.com", "none", None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 403);
+    }
+
+    #[actix_web::test]
+    async fn canceled_membership_returns_403() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("21", "old@example.com", "canceled", None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 403);
+    }
+
+    #[actix_web::test]
+    async fn past_due_membership_returns_403() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("22", "pastdue@example.com", "past_due", None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 403);
+    }
+
+    #[actix_web::test]
+    async fn admin_role_bypasses_membership_check() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("2", "admin@example.com", "none", Some("admin"));
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn missing_cookie_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::get().uri("/api/ping").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn invalid_jwt_signature_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+
+        // Sign with a different secret
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        let exp = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp();
+        let claims = serde_json::json!({"sub": "5", "membership_status": "active", "exp": exp});
+        let bad_jwt = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(b"wrong-secret"),
+        )
+        .unwrap();
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&bad_jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn non_member_403_response_contains_redirect_url() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("30", "user@example.com", "none", None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 403);
+        let body: Value = test::read_body_json(resp).await;
+        assert!(body["redirect"].is_string());
+        assert!(
+            body["redirect"]
+                .as_str()
+                .unwrap()
+                .contains("membership"),
+            "redirect URL should point to membership page"
+        );
+    }
+
+    #[actix_web::test]
+    async fn admin_is_provisioned_in_db_with_is_admin_true() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let jwt = make_saas_jwt("99", "admin@example.com", "active", Some("admin"));
+
+        test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/api/ping")
+                .insert_header(("Cookie", cookie(&jwt)))
+                .to_request(),
+        )
+        .await;
+
+        let is_admin: i32 = {
+            let db = state.db.lock().unwrap();
+            db.query_row(
+                "SELECT is_admin FROM users WHERE userID=99",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(is_admin, 1);
+    }
+
+    #[actix_web::test]
+    async fn admin_status_synced_on_each_request() {
+        let state = make_test_state();
+        insert_saas_user(&state, 50, "user@example.com", false);
+        let app = setup_app!(state);
+
+        // First request as regular member
+        let jwt_member = make_saas_jwt("50", "user@example.com", "active", None);
+        test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/api/ping")
+                .insert_header(("Cookie", cookie(&jwt_member)))
+                .to_request(),
+        )
+        .await;
+
+        // Second request — now promoted to admin in parent app
+        let jwt_admin = make_saas_jwt("50", "user@example.com", "active", Some("admin"));
+        test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/api/ping")
+                .insert_header(("Cookie", cookie(&jwt_admin)))
+                .to_request(),
+        )
+        .await;
+
+        let is_admin: i32 = {
+            let db = state.db.lock().unwrap();
+            db.query_row(
+                "SELECT is_admin FROM users WHERE userID=50",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(is_admin, 1);
+    }
+}
