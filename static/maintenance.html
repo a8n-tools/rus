@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RUS - Under Maintenance</title>
+    <link rel="stylesheet" href="styles.css?v=3" />
+    <style>
+      .maintenance-container {
+        min-height: calc(100vh - 80px);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        padding: 60px 20px;
+      }
+      .maintenance-icon {
+        font-size: 4em;
+        margin-bottom: 20px;
+      }
+      .maintenance-container h1 {
+        font-size: 2em;
+        margin-bottom: 16px;
+      }
+      .maintenance-message {
+        color: var(--text-secondary);
+        font-size: 1.1em;
+        max-width: 500px;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="maintenance-container">
+      <div class="maintenance-icon">&#128736;</div>
+      <h1>Under Maintenance</h1>
+      <p class="maintenance-message">{{MAINTENANCE_MESSAGE}}</p>
+      <p class="maintenance-message" style="margin-top: 24px;">We'll be back shortly. Please try again later.</p>
+    </div>
+  </body>
+</html>

@@ -1,5 +1,6 @@
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, Result};
 use jsonwebtoken::{decode, DecodingKey, Validation};
+use std::sync::atomic::Ordering;
 
 /// SaaS user claims extracted from access_token cookie
 #[derive(Debug, Clone)]
@@ -124,6 +125,77 @@ pub async fn saas_me(http_req: HttpRequest) -> Result<HttpResponse> {
         "username": username,
         "is_admin": claims.is_admin,
     })))
+}
+
+/// Paths that bypass maintenance mode entirely
+const MAINTENANCE_ALLOWLIST: &[&str] = &[
+    "/health",
+    "/api/config",
+    "/api/version",
+    "/styles.css",
+    "/k9f3x2m7.js",
+];
+
+/// Maintenance mode guard middleware (outermost layer in SaaS mode).
+///
+/// When maintenance mode is active, only admin users and allowlisted paths
+/// are permitted through. All other requests receive a 503.
+pub async fn maintenance_guard(
+    req: actix_web::dev::ServiceRequest,
+    next: actix_web::middleware::Next<impl actix_web::body::MessageBody + 'static>,
+) -> Result<actix_web::dev::ServiceResponse<actix_web::body::BoxBody>, actix_web::Error> {
+    let state = req
+        .app_data::<actix_web::web::Data<crate::db::AppState>>()
+        .expect("AppState not found");
+
+    // Fast path: maintenance off
+    if !state.maintenance_mode.load(Ordering::SeqCst) {
+        return Ok(next.call(req).await?.map_into_boxed_body());
+    }
+
+    let path = req.path();
+
+    // Allowlisted paths always pass through
+    if MAINTENANCE_ALLOWLIST.iter().any(|p| path == *p) || path.starts_with("/webhooks/") {
+        return Ok(next.call(req).await?.map_into_boxed_body());
+    }
+
+    // Check if user is admin via cookie
+    let secret = &state.config.saas_jwt_secret;
+    if let Some(claims) = get_user_from_cookie(req.request(), secret) {
+        if claims.is_admin {
+            return Ok(next.call(req).await?.map_into_boxed_body());
+        }
+    }
+
+    // Read maintenance message
+    let message = state
+        .maintenance_message
+        .read()
+        .unwrap()
+        .clone()
+        .unwrap_or_default();
+
+    // API routes get JSON 503
+    if path.starts_with("/api/") {
+        return Ok(req.into_response(
+            HttpResponse::ServiceUnavailable()
+                .json(serde_json::json!({
+                    "error": "Service under maintenance",
+                    "maintenance": true,
+                    "message": message,
+                })),
+        ));
+    }
+
+    // Page/other routes get HTML 503
+    let html = include_str!("../../static/maintenance.html")
+        .replace("{{MAINTENANCE_MESSAGE}}", &message);
+    Ok(req.into_response(
+        HttpResponse::ServiceUnavailable()
+            .content_type("text/html; charset=utf-8")
+            .body(html),
+    ))
 }
 
 /// SaaS cookie authentication middleware
@@ -480,5 +552,137 @@ mod tests {
             .unwrap()
         };
         assert_eq!(is_admin, 1);
+    }
+
+    // --- maintenance_guard tests ---
+
+    macro_rules! setup_maintenance_app {
+        ($state:expr) => {{
+            test::init_service(
+                App::new()
+                    .app_data($state.clone())
+                    .route("/api/ping", web::get().to(|| async { "pong" }))
+                    .route("/health", web::get().to(|| async { "ok" }))
+                    .route("/api/config", web::get().to(|| async { "config" }))
+                    .route("/styles.css", web::get().to(|| async { "css" }))
+                    .route("/webhooks/test", web::post().to(|| async { "webhook" }))
+                    .route("/dashboard.html", web::get().to(|| async { "dashboard" }))
+                    .route("/", web::get().to(|| async { "index" }))
+                    .wrap(actix_web::middleware::from_fn(maintenance_guard)),
+            )
+            .await
+        }};
+    }
+
+    #[actix_web::test]
+    async fn maintenance_off_passes_through() {
+        let state = make_test_state();
+        let app = setup_maintenance_app!(state);
+
+        let req = test::TestRequest::get().uri("/api/ping").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn maintenance_blocks_api_with_503_json() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, std::sync::atomic::Ordering::SeqCst);
+        *state.maintenance_message.write().unwrap() = Some("Upgrading DB".to_string());
+        let app = setup_maintenance_app!(state);
+
+        let req = test::TestRequest::get().uri("/api/ping").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 503);
+        let body: Value = test::read_body_json(resp).await;
+        assert_eq!(body["maintenance"], true);
+        assert_eq!(body["message"], "Upgrading DB");
+    }
+
+    #[actix_web::test]
+    async fn maintenance_blocks_pages_with_503_html() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, std::sync::atomic::Ordering::SeqCst);
+        *state.maintenance_message.write().unwrap() = Some("Be right back".to_string());
+        let app = setup_maintenance_app!(state);
+
+        let req = test::TestRequest::get()
+            .uri("/dashboard.html")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 503);
+        let body = test::read_body(resp).await;
+        let html = std::str::from_utf8(&body).unwrap();
+        assert!(html.contains("Under Maintenance"));
+        assert!(html.contains("Be right back"));
+    }
+
+    #[actix_web::test]
+    async fn maintenance_allows_health_endpoint() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, std::sync::atomic::Ordering::SeqCst);
+        let app = setup_maintenance_app!(state);
+
+        let req = test::TestRequest::get().uri("/health").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn maintenance_allows_webhook_paths() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, std::sync::atomic::Ordering::SeqCst);
+        let app = setup_maintenance_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/webhooks/test")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn maintenance_allows_allowlisted_paths() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, std::sync::atomic::Ordering::SeqCst);
+        let app = setup_maintenance_app!(state);
+
+        for path in &["/health", "/api/config", "/styles.css"] {
+            let req = test::TestRequest::get().uri(path).to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200, "expected 200 for {path}");
+        }
+    }
+
+    #[actix_web::test]
+    async fn maintenance_allows_admin_through() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, std::sync::atomic::Ordering::SeqCst);
+        let app = setup_maintenance_app!(state);
+
+        let jwt = make_saas_jwt("1", "admin@example.com", "active", Some("admin"));
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn maintenance_blocks_non_admin_user() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, std::sync::atomic::Ordering::SeqCst);
+        let app = setup_maintenance_app!(state);
+
+        let jwt = make_saas_jwt("10", "user@example.com", "active", None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", cookie(&jwt)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 503);
     }
 }

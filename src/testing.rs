@@ -131,6 +131,18 @@ pub fn insert_saas_user(state: &web::Data<AppState>, user_id: i64, username: &st
     .expect("insert_saas_user failed");
 }
 
+/// Compute HMAC-SHA256 signature for a webhook payload body.
+#[cfg(feature = "saas")]
+pub fn sign_webhook_payload(body: &[u8], secret: &str) -> String {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    type HmacSha256 = Hmac<Sha256>;
+
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC key error");
+    mac.update(body);
+    hex::encode(mac.finalize().into_bytes())
+}
+
 /// Insert a URL directly for SaaS tests. Returns the new row id.
 #[cfg(feature = "saas")]
 pub fn insert_saas_url(

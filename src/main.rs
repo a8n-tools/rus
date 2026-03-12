@@ -141,6 +141,8 @@ async fn main() -> std::io::Result<()> {
 
         #[cfg(feature = "saas")]
         let app = app
+            // Webhook endpoint (outside maintenance guard allowlist, but also explicitly allowed)
+            .route("/webhooks/maintenance", web::post().to(handle_maintenance_webhook))
             // SaaS mode: minimal public API routes
             .route("/api/config", web::get().to(get_config))
             .route("/api/version", web::get().to(get_version))
@@ -170,7 +172,9 @@ async fn main() -> std::io::Result<()> {
             .route("/k9f3x2m7.js", web::get().to(serve_auth_js))
             .route("/health", web::get().to(health_check))
             // Catch-all route for short code redirects (MUST BE LAST)
-            .route("/{code}", web::get().to(redirect_url));
+            .route("/{code}", web::get().to(redirect_url))
+            // Maintenance guard: outermost middleware (last .wrap() = runs first)
+            .wrap(actix_web::middleware::from_fn(maintenance_guard));
 
         app
     })
