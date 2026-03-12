@@ -17,7 +17,7 @@ required-features = ["saas"]
 [features]
 default = ["standalone"]
 standalone = ["dep:bcrypt", "dep:argon2", "dep:actix-web-httpauth"]
-saas = []
+saas = ["dep:hmac", "dep:sha2", "dep:hex"]
 
 [dependencies]
 actix-web = "4.4"
@@ -37,3 +37,6 @@ qrcode = "0.14"
 image = "0.25"
 base64 = "0.22"
 url = "2.5"
+hmac = { version = "0.12", optional = true }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }

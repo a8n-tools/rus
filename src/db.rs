@@ -1,6 +1,10 @@
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection};
 use std::sync::Mutex;
+#[cfg(feature = "saas")]
+use std::sync::atomic::AtomicBool;
+#[cfg(feature = "saas")]
+use std::sync::RwLock;
 
 use crate::config::Config;
 
@@ -9,6 +13,10 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     pub config: Config,
     pub start_time: std::time::Instant,
+    #[cfg(feature = "saas")]
+    pub maintenance_mode: AtomicBool,
+    #[cfg(feature = "saas")]
+    pub maintenance_message: RwLock<Option<String>>,
 }
 
 impl AppState {
@@ -155,6 +163,10 @@ impl AppState {
             db: Mutex::new(conn),
             config,
             start_time: std::time::Instant::now(),
+            #[cfg(feature = "saas")]
+            maintenance_mode: AtomicBool::new(false),
+            #[cfg(feature = "saas")]
+            maintenance_message: RwLock::new(None),
         })
     }
 }
