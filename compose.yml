@@ -23,6 +23,8 @@ services:
       - ./Cargo.toml:/app/Cargo.toml
       - ./Cargo.lock:/app/Cargo.lock
       - cargo_target:/app/target
+      - rus-data:/data
 
 volumes:
   cargo_target:
+  rus-data:
