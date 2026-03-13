@@ -7,14 +7,17 @@ services:
       context: .
     container_name: rus-dev
     restart: unless-stopped
+    # ports:
+    # - "8080:8080"
     ports:
       - "8080:8080"
     env_file:
       - .env
     environment:
       HOST: 0.0.0.0
-      RUST_LOG: debug
+      RUST_LOG: info
     volumes:
+      - rus-data:/data
       - ./src:/app/src
       - ./static:/app/static
       - ./Cargo.toml:/app/Cargo.toml

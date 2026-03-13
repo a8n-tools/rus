@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard - Rust URL Shortener</title>
-    <link rel="stylesheet" href="styles.css?v=2" />
+    <link rel="stylesheet" href="styles.css?v=3" />
   </head>
   <body>
     <nav class="navbar">
@@ -24,33 +24,37 @@
         <p class="subtitle">Manage your shortened URLs</p>
       </div>
 
-      <div class="create-section">
-        <h2>Create New Short URL</h2>
-        <form id="createForm">
-          <div class="input-group">
-            <label for="urlInput">Enter your long URL:</label>
-            <input type="url" id="urlInput" placeholder="https://example.com/very/long/url" required />
-          </div>
-          <button type="submit" id="createBtn">Shorten URL</button>
-        </form>
-        <div class="error" id="error"></div>
-        <div class="success" id="success"></div>
+      <div class="create-section accent-card">
+        <div class="accent-card-body">
+          <h2>Create New Short URL</h2>
+          <form id="createForm">
+            <div class="input-group">
+              <label for="urlInput">Enter your long URL:</label>
+              <input type="url" id="urlInput" placeholder="https://example.com/very/long/url" required />
+            </div>
+            <button type="submit" id="createBtn">Shorten URL</button>
+          </form>
+          <div class="error" id="error"></div>
+          <div class="success" id="success"></div>
+        </div>
       </div>
 
-      <div class="urls-section">
-        <div class="section-header">
-          <h2>Your URLs</h2>
-          <button id="refreshBtn" class="refresh-btn">🔄 Refresh</button>
-        </div>
+      <div class="urls-section accent-card">
+        <div class="accent-card-body">
+          <div class="section-header">
+            <h2>Your URLs</h2>
+            <button id="refreshBtn" class="refresh-btn">🔄 Refresh</button>
+          </div>
 
-        <div id="loading" class="loading">Loading your URLs...</div>
-        <div id="emptyState" class="empty-state" style="display: none">
-          <div class="empty-icon">📎</div>
-          <h3>No URLs yet</h3>
-          <p>Create your first shortened URL using the form above!</p>
-        </div>
+          <div id="loading" class="loading">Loading your URLs...</div>
+          <div id="emptyState" class="empty-state" style="display: none">
+            <div class="empty-icon">📎</div>
+            <h3>No URLs yet</h3>
+            <p>Create your first shortened URL using the form above!</p>
+          </div>
 
-        <div id="urlsList" class="urls-list"></div>
+          <div id="urlsList" class="urls-list"></div>
+        </div>
       </div>
     </div>
 
@@ -283,6 +287,8 @@
 
         const shortUrl = `${window.location.origin}/${urlEntry.short_code}`;
         const displayName = urlEntry.name || "Unnamed URL";
+        const escapedName = (urlEntry.name || "").replace(/'/g, "\\'").replace(/"/g, "&quot;");
+
 
         // Header
         const header = document.createElement("div");
@@ -410,6 +416,43 @@
         card.appendChild(header);
         card.appendChild(actions);
 
+        card.innerHTML = `
+                <div class="url-card-header">
+                    <div class="url-info">
+                        <div class="url-name-row">
+                            <span class="url-name" data-short-code="${urlEntry.short_code}">${displayName}</span>
+                            <button class="rename-btn" onclick="toggleRename('${
+                              urlEntry.short_code
+                            }')" title="Rename">✏️</button>
+                            <span class="click-pill">
+                                <span class="click-pill-value">${urlEntry.clicks}</span>
+                                <span class="click-pill-label">${urlEntry.clicks === 1 ? 'click' : 'clicks'}</span>
+                            </span>
+                        </div>
+                        <div class="rename-form" id="rename-form-${urlEntry.short_code}" style="display: none;">
+                            <input type="text" class="rename-input" id="rename-input-${urlEntry.short_code}"
+                                   value="${escapedName}" placeholder="Enter URL name">
+                            <button class="save-rename-btn" onclick="saveRename('${urlEntry.short_code}')">Save</button>
+                            <button class="cancel-rename-btn" onclick="cancelRename('${
+                              urlEntry.short_code
+                            }')">Cancel</button>
+                        </div>
+                        <div class="short-code">
+                            /${urlEntry.short_code}
+                            <button class="short-code-copy" onclick="copyToClipboard('${shortUrl}', this)" title="Copy short URL">📋</button>
+                        </div>
+                        <div class="original-url">${urlEntry.original_url}</div>
+                    </div>
+                </div>
+                <div class="url-card-actions">
+                    <button class="action-btn" onclick="copyToClipboard('${shortUrl}', this)">📋 Copy</button>
+                    <a href="/${urlEntry.short_code}" target="_blank" class="action-btn">↗ Visit</a>
+                    <button class="action-btn" onclick="showQRCode('${urlEntry.short_code}')">🔲 QR</button>
+                    <button class="action-btn action-btn--delete" onclick="deleteUrl('${urlEntry.short_code}', this)">🗑 Delete</button>
+                </div>
+            `;
+
+
         return card;
       }
 
@@ -505,17 +548,17 @@
       // Toggle rename form
       window.toggleRename = function (shortCode) {
         const renameForm = document.getElementById(`rename-form-${shortCode}`);
-        const nameSection = document.querySelector(`.url-name[data-short-code="${shortCode}"]`).parentElement;
+        const nameRow = document.querySelector(`.url-name[data-short-code="${shortCode}"]`).parentElement;
 
         if (renameForm.style.display === "none") {
           renameForm.style.display = "flex";
-          nameSection.querySelector(".url-name").style.display = "none";
-          nameSection.querySelector(".rename-btn").style.display = "none";
+          nameRow.querySelector(".url-name").style.display = "none";
+          nameRow.querySelector(".rename-btn").style.display = "none";
           document.getElementById(`rename-input-${shortCode}`).focus();
         } else {
           renameForm.style.display = "none";
-          nameSection.querySelector(".url-name").style.display = "inline";
-          nameSection.querySelector(".rename-btn").style.display = "inline";
+          nameRow.querySelector(".url-name").style.display = "inline";
+          nameRow.querySelector(".rename-btn").style.display = "inline";
         }
       };
 
