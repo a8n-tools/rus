@@ -88,6 +88,19 @@ body {
     color: var(--rust-orange);
 }
 
+.maintenance-badge {
+    display: inline-flex;
+    align-items: center;
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--error);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
 .user-info {
     color: var(--text-secondary);
     font-weight: 500;

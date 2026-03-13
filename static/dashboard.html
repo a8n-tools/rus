@@ -11,6 +11,7 @@
       <div class="nav-content">
         <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
         <div class="nav-links">
+          <span id="maintenanceBadge" class="maintenance-badge" style="display: none">Maintenance Mode</span>
           <a href="admin.html" id="adminLink" style="display: none" class="admin-link">⚙️ Admin</a>
           <span class="user-info">👤 <span id="username"></span></span>
           <button id="logoutBtn" class="logout-btn">Log Out</button>
@@ -101,6 +102,10 @@
             if (config.logout_url) {
               logoutRedirect = `${config.logout_url}?url=${returnUrl}`;
             }
+          }
+          // Show maintenance badge if active
+          if (config.maintenance_mode) {
+            document.getElementById('maintenanceBadge').style.display = 'inline-flex';
           }
         } catch (e) {
           console.error('Failed to load config:', e);
