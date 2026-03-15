@@ -17,7 +17,6 @@ services:
       HOST: 0.0.0.0
       RUST_LOG: info
     volumes:
-      - rus-data:/data
       - ./src:/app/src
       - ./static:/app/static
       - ./Cargo.toml:/app/Cargo.toml
