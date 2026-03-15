@@ -117,6 +117,10 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
         login_url: data.config.saas_login_url.clone(),
         #[cfg(feature = "saas")]
         logout_url: data.config.saas_logout_url.clone(),
+        #[cfg(feature = "saas")]
+        maintenance_mode: data.maintenance_mode.load(std::sync::atomic::Ordering::SeqCst),
+        #[cfg(feature = "saas")]
+        maintenance_message: data.maintenance_message.read().unwrap().clone(),
     }))
 }
 
