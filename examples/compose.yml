@@ -3,9 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    container_name: rus-app-${USER}
     # No need for ports since Traefik will handle the routing
     # ports:
-      # - "8080:8080"
+      # - "${HOST_IP:-127.0.0.1}:${HOST_PORT:-4001}:4001"
     volumes:
       - rus-data:/data
     environment:
@@ -19,7 +20,7 @@ services:
       traefik.http.routers.child-rus.service: child-rus@docker
       traefik.http.routers.child-rus.entrypoints: web-secure
       traefik.http.routers.child-rus.tls.certresolver: cert-cloudflare
-      traefik.http.services.child-rus.loadbalancer.server.port: 8080
+      traefik.http.services.child-rus.loadbalancer.server.port: 4001
     networks:
       - network-traefik-public
 
@@ -29,3 +30,4 @@ networks:
 
 volumes:
   rus-data:
+    name: rus-data-${USER}

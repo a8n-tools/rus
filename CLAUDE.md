@@ -121,8 +121,8 @@ JWT_SECRET=<base64-encoded-32-bytes>
 ```
 DB_PATH=./data/rus.db       # Database location (Docker default: /data/rus.db)
 HOST=0.0.0.0                # Bind address
-PORT=8080                   # Server port
-HOST_URL=http://localhost:8080  # Public URL for shortened links
+APP_PORT=4001               # Server port
+HOST_URL=http://localhost:4001  # Public URL for shortened links
 MAX_URL_LENGTH=2048         # Maximum URL length
 CLICK_RETENTION_DAYS=30     # Days to retain click history
 ```
@@ -147,17 +147,17 @@ ALLOW_REGISTRATION=true     # Allow public signups (default: true)
 
 ```bash
 # Register
-curl -X POST http://localhost:8080/api/register \
+curl -X POST http://localhost:4001/api/register \
   -H "Content-Type: application/json" \
   -d '{"username":"test","password":"password123"}'
 
 # Login (returns token)
-curl -X POST http://localhost:8080/api/login \
+curl -X POST http://localhost:4001/api/login \
   -H "Content-Type: application/json" \
   -d '{"username":"test","password":"password123"}'
 
 # Shorten URL (protected)
-curl -X POST http://localhost:8080/api/shorten \
+curl -X POST http://localhost:4001/api/shorten \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer {TOKEN}" \
   -d '{"url":"https://example.com"}'

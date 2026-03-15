@@ -71,7 +71,7 @@ cargo build --release
 cargo run --release
 ```
 
-The application starts on `http://localhost:8080`.
+The application starts on `http://localhost:4001`.
 
 ### Docker Deployment
 
@@ -150,21 +150,21 @@ just check-all           # Check both modes
 
 Register:
 ```bash
-curl -X POST http://localhost:8080/api/register \
+curl -X POST http://localhost:4001/api/register \
   -H "Content-Type: application/json" \
   -d '{"username":"test","password":"password123"}'
 ```
 
 Login and save token:
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:8080/api/login \
+TOKEN=$(curl -s -X POST http://localhost:4001/api/login \
   -H "Content-Type: application/json" \
   -d '{"username":"test","password":"password123"}' | jq -r '.token')
 ```
 
 Shorten a URL:
 ```bash
-curl -X POST http://localhost:8080/api/shorten \
+curl -X POST http://localhost:4001/api/shorten \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"url":"https://github.com/joshrandall8478/rus"}'
@@ -172,7 +172,7 @@ curl -X POST http://localhost:8080/api/shorten \
 
 Get your URLs:
 ```bash
-curl http://localhost:8080/api/urls \
+curl http://localhost:4001/api/urls \
   -H "Authorization: Bearer $TOKEN"
 ```
 
@@ -234,8 +234,8 @@ rus/
 |----------|-------------|---------|
 | `DB_PATH` | Path to SQLite database file | `./data/rus.db` |
 | `HOST` | Server bind address | `0.0.0.0` |
-| `PORT` | Server port | `8080` |
-| `HOST_URL` | Public URL for shortened links | `http://localhost:8080` |
+| `APP_PORT` | Server port | `4001` |
+| `HOST_URL` | Public URL for shortened links | `http://localhost:4001` |
 | `MAX_URL_LENGTH` | Maximum URL length | `2048` |
 | `CLICK_RETENTION_DAYS` | Days to retain click history | `30` |
 | `RUST_LOG` | Log level | `info` |

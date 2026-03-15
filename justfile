@@ -23,7 +23,22 @@ dev-stop:
 
 # Remove dev containers, volumes, and networks
 dev-clean:
-    docker compose down --volumes --remove-orphans
+    docker compose down --remove-orphans
+
+# Remove dev containers, volumes, networks, and all named Docker volumes
+dev-clean-all: dev-clean
+    #!/usr/bin/env nu
+    let suffix = $env.USER
+    let vols = [
+        $"rus-cargo-target-($suffix)"
+        $"rus-data-($suffix)"
+    ]
+    let existing = docker volume ls --quiet | lines
+    for vol in $vols {
+        if $vol in $existing {
+            docker volume rm $vol
+        }
+    }
 
 # Run in standalone mode (debug)
 run: ensure-env

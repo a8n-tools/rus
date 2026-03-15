@@ -61,6 +61,6 @@ ENV HOST=0.0.0.0
 ENV RUST_LOG=info
 ENV DB_PATH=/data/rus.db
 
-EXPOSE 8080
+EXPOSE 4001
 
 ENTRYPOINT ["/app/app"]

@@ -75,7 +75,7 @@ impl Config {
             .unwrap_or(30);
 
         let host_url = env::var("HOST_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+            .unwrap_or_else(|_| "http://localhost:4001".to_string());
 
         let db_path = env::var("DB_PATH")
             .unwrap_or_else(|_| "./data/rus.db".to_string());
@@ -83,10 +83,10 @@ impl Config {
         let host = env::var("HOST")
             .unwrap_or_else(|_| "0.0.0.0".to_string());
 
-        let port = env::var("PORT")
+        let port = env::var("APP_PORT")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(8080);
+            .unwrap_or(4001);
 
         #[cfg(feature = "standalone")]
         let allow_registration = env::var("ALLOW_REGISTRATION")

@@ -10,6 +10,6 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs && cargo build && rm -rf src
 
 COPY static ./static
 
-EXPOSE 8080
+EXPOSE 4001
 
 CMD ["sh", "-c", "find src -name '*.rs' -exec touch {} + && cargo watch -x run"]
