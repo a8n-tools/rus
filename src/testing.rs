@@ -20,10 +20,10 @@ pub fn test_config() -> Config {
     Config {
         max_url_length: 2048,
         click_retention_days: 30,
-        host_url: "http://localhost:8080".to_string(),
+        host_url: "http://localhost:4001".to_string(),
         db_path: ":memory:".to_string(),
         host: "127.0.0.1".to_string(),
-        port: 8080,
+        port: 4001,
         #[cfg(feature = "standalone")]
         jwt_secret: TEST_JWT_SECRET.to_string(),
         #[cfg(feature = "standalone")]

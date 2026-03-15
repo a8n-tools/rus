@@ -5,12 +5,12 @@ services:
   app:
     build:
       context: .
-    container_name: rus-dev
+    container_name: rus-dev-${USER}
     restart: unless-stopped
     # ports:
-    # - "8080:8080"
+    # - "${HOST_IP:-127.0.0.1}:${HOST_PORT:-4001}:4001"
     ports:
-      - "8080:8080"
+      - "${HOST_IP:-127.0.0.1}:${HOST_PORT:-4001}:4001"
     env_file:
       - .env
     environment:
@@ -26,4 +26,6 @@ services:
 
 volumes:
   cargo_target:
+    name: rus-cargo-target-${USER}
   rus-data:
+    name: rus-data-${USER}
