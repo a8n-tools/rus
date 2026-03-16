@@ -91,6 +91,13 @@ pub async fn serve_auth_js() -> Result<HttpResponse> {
         .body(include_str!("../../static/auth.js")))
 }
 
+#[cfg(feature = "saas")]
+pub async fn serve_saas_refresh_js() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("application/javascript; charset=utf-8")
+        .body(include_str!("../../static/saas-refresh.js")))
+}
+
 /// Health check endpoint for monitoring and Docker health checks
 pub async fn health_check(data: web::Data<AppState>) -> Result<HttpResponse> {
     let uptime = data.start_time.elapsed().as_secs();
@@ -117,6 +124,8 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
         login_url: data.config.saas_login_url.clone(),
         #[cfg(feature = "saas")]
         logout_url: data.config.saas_logout_url.clone(),
+        #[cfg(feature = "saas")]
+        refresh_url: data.config.saas_refresh_url.clone(),
         #[cfg(feature = "saas")]
         maintenance_mode: data.maintenance_mode.load(std::sync::atomic::Ordering::SeqCst),
         #[cfg(feature = "saas")]
