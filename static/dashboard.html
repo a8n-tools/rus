@@ -107,6 +107,12 @@
           if (config.maintenance_mode) {
             document.getElementById('maintenanceBadge').style.display = 'inline-flex';
           }
+          // Load SaaS token refresh script
+          if (authMode === 'saas') {
+            var s = document.createElement('script');
+            s.src = 'saas-refresh.js';
+            document.head.appendChild(s);
+          }
         } catch (e) {
           console.error('Failed to load config:', e);
         }

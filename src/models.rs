@@ -119,6 +119,8 @@ pub struct ConfigResponse {
     #[cfg(feature = "saas")]
     pub logout_url: String,
     #[cfg(feature = "saas")]
+    pub refresh_url: String,
+    #[cfg(feature = "saas")]
     pub maintenance_mode: bool,
     #[cfg(feature = "saas")]
     #[serde(skip_serializing_if = "Option::is_none")]
