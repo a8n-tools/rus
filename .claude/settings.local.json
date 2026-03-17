@@ -4,7 +4,8 @@
       "Bash(find:*)",
       "Bash(curl:*)",
       "Bash(kill:*)",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(pkill:*)"
     ]
   }
 }
