@@ -445,7 +445,7 @@
     <!-- Hero -->
     <section class="landing-hero">
       <div class="hero-badge">
-        >_ Part of <a href="#" id="a8nLink">a8n-tools</a> suite
+        >_ Part of <a href="https://pugtsurani.net/" id="a8nLink" target="_blank" rel="noopener noreferrer">a8n-tools</a> suite
       </div>
       <div class="hero-icon">🔗</div>
       <h1 class="hero-title">
@@ -596,7 +596,7 @@
 
         // Update a8n-tools links to point to SaaS login (or '#' for standalone)
         const a8nUrl = config.login_url || '#';
-        document.querySelectorAll('#a8nLink, #a8nLinkFooter, #a8nLinkNav').forEach(link => {
+        document.querySelectorAll('#a8nLinkFooter, #a8nLinkNav').forEach(link => {
           link.href = a8nUrl;
         });
 
