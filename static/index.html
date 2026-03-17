@@ -5,331 +5,508 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RUS - URL Shortener | Part of a8n-tools</title>
     <link rel="stylesheet" href="styles.css?v=3" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <style>
+      /* ============================================================
+         Light-theme overrides — landing page only
+         ============================================================ */
+      :root {
+        --l-bg:        hsl(240 20% 98%);
+        --l-bg-sec:    hsl(240 20% 95%);
+        --l-fg:        hsl(240 24% 10%);
+        --l-primary:   #f97316;
+        --l-primary-d: #ea6b0a;
+        --l-muted:     hsl(240 10% 46%);
+        --l-border:    hsl(240 15% 90%);
+        --l-card:      hsl(240 25% 100%);
+        --l-radius:    0.5rem;
+        --l-indigo:    #6366f1;
+        --l-cyan:      #22d3ee;
+      }
+
+      body {
+        background: var(--l-bg);
+        color: var(--l-fg);
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        padding-bottom: 0;
+      }
+
+      /* ---- Nav ---- */
+      .navbar {
+        background: var(--l-card);
+        border-bottom: 1px solid var(--l-border);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        box-shadow: none;
+        padding: 14px 0;
+      }
+
+      .nav-brand {
+        color: var(--l-fg);
+        font-size: 1.2rem;
+        font-weight: 700;
+      }
+
+      .nav-brand:hover { opacity: 0.75; }
+
+      .nav-links a {
+        color: var(--l-muted);
+        font-size: 0.9rem;
+        font-weight: 500;
+      }
+
+      .nav-links a:hover { color: var(--l-fg); }
+
+      .nav-cta {
+        background: var(--l-primary) !important;
+        color: #fff !important;
+        padding: 7px 18px;
+        border-radius: var(--l-radius);
+        font-weight: 600;
+        font-size: 0.875rem;
+        transition: background 0.2s !important;
+      }
+
+      .nav-cta:hover {
+        background: var(--l-primary-d) !important;
+        color: #fff !important;
+        opacity: 1 !important;
+      }
+
+      /* ---- Hero ---- */
+      .hero-icon {
+        font-size: 4.5rem;
+        margin-bottom: 16px;
+        filter: drop-shadow(0 8px 24px rgba(249, 115, 22, 0.25));
+      }
+
       .landing-hero {
-        min-height: calc(100vh - 80px);
+        min-height: calc(100vh - 56px);
         display: flex;
         flex-direction: column;
         justify-content: center;
         align-items: center;
         text-align: center;
-        padding: 60px 20px;
-        position: relative;
+        padding: 80px 20px 100px;
+        background: var(--l-bg);
       }
 
-      .affiliate-badge {
+      .hero-badge {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        background: var(--bg-card);
-        border: 1px solid var(--border-color);
+        background: hsl(240 24% 10%);
+        color: hsl(240 10% 75%);
         border-radius: 50px;
-        padding: 8px 20px;
-        margin-bottom: 30px;
-        font-size: 0.9em;
-        color: var(--text-secondary);
+        padding: 6px 18px;
+        margin-bottom: 32px;
+        font-size: 0.82rem;
+        font-weight: 500;
+        letter-spacing: 0.01em;
       }
 
-      .affiliate-badge a {
-        color: var(--rust-orange);
+      .hero-badge a {
+        color: var(--l-primary);
         text-decoration: none;
         font-weight: 600;
       }
 
-      .affiliate-badge a:hover {
-        text-decoration: underline;
-      }
+      .hero-badge a:hover { text-decoration: underline; }
 
-      .hero-icon {
-        font-size: 5em;
-        margin-bottom: 20px;
-        filter: drop-shadow(0 10px 30px rgba(247, 76, 0, 0.3));
+      @keyframes gradient-shift {
+        0%   { background-position: 0% center; }
+        50%  { background-position: 100% center; }
+        100% { background-position: 0% center; }
       }
 
       .hero-title {
-        font-size: 3.5em;
+        font-size: clamp(2.8rem, 8vw, 5rem);
         font-weight: 800;
-        color: var(--text-primary);
-        margin-bottom: 10px;
-        letter-spacing: -1px;
+        color: var(--l-fg);
+        letter-spacing: -0.03em;
+        line-height: 1.1;
+        margin-bottom: 22px;
       }
 
-      .hero-title span {
-        color: var(--rust-orange);
+      .hero-title .gradient-word {
+        background: linear-gradient(to right, #f97316, #6366f1, #22d3ee);
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        animation: gradient-shift 6s ease-in-out infinite;
       }
 
       .hero-subtitle {
-        font-size: 1.4em;
-        color: var(--text-secondary);
-        max-width: 600px;
+        font-size: 1.1rem;
+        color: var(--l-muted);
+        max-width: 540px;
         margin: 0 auto 40px;
-        line-height: 1.6;
+        line-height: 1.7;
       }
 
       .hero-cta {
         display: flex;
-        gap: 15px;
+        gap: 12px;
         justify-content: center;
         flex-wrap: wrap;
       }
 
       .cta-btn {
-        padding: 16px 32px;
-        border-radius: 12px;
-        font-size: 1.1em;
+        padding: 11px 26px;
+        border-radius: var(--l-radius);
+        font-size: 0.95rem;
         font-weight: 600;
         cursor: pointer;
-        transition: transform 0.2s, box-shadow 0.2s;
+        transition: opacity 0.2s, box-shadow 0.2s, transform 0.2s;
         text-decoration: none;
         display: inline-flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
       }
 
       .cta-primary {
-        background: linear-gradient(135deg, var(--rust-orange) 0%, var(--rust-orange-dark) 100%);
-        color: white;
+        background: var(--l-primary);
+        color: #fff;
         border: none;
-      }
-
-      .cta-secondary {
-        background: var(--bg-card);
-        color: var(--text-primary);
-        border: 2px solid var(--border-color);
-      }
-
-      .cta-btn:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 1px 4px rgba(249, 115, 22, 0.3);
       }
 
       .cta-primary:hover {
-        box-shadow: 0 10px 30px rgba(247, 76, 0, 0.4);
+        background: var(--l-primary-d);
+        transform: translateY(-1px);
+        box-shadow: 0 6px 18px rgba(249, 115, 22, 0.35);
       }
 
-      /* Features Section */
+      .cta-secondary {
+        background: transparent;
+        color: var(--l-fg);
+        border: 1.5px solid var(--l-border);
+      }
+
+      .cta-secondary:hover {
+        border-color: var(--l-muted);
+        transform: translateY(-1px);
+      }
+
+      /* ---- Features section ---- */
       .features-section {
         padding: 80px 20px;
-        background: var(--bg-card);
-        border-top: 1px solid var(--border-color);
+        background: var(--l-bg-sec);
+        border-top: 1px solid var(--l-border);
+        border-bottom: 1px solid var(--l-border);
       }
 
-      .features-container {
-        max-width: 1200px;
-        margin: 0 auto;
+      .features-container { max-width: 1100px; margin: 0 auto; }
+
+      .section-eyebrow {
+        text-align: center;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--l-primary);
+        margin-bottom: 10px;
       }
 
       .section-title {
         text-align: center;
-        font-size: 2.5em;
-        color: var(--text-primary);
-        margin-bottom: 50px;
+        font-size: clamp(1.6rem, 4vw, 2.2rem);
+        font-weight: 800;
+        color: var(--l-fg);
+        margin-bottom: 8px;
+        letter-spacing: -0.02em;
+      }
+
+      .section-subtitle {
+        text-align: center;
+        color: var(--l-muted);
+        font-size: 0.95rem;
+        margin-bottom: 48px;
       }
 
       .features-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 30px;
+        gap: 18px;
       }
 
       .feature-card {
-        background: var(--bg-dark);
-        border-radius: 16px;
-        padding: 30px;
-        border: 1px solid var(--border-color);
-        transition: transform 0.2s, box-shadow 0.2s;
+        background: var(--l-card);
+        border-radius: var(--l-radius);
+        padding: 28px;
+        border: 1px solid var(--l-border);
+        position: relative;
       }
 
-      .feature-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      .feature-card-overlay {
+        position: absolute;
+        inset: -1px;
+        border-radius: 0.75rem;
+        opacity: 0;
+        transition: opacity 0.15s cubic-bezier(.4, 0, .2, 1);
+        pointer-events: none;
       }
 
-      .feature-icon {
-        font-size: 2.5em;
-        margin-bottom: 15px;
+      .feature-card:hover .feature-card-overlay {
+        opacity: 1;
       }
+
+      .feature-icon-box {
+        width: 2.5rem;
+        height: 2.5rem;
+        border-radius: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+        margin-bottom: 16px;
+        color: #fff;
+      }
+
 
       .feature-card h3 {
-        font-size: 1.3em;
-        color: var(--text-primary);
-        margin-bottom: 10px;
+        font-size: 1rem;
+        font-weight: 700;
+        color: var(--l-fg);
+        margin-bottom: 8px;
       }
 
       .feature-card p {
-        color: var(--text-secondary);
-        line-height: 1.6;
+        color: var(--l-muted);
+        font-size: 0.875rem;
+        line-height: 1.65;
       }
 
-      /* About Section */
+      /* ---- About / Suite section ---- */
       .about-section {
         padding: 80px 20px;
+        background: var(--l-bg);
       }
 
       .about-container {
-        max-width: 800px;
+        max-width: 720px;
         margin: 0 auto;
         text-align: center;
       }
 
       .about-section h2 {
-        font-size: 2em;
-        color: var(--text-primary);
-        margin-bottom: 20px;
+        font-size: clamp(1.6rem, 4vw, 2.2rem);
+        font-weight: 800;
+        color: var(--l-fg);
+        margin-bottom: 16px;
+        letter-spacing: -0.02em;
       }
 
       .about-section p {
-        color: var(--text-secondary);
-        font-size: 1.1em;
-        line-height: 1.8;
-        margin-bottom: 30px;
+        color: var(--l-muted);
+        font-size: 1rem;
+        line-height: 1.75;
+        margin-bottom: 28px;
       }
 
       .a8n-link {
         display: inline-flex;
         align-items: center;
-        gap: 10px;
-        color: var(--rust-orange);
+        gap: 6px;
+        color: var(--l-primary);
         font-weight: 600;
         text-decoration: none;
-        font-size: 1.1em;
+        font-size: 0.95rem;
         transition: opacity 0.2s;
       }
 
-      .a8n-link:hover {
-        opacity: 0.8;
-        text-decoration: underline;
-      }
+      .a8n-link:hover { opacity: 0.75; }
 
-      /* Footer */
-      .landing-footer {
-        padding: 40px 20px;
+      /* ---- CTA gradient band ---- */
+      .cta-section {
+        padding: 80px 20px;
+        background: linear-gradient(to bottom right, #4f46e5, #f97316, #06b6d4);
         text-align: center;
-        border-top: 1px solid var(--border-color);
-        color: var(--text-secondary);
       }
 
-      .footer-links {
+      .cta-section h2 {
+        font-size: clamp(1.8rem, 5vw, 2.8rem);
+        font-weight: 800;
+        color: #fff;
+        margin-bottom: 12px;
+        letter-spacing: -0.02em;
+      }
+
+      .cta-section p {
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 1rem;
+        margin-bottom: 32px;
+      }
+
+      .cta-ghost {
+        background: rgba(255, 255, 255, 0.12);
+        color: #fff;
+        border: 1.5px solid rgba(255, 255, 255, 0.5);
+        backdrop-filter: blur(4px);
+      }
+
+      .cta-ghost:hover {
+        background: rgba(255, 255, 255, 0.22);
+        transform: translateY(-1px);
+      }
+
+      /* ---- Footer ---- */
+      .landing-footer {
+        padding: 52px 20px 32px;
+        background: var(--l-card);
+        border-top: 1px solid var(--l-border);
+      }
+
+      .footer-inner {
+        max-width: 1100px;
+        margin: 0 auto 40px;
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr 1fr;
+        gap: 40px;
+      }
+
+      .footer-brand-col .footer-logo {
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--l-fg);
+        text-decoration: none;
+        display: inline-block;
+        margin-bottom: 10px;
+      }
+
+      .footer-tagline {
+        font-size: 0.85rem;
+        color: var(--l-muted);
+        line-height: 1.55;
+      }
+
+      .footer-col h4 {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--l-fg);
+        margin-bottom: 14px;
+      }
+
+      .footer-col a {
+        display: block;
+        font-size: 0.875rem;
+        color: var(--l-muted);
+        text-decoration: none;
+        margin-bottom: 9px;
+        transition: color 0.2s;
+      }
+
+      .footer-col a:hover { color: var(--l-fg); }
+
+      .footer-bottom {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding-top: 24px;
+        border-top: 1px solid var(--l-border);
         display: flex;
         justify-content: center;
-        gap: 30px;
-        margin-bottom: 20px;
-        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8rem;
+        color: var(--l-muted);
       }
 
-      .footer-links a {
-        color: var(--text-secondary);
+      .footer-bottom a {
+        color: var(--l-muted);
         text-decoration: none;
         transition: color 0.2s;
       }
 
-      .footer-links a:hover {
-        color: var(--rust-orange);
-      }
+      .footer-bottom a:hover { color: var(--l-primary); }
 
-      .footer-brand {
-        font-size: 0.9em;
-        opacity: 0.7;
-      }
-
-      .footer-brand a {
-        color: var(--rust-orange);
-        text-decoration: none;
-      }
-
+      /* ---- Responsive ---- */
       @media (max-width: 768px) {
-        .hero-title {
-          font-size: 2.5em;
-        }
+        .footer-inner { grid-template-columns: 1fr 1fr; gap: 28px; }
 
-        .hero-subtitle {
-          font-size: 1.1em;
-        }
+        .hero-cta { flex-direction: column; align-items: center; }
 
-        .hero-cta {
-          flex-direction: column;
-          align-items: center;
-        }
+        .cta-btn { width: 100%; max-width: 300px; justify-content: center; }
+      }
 
-        .cta-btn {
-          width: 100%;
-          max-width: 300px;
-          justify-content: center;
-        }
-
-        .section-title {
-          font-size: 2em;
-        }
+      @media (max-width: 480px) {
+        .footer-inner { grid-template-columns: 1fr; }
       }
     </style>
   </head>
   <body>
     <nav class="navbar">
       <div class="nav-content">
-        <a href="/" class="nav-brand">🦀 RUS</a>
+        <a href="/" class="nav-brand">🦀 <span style="color: #f97316; font-weight: 700;">RUS</span></a>
         <div class="nav-links" id="navLinks">
           <a href="#features">Features</a>
           <a href="#about">About</a>
           <a href="login.html">Log In</a>
-          <a href="signup.html" id="signupLink">Sign Up</a>
+          <a href="signup.html" class="nav-cta" id="signupLink">Sign Up</a>
         </div>
       </div>
     </nav>
 
-    <!-- Hero Section -->
+    <!-- Hero -->
     <section class="landing-hero">
-      <div class="affiliate-badge">
-        Part of <a href="#" id="a8nLink">a8n-tools</a> suite
+      <div class="hero-badge">
+        >_ Part of <a href="https://pugtsurani.net/" id="a8nLink" target="_blank" rel="noopener noreferrer">a8n-tools</a> suite
       </div>
       <div class="hero-icon">🔗</div>
       <h1 class="hero-title">
-        <span>RUS</span> - URL Shortener
+        <span style="color: var(--l-primary);">RUS</span> - <span class="gradient-word">URL Shortener</span>
       </h1>
       <p class="hero-subtitle">
         Create short, trackable links in seconds. Built with Rust for blazing fast performance and rock-solid reliability.
       </p>
       <div class="hero-cta" id="heroCta">
-        <a href="signup.html" class="cta-btn cta-primary" id="getStartedBtn">
-          Get Started Free
-        </a>
-        <a href="login.html" class="cta-btn cta-secondary">
-          Log In
-        </a>
+        <a href="signup.html" class="cta-btn cta-primary" id="getStartedBtn">Get Started →</a>
+        <a href="login.html" class="cta-btn cta-secondary">Log In</a>
       </div>
     </section>
 
-    <!-- Features Section -->
+    <!-- Features -->
     <section class="features-section" id="features">
       <div class="features-container">
-        <h2 class="section-title">Why RUS?</h2>
+        <p class="section-eyebrow">Why RUS?</p>
+        <h2 class="section-title">No ops. No overhead. No nonsense.</h2>
+        <p class="section-subtitle">Built with Rust so your links are always fast and always up.</p>
         <div class="features-grid">
           <div class="feature-card">
-            <div class="feature-icon">⚡</div>
+            <div class="feature-card-overlay" style="background-image: linear-gradient(to bottom, rgb(249 115 22 / 0.5), rgb(249 115 22 / 0.2), transparent);"></div>
+            <div class="feature-icon-box" style="background: #f97316;"><i class="fa-solid fa-bolt"></i></div>
             <h3>Lightning Fast</h3>
             <p>Built with Rust and Actix-web, RUS delivers sub-millisecond redirects. Your links load instantly, every time.</p>
           </div>
           <div class="feature-card">
-            <div class="feature-icon">📊</div>
+            <div class="feature-card-overlay" style="background-image: linear-gradient(to bottom, rgb(139 92 246 / 0.5), rgb(139 92 246 / 0.2), transparent);"></div>
+            <div class="feature-icon-box" style="background: #8b5cf6;"><i class="fa-solid fa-chart-line"></i></div>
             <h3>Click Analytics</h3>
             <p>Track how your links perform. See click counts and monitor engagement across all your shortened URLs.</p>
           </div>
           <div class="feature-card">
-            <div class="feature-icon">🔒</div>
+            <div class="feature-card-overlay" style="background-image: linear-gradient(to bottom, rgb(6 182 212 / 0.5), rgb(6 182 212 / 0.2), transparent);"></div>
+            <div class="feature-icon-box" style="background: #06b6d4;"><i class="fa-solid fa-shield-halved"></i></div>
             <h3>Secure by Design</h3>
-            <p>JWT authentication and bcrypt password hashing keep your account and links protected.</p>
+            <p>JWT authentication and Argon2id password hashing keep your account and links protected.</p>
           </div>
           <div class="feature-card">
-            <div class="feature-icon">🏷️</div>
+            <div class="feature-card-overlay" style="background-image: linear-gradient(to bottom, rgb(236 72 153 / 0.5), rgb(236 72 153 / 0.2), transparent);"></div>
+            <div class="feature-icon-box" style="background: #ec4899;"><i class="fa-solid fa-pen-to-square"></i></div>
             <h3>Custom Names</h3>
             <p>Organize your links with custom names. Easily find and manage URLs in your dashboard.</p>
           </div>
           <div class="feature-card">
-            <div class="feature-icon">📱</div>
+            <div class="feature-card-overlay" style="background-image: linear-gradient(to bottom, rgb(99 102 241 / 0.5), rgb(99 102 241 / 0.2), transparent);"></div>
+            <div class="feature-icon-box" style="background: #6366f1;"><i class="fa-solid fa-qrcode"></i></div>
             <h3>QR Codes</h3>
             <p>Generate QR codes for any shortened URL. Perfect for print materials and offline sharing.</p>
           </div>
           <div class="feature-card">
-            <div class="feature-icon">🚀</div>
+            <div class="feature-card-overlay" style="background-image: linear-gradient(to bottom, rgb(16 185 129 / 0.5), rgb(16 185 129 / 0.2), transparent);"></div>
+            <div class="feature-icon-box" style="background: #10b981;"><i class="fa-solid fa-server"></i></div>
             <h3>Self-Hostable</h3>
             <p>Deploy on your own infrastructure with Docker. Full control over your data and branding.</p>
           </div>
@@ -337,7 +514,7 @@
       </div>
     </section>
 
-    <!-- About Section -->
+    <!-- About / Suite -->
     <section class="about-section" id="about">
       <div class="about-container">
         <h2>Part of the a8n-tools Suite</h2>
@@ -346,23 +523,45 @@
           Whether you're managing marketing campaigns, sharing resources, or tracking link engagement,
           RUS provides the speed and reliability you need.
         </p>
-        <a href="#" class="a8n-link" id="a8nLinkFooter">
-          Explore a8n-tools →
-        </a>
+        <a href="#" class="a8n-link" id="a8nLinkFooter">Explore a8n-tools →</a>
       </div>
+    </section>
+
+    <!-- CTA gradient band -->
+    <section class="cta-section">
+      <h2>Start shortening. Stop waiting.</h2>
+      <p>Create an account and shorten your first link in under a minute.</p>
+      <a href="signup.html" class="cta-btn cta-ghost" id="ctaSectionBtn">Create Account →</a>
     </section>
 
     <!-- Footer -->
     <footer class="landing-footer">
-      <div class="footer-links">
-        <a href="report.html">Report Abuse</a>
-        <a href="#" id="a8nLinkNav">a8n-tools</a>
+      <div class="footer-inner">
+        <div class="footer-brand-col">
+          <a href="/" class="footer-logo">🦀 RUS</a>
+          <p class="footer-tagline">Short links.<br />Built with Rust.</p>
+        </div>
+        <div class="footer-col">
+          <h4>Product</h4>
+          <a href="#features">Features</a>
+          <a href="dashboard.html">Dashboard</a>
+        </div>
+        <div class="footer-col">
+          <h4>Account</h4>
+          <a href="login.html">Log In</a>
+          <a href="signup.html" id="footerSignupLink">Sign Up</a>
+        </div>
+        <div class="footer-col">
+          <h4>Legal</h4>
+          <a href="report.html">Report Abuse</a>
+          <a href="#" id="a8nLinkNav">a8n-tools</a>
+        </div>
       </div>
-      <p class="footer-brand">
-        Made with 🦀 using <a href="https://www.rust-lang.org/" target="_blank">Rust</a>
-        <br />
+      <div class="footer-bottom">
+        <span>Made with 🦀 using <a href="https://www.rust-lang.org/" target="_blank">Rust</a></span>
+        <span>·</span>
         <span id="version"></span>
-      </p>
+      </div>
     </footer>
 
     <script src="k9f3x2m7.js"></script>
@@ -374,7 +573,6 @@
         try {
           const response = await fetch('/api/setup/required');
           const data = await response.json();
-
           if (data.setup_required) {
             window.location.href = 'setup.html';
           }
@@ -382,7 +580,6 @@
           console.error('Failed to check setup status:', error);
         }
       }
-
       checkSetup();
 
       // Fetch and display version
@@ -395,7 +592,6 @@
           console.error('Failed to load version:', error);
         }
       }
-
       loadVersion();
 
       // Update nav and CTA based on auth status and registration config
@@ -403,7 +599,6 @@
         const navLinks = document.getElementById('navLinks');
         const heroCta = document.getElementById('heroCta');
 
-        // Fetch config to determine auth mode
         let config = {};
         try {
           const response = await fetch('/api/config');
@@ -414,7 +609,7 @@
 
         // Update a8n-tools links to point to SaaS login (or '#' for standalone)
         const a8nUrl = config.login_url || '#';
-        document.querySelectorAll('#a8nLink, #a8nLinkFooter, #a8nLinkNav').forEach(link => {
+        document.querySelectorAll('#a8nLinkFooter, #a8nLinkNav').forEach(link => {
           link.href = a8nUrl;
         });
 
@@ -429,12 +624,8 @@
             <a href="${loginUrl}">Log In</a>
           `;
           heroCta.innerHTML = `
-            <a href="dashboard.html" class="cta-btn cta-primary">
-              Go to Dashboard
-            </a>
-            <a href="${loginUrl}" class="cta-btn cta-secondary">
-              Log In
-            </a>
+            <a href="dashboard.html" class="cta-btn cta-primary">Go to Dashboard</a>
+            <a href="${loginUrl}" class="cta-btn cta-secondary">Log In</a>
           `;
         } else if (isAuthenticated()) {
           // Standalone mode - user is logged in
@@ -445,21 +636,18 @@
             <button class="logout-btn" onclick="handleLogout()">Log Out</button>
           `;
           heroCta.innerHTML = `
-            <a href="dashboard.html" class="cta-btn cta-primary">
-              Go to Dashboard
-            </a>
+            <a href="dashboard.html" class="cta-btn cta-primary">Go to Dashboard</a>
           `;
         } else {
           // Standalone mode - not logged in
           if (config.allow_registration === false) {
-            const signupLink = document.getElementById('signupLink');
-            const getStartedBtn = document.getElementById('getStartedBtn');
-            if (signupLink) signupLink.style.display = 'none';
-            if (getStartedBtn) getStartedBtn.style.display = 'none';
+            ['signupLink', 'getStartedBtn', 'footerSignupLink', 'ctaSectionBtn'].forEach(id => {
+              const el = document.getElementById(id);
+              if (el) el.style.display = 'none';
+            });
           }
         }
       }
-
       updateUI();
 
       function handleLogout() {
@@ -472,12 +660,9 @@
         anchor.addEventListener('click', function(e) {
           const href = this.getAttribute('href');
           if (!href.startsWith('#') || href === '#') return;
-
           e.preventDefault();
           const target = document.querySelector(href);
-          if (target) {
-            target.scrollIntoView({ behavior: 'smooth' });
-          }
+          if (target) target.scrollIntoView({ behavior: 'smooth' });
         });
       });
     </script>
