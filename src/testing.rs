@@ -44,6 +44,8 @@ pub fn test_config() -> Config {
         saas_logout_url: "https://api.example.com/logout".to_string(),
         #[cfg(feature = "saas")]
         saas_membership_url: "https://app.example.com/membership".to_string(),
+        #[cfg(feature = "saas")]
+        saas_refresh_url: "https://api.example.com/auth/refresh".to_string(),
     }
 }
 

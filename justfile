@@ -56,13 +56,13 @@ build:
 build-saas:
     cargo build --release --no-default-features --features saas
 
-# Run tests (standalone)
+# Run tests (standalone) inside Docker
 test:
-    cargo test
+    docker compose run --rm --no-deps -e JWT_SECRET=test-secret-at-least-32-chars-ok! app sh -c "cargo test --features standalone 2>&1"
 
-# Run tests (saas)
+# Run tests (saas) inside Docker
 test-saas:
-    cargo test --no-default-features --features saas
+    docker compose run --rm --no-deps -e SAAS_JWT_SECRET=test-saas-secret-32-chars-padded! app sh -c "cargo test --no-default-features --features saas 2>&1"
 
 # Lint with Clippy (standalone)
 lint:
