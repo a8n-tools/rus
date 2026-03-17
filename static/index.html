@@ -166,16 +166,26 @@
       }
 
       .cta-primary {
-        background: var(--l-primary);
+        display: inline-flex;
+        height: 2.75rem;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        border-radius: calc(0.5rem - 2px);
+        border-width: 0;
+        padding-left: 2rem;
+        padding-right: 2rem;
+        font-size: 0.875rem;
+        font-weight: 500;
         color: #fff;
-        border: none;
-        box-shadow: 0 1px 4px rgba(249, 115, 22, 0.3);
+        background: linear-gradient(to right, #f97316, #6366f1);
+        box-shadow: 0 10px 15px -3px rgb(249 115 22 / 0.25),
+                    0 4px 6px -4px rgb(249 115 22 / 0.25);
+        transition: color, background-color, border-color 0.15s cubic-bezier(.4,0,.2,1);
       }
 
       .cta-primary:hover {
-        background: var(--l-primary-d);
-        transform: translateY(-1px);
-        box-shadow: 0 6px 18px rgba(249, 115, 22, 0.35);
+        opacity: 0.92;
       }
 
       .cta-secondary {
