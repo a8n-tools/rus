@@ -189,14 +189,24 @@
       }
 
       .cta-secondary {
-        background: transparent;
-        color: var(--l-fg);
-        border: 1.5px solid var(--l-border);
+        display: inline-flex;
+        height: 2.75rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: calc(0.5rem - 2px);
+        border: 1px solid rgba(165, 180, 252, 0.3);
+        background-color: hsl(240 20% 98%);
+        padding-left: 2rem;
+        padding-right: 2rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: rgb(79 70 229);
+        transition: color, background-color, border-color 0.15s cubic-bezier(.4,0,.2,1);
       }
 
       .cta-secondary:hover {
-        border-color: var(--l-muted);
-        transform: translateY(-1px);
+        border-color: rgba(165, 180, 252, 0.6);
+        background-color: hsl(240 20% 96%);
       }
 
       /* ---- Features section ---- */
