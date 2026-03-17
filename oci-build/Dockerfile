@@ -20,7 +20,7 @@ RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static
 COPY Cargo.toml Cargo.lock ./
 
 # Create dummy src for dependency compilation
-RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN mkdir src && echo "fn main() {}" > src/main.rs && touch src/lib.rs
 
 # Build dependencies only (default features covers standalone deps)
 RUN cargo build --release && rm -rf src target/release/deps/rus*
