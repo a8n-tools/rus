@@ -82,7 +82,7 @@ impl Config {
         let db_path = env::var("DB_PATH")
             .unwrap_or_else(|_| "./data/rus.db".to_string());
 
-        let host = env::var("HOST")
+        let host = env::var("APP_HOST")
             .unwrap_or_else(|_| "0.0.0.0".to_string());
 
         let port = env::var("APP_PORT")

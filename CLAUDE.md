@@ -120,7 +120,7 @@ JWT_SECRET=<base64-encoded-32-bytes>
 ### Optional (both modes)
 ```
 DB_PATH=./data/rus.db       # Database location (Docker default: /data/rus.db)
-HOST=0.0.0.0                # Bind address
+APP_HOST=0.0.0.0            # Bind address (avoids collision with system HOST variable)
 APP_PORT=4001               # Server port
 HOST_URL=http://localhost:4001  # Public URL for shortened links
 MAX_URL_LENGTH=2048         # Maximum URL length
