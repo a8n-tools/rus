@@ -19,6 +19,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./static:/app/static
+      - ./tests:/app/tests
       - ./Cargo.toml:/app/Cargo.toml
       - ./Cargo.lock:/app/Cargo.lock
       - cargo_target:/app/target

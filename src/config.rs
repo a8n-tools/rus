@@ -194,3 +194,65 @@ impl Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+
+    /// test_config() is used throughout the test suite; verify it produces sane values.
+    #[test]
+    fn test_config_has_expected_defaults() {
+        let cfg = crate::testing::test_config();
+        assert_eq!(cfg.max_url_length, 2048);
+        assert_eq!(cfg.click_retention_days, 30);
+        assert_eq!(cfg.host_url, "http://localhost:4001");
+        assert_eq!(cfg.db_path, ":memory:");
+        assert_eq!(cfg.host, "127.0.0.1");
+        assert_eq!(cfg.port, 4001);
+    }
+
+    #[cfg(feature = "standalone")]
+    #[test]
+    fn test_config_standalone_fields() {
+        let cfg = crate::testing::test_config();
+        assert_eq!(cfg.jwt_expiry_hours, 1);
+        assert_eq!(cfg.refresh_token_expiry_days, 7);
+        assert_eq!(cfg.account_lockout_attempts, 5);
+        assert_eq!(cfg.account_lockout_duration_minutes, 30);
+        assert!(cfg.allow_registration);
+        assert!(!cfg.jwt_secret.is_empty());
+    }
+
+    #[cfg(feature = "saas")]
+    #[test]
+    fn test_config_saas_fields() {
+        let cfg = crate::testing::test_config();
+        assert!(!cfg.saas_jwt_secret.is_empty());
+        assert!(!cfg.saas_login_url.is_empty());
+        assert!(!cfg.saas_logout_url.is_empty());
+        assert!(!cfg.saas_membership_url.is_empty());
+    }
+
+    #[test]
+    fn config_is_clone_and_debug() {
+        let cfg = crate::testing::test_config();
+        let _cloned = cfg.clone();
+        let debug_str = format!("{:?}", cfg);
+        assert!(!debug_str.is_empty());
+    }
+
+    #[test]
+    fn print_banner_does_not_panic() {
+        let cfg = crate::testing::test_config();
+        cfg.print_banner(); // should not panic
+    }
+
+    #[cfg(feature = "standalone")]
+    #[test]
+    fn get_jwt_secret_returns_default_when_unset() {
+        // When JWT_SECRET is not set, get_jwt_secret returns the hardcoded default
+        let secret = Config::get_jwt_secret();
+        assert!(!secret.is_empty());
+    }
+}

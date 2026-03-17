@@ -181,3 +181,201 @@ pub fn cleanup_old_clicks(db: &Connection, retention_days: i64) {
         params![cutoff_str],
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn appstate_new_creates_tables() {
+        let cfg = crate::testing::test_config();
+        let state = AppState::new(cfg).expect("AppState::new should succeed with :memory:");
+        let db = state.db.lock().unwrap();
+
+        // Verify core tables exist
+        let tables: Vec<String> = {
+            let mut stmt = db
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        assert!(tables.contains(&"users".to_string()));
+        assert!(tables.contains(&"urls".to_string()));
+        assert!(tables.contains(&"click_history".to_string()));
+        assert!(tables.contains(&"abuse_reports".to_string()));
+    }
+
+    #[cfg(feature = "standalone")]
+    #[test]
+    fn appstate_standalone_has_extra_tables() {
+        let cfg = crate::testing::test_config();
+        let state = AppState::new(cfg).unwrap();
+        let db = state.db.lock().unwrap();
+
+        let tables: Vec<String> = {
+            let mut stmt = db
+                .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                .unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        assert!(tables.contains(&"refresh_tokens".to_string()));
+        assert!(tables.contains(&"login_attempts".to_string()));
+    }
+
+    #[test]
+    fn appstate_indexes_created() {
+        let cfg = crate::testing::test_config();
+        let state = AppState::new(cfg).unwrap();
+        let db = state.db.lock().unwrap();
+
+        let indexes: Vec<String> = {
+            let mut stmt = db
+                .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")
+                .unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        assert!(indexes.contains(&"idx_short_code".to_string()));
+        assert!(indexes.contains(&"idx_user_id".to_string()));
+        assert!(indexes.contains(&"idx_click_history_url_id".to_string()));
+        assert!(indexes.contains(&"idx_click_history_clicked_at".to_string()));
+    }
+
+    #[test]
+    fn appstate_foreign_keys_enabled() {
+        let cfg = crate::testing::test_config();
+        let state = AppState::new(cfg).unwrap();
+        let db = state.db.lock().unwrap();
+
+        let fk: i32 = db
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fk, 1);
+    }
+
+    #[test]
+    fn appstate_new_is_idempotent() {
+        // Calling new twice with :memory: should both succeed (CREATE IF NOT EXISTS)
+        let cfg1 = crate::testing::test_config();
+        let _s1 = AppState::new(cfg1).unwrap();
+        let cfg2 = crate::testing::test_config();
+        let _s2 = AppState::new(cfg2).unwrap();
+    }
+
+    #[test]
+    fn cleanup_old_clicks_removes_expired_entries() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+
+        // Insert a user and URL
+        db.execute(
+            "INSERT INTO users (username, password) VALUES ('testuser', 'pass')",
+            [],
+        )
+        .unwrap();
+        let user_id = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO urls (user_id, original_url, short_code) VALUES (?1, 'https://example.com', 'abc123')",
+            params![user_id],
+        )
+        .unwrap();
+        let url_id = db.last_insert_rowid();
+
+        // Insert an old click (60 days ago)
+        let old_time = (Utc::now() - Duration::days(60))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        db.execute(
+            "INSERT INTO click_history (url_id, clicked_at) VALUES (?1, ?2)",
+            params![url_id, old_time],
+        )
+        .unwrap();
+
+        // Insert a recent click
+        let recent_time = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        db.execute(
+            "INSERT INTO click_history (url_id, clicked_at) VALUES (?1, ?2)",
+            params![url_id, recent_time],
+        )
+        .unwrap();
+
+        let count_before: i64 = db
+            .query_row("SELECT COUNT(*) FROM click_history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count_before, 2);
+
+        // Cleanup with 30-day retention
+        cleanup_old_clicks(&db, 30);
+
+        let count_after: i64 = db
+            .query_row("SELECT COUNT(*) FROM click_history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count_after, 1);
+    }
+
+    #[test]
+    fn cleanup_old_clicks_keeps_all_when_within_retention() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+
+        db.execute(
+            "INSERT INTO users (username, password) VALUES ('testuser', 'pass')",
+            [],
+        )
+        .unwrap();
+        let user_id = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO urls (user_id, original_url, short_code) VALUES (?1, 'https://example.com', 'abc123')",
+            params![user_id],
+        )
+        .unwrap();
+        let url_id = db.last_insert_rowid();
+
+        // Insert clicks within retention
+        let recent_time = Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        db.execute(
+            "INSERT INTO click_history (url_id, clicked_at) VALUES (?1, ?2)",
+            params![url_id, recent_time],
+        )
+        .unwrap();
+
+        cleanup_old_clicks(&db, 30);
+
+        let count: i64 = db
+            .query_row("SELECT COUNT(*) FROM click_history", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn cleanup_old_clicks_noop_on_empty_table() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+        cleanup_old_clicks(&db, 30); // should not panic
+    }
+
+    #[test]
+    fn start_time_is_recent() {
+        let state = crate::testing::make_test_state();
+        assert!(state.start_time.elapsed().as_secs() < 5);
+    }
+
+    #[cfg(feature = "saas")]
+    #[test]
+    fn saas_maintenance_mode_defaults_to_false() {
+        let state = crate::testing::make_test_state();
+        assert!(!state.maintenance_mode.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(state.maintenance_message.read().unwrap().is_none());
+    }
+}

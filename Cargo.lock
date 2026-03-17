@@ -2035,6 +2035,7 @@ name = "rus"
 version = "0.15.1"
 dependencies = [
  "actix-governor",
+ "actix-http",
  "actix-web",
  "actix-web-httpauth",
  "argon2",

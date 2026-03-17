@@ -165,7 +165,11 @@ mod tests {
             let state = crate::testing::make_test_state();
             test::init_service(
                 App::new()
-                    .app_data(state)
+                    .app_data(state.clone())
+                    .route("/", web::get().to(index))
+                    .route("/report.html", web::get().to(report_page))
+                    .route("/styles.css", web::get().to(serve_css))
+                    .route("/k9f3x2m7.js", web::get().to(serve_auth_js))
                     .route("/health", web::get().to(health_check))
                     .route("/api/config", web::get().to(get_config))
                     .route("/api/version", web::get().to(get_version)),
@@ -173,6 +177,8 @@ mod tests {
             .await
         }};
     }
+
+    // --- health_check ---
 
     #[actix_web::test]
     async fn health_check_returns_200() {
@@ -192,6 +198,8 @@ mod tests {
         assert!(body["uptime_seconds"].is_number());
     }
 
+    // --- get_config ---
+
     #[actix_web::test]
     async fn get_config_returns_200() {
         let app = setup_app!();
@@ -210,6 +218,29 @@ mod tests {
         assert!(body["auth_mode"].is_string());
     }
 
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn get_config_standalone_auth_mode() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/api/config").to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(body["auth_mode"], "standalone");
+        assert!(body.get("allow_registration").is_some());
+    }
+
+    #[cfg(feature = "saas")]
+    #[actix_web::test]
+    async fn get_config_saas_auth_mode() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/api/config").to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(body["auth_mode"], "saas");
+        assert!(body.get("login_url").is_some());
+        assert!(body.get("logout_url").is_some());
+    }
+
+    // --- get_version ---
+
     #[actix_web::test]
     async fn get_version_returns_version_string() {
         let app = setup_app!();
@@ -217,5 +248,254 @@ mod tests {
         let body: Value = test::call_and_read_body_json(&app, req).await;
         assert!(body["version"].is_string());
         assert!(!body["version"].as_str().unwrap().is_empty());
+    }
+
+    // --- static page handlers ---
+
+    #[actix_web::test]
+    async fn index_returns_200_with_html() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "text/html; charset=utf-8"
+        );
+    }
+
+    #[actix_web::test]
+    async fn index_body_contains_html() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/").to_request();
+        let body = test::call_and_read_body(&app, req).await;
+        let body_str = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body_str.contains("<html") || body_str.contains("<!DOCTYPE") || body_str.contains("<!doctype"));
+    }
+
+    #[actix_web::test]
+    async fn report_page_returns_200_with_html() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/report.html").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "text/html; charset=utf-8"
+        );
+    }
+
+    #[actix_web::test]
+    async fn serve_css_returns_200_with_css_content_type() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/styles.css").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "text/css; charset=utf-8"
+        );
+    }
+
+    #[actix_web::test]
+    async fn serve_css_body_is_not_empty() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/styles.css").to_request();
+        let body = test::call_and_read_body(&app, req).await;
+        assert!(!body.is_empty());
+    }
+
+    #[actix_web::test]
+    async fn serve_auth_js_returns_200_with_js_content_type() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/k9f3x2m7.js").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "application/javascript; charset=utf-8"
+        );
+    }
+
+    #[actix_web::test]
+    async fn serve_auth_js_body_is_not_empty() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/k9f3x2m7.js").to_request();
+        let body = test::call_and_read_body(&app, req).await;
+        assert!(!body.is_empty());
+    }
+
+    // --- standalone-only page handlers ---
+
+    #[cfg(feature = "standalone")]
+    mod standalone {
+        use super::*;
+
+        macro_rules! setup_standalone_app {
+            () => {{
+                let state = crate::testing::make_test_state();
+                test::init_service(
+                    App::new()
+                        .app_data(state.clone())
+                        .route("/login.html", web::get().to(login_page))
+                        .route("/signup.html", web::get().to(signup_page))
+                        .route("/dashboard.html", web::get().to(dashboard_page))
+                        .route("/setup.html", web::get().to(setup_page))
+                        .route("/admin.html", web::get().to(admin_page))
+                        .route("/api/setup/required", web::get().to(check_setup_required)),
+                )
+                .await
+            }};
+        }
+
+        #[actix_web::test]
+        async fn login_page_returns_200_html() {
+            let app = setup_standalone_app!();
+            let req = test::TestRequest::get().uri("/login.html").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                "text/html; charset=utf-8"
+            );
+        }
+
+        #[actix_web::test]
+        async fn signup_page_returns_200_html() {
+            let app = setup_standalone_app!();
+            let req = test::TestRequest::get().uri("/signup.html").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                "text/html; charset=utf-8"
+            );
+        }
+
+        #[actix_web::test]
+        async fn dashboard_page_returns_200_html() {
+            let app = setup_standalone_app!();
+            let req = test::TestRequest::get().uri("/dashboard.html").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                "text/html; charset=utf-8"
+            );
+        }
+
+        #[actix_web::test]
+        async fn setup_page_returns_200_html() {
+            let app = setup_standalone_app!();
+            let req = test::TestRequest::get().uri("/setup.html").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                "text/html; charset=utf-8"
+            );
+        }
+
+        #[actix_web::test]
+        async fn admin_page_returns_200_html() {
+            let app = setup_standalone_app!();
+            let req = test::TestRequest::get().uri("/admin.html").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                "text/html; charset=utf-8"
+            );
+        }
+
+        #[actix_web::test]
+        async fn check_setup_required_true_when_no_users() {
+            let app = setup_standalone_app!();
+            let req = test::TestRequest::get().uri("/api/setup/required").to_request();
+            let body: Value = test::call_and_read_body_json(&app, req).await;
+            assert_eq!(body["setup_required"], true);
+        }
+
+        #[actix_web::test]
+        async fn check_setup_required_false_when_users_exist() {
+            let state = crate::testing::make_test_state();
+            crate::testing::insert_test_user(&state, "admin", true);
+            let app = test::init_service(
+                App::new()
+                    .app_data(state)
+                    .route("/api/setup/required", web::get().to(check_setup_required)),
+            )
+            .await;
+
+            let req = test::TestRequest::get().uri("/api/setup/required").to_request();
+            let body: Value = test::call_and_read_body_json(&app, req).await;
+            assert_eq!(body["setup_required"], false);
+        }
+    }
+
+    // --- saas-only page handlers ---
+
+    #[cfg(feature = "saas")]
+    mod saas {
+        use super::*;
+
+        #[actix_web::test]
+        async fn dashboard_redirects_without_valid_cookie() {
+            let state = crate::testing::make_test_state();
+            let app = test::init_service(
+                App::new()
+                    .app_data(state)
+                    .route("/dashboard.html", web::get().to(dashboard_page)),
+            )
+            .await;
+
+            let req = test::TestRequest::get().uri("/dashboard.html").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 302);
+            let location = resp.headers().get("Location").unwrap().to_str().unwrap();
+            assert!(location.contains("login") || location.contains("app.example.com"));
+        }
+
+        #[actix_web::test]
+        async fn dashboard_returns_html_with_valid_cookie() {
+            let state = crate::testing::make_test_state();
+            let jwt = crate::testing::make_saas_jwt("42", "alice@example.com", "active", None);
+            let app = test::init_service(
+                App::new()
+                    .app_data(state)
+                    .route("/dashboard.html", web::get().to(dashboard_page)),
+            )
+            .await;
+
+            let req = test::TestRequest::get()
+                .uri("/dashboard.html")
+                .insert_header(("Cookie", format!("access_token={jwt}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                "text/html; charset=utf-8"
+            );
+        }
+
+        #[actix_web::test]
+        async fn serve_saas_refresh_js_returns_200() {
+            let state = crate::testing::make_test_state();
+            let app = test::init_service(
+                App::new()
+                    .app_data(state)
+                    .route("/saas-refresh.js", web::get().to(serve_saas_refresh_js)),
+            )
+            .await;
+
+            let req = test::TestRequest::get().uri("/saas-refresh.js").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            assert_eq!(
+                resp.headers().get("content-type").unwrap(),
+                "application/javascript; charset=utf-8"
+            );
+        }
     }
 }
