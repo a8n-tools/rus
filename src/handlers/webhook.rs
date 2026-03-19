@@ -71,10 +71,7 @@ pub async fn handle_maintenance_webhook(
         };
     }
 
-    eprintln!(
-        "webhook: maintenance_mode set to {}",
-        payload.maintenance_mode
-    );
+    tracing::info!(maintenance_mode = payload.maintenance_mode, "Maintenance mode updated via webhook");
 
     Ok(HttpResponse::Ok().json(serde_json::json!({ "status": "ok" })))
 }

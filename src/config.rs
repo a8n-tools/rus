@@ -38,7 +38,7 @@ impl Config {
     pub fn from_env() -> Self {
         #[cfg(feature = "standalone")]
         let jwt_secret = env::var("JWT_SECRET").unwrap_or_else(|_| {
-            eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
+            tracing::warn!("JWT_SECRET not set in environment, using default (insecure)");
             "your-secret-key-change-this-in-production".to_string()
         });
 
@@ -152,7 +152,7 @@ impl Config {
     #[cfg(feature = "standalone")]
     pub fn get_jwt_secret() -> String {
         env::var("JWT_SECRET").unwrap_or_else(|_| {
-            eprintln!("WARNING: JWT_SECRET not set in environment, using default (insecure)");
+            tracing::warn!("JWT_SECRET not set in environment, using default (insecure)");
             "your-secret-key-change-this-in-production".to_string()
         })
     }
@@ -160,38 +160,33 @@ impl Config {
     /// Print configuration banner on startup
     pub fn print_banner(&self) {
         #[cfg(feature = "standalone")]
-        {
-            println!("========================================");
-            println!("  Rust URL Shortener - Standalone Mode");
-            println!("========================================");
-            println!("Host: {}", self.host);
-            println!("Port: {}", self.port);
-            println!("Host URL: {}", self.host_url);
-            println!("Database Path: {}", self.db_path);
-            println!("JWT Expiry: {} hours", self.jwt_expiry_hours);
-            println!("Refresh Token Expiry: {} days", self.refresh_token_expiry_days);
-            println!("Max URL Length: {}", self.max_url_length);
-            println!("Account Lockout Attempts: {}", self.account_lockout_attempts);
-            println!("Account Lockout Duration: {} minutes", self.account_lockout_duration_minutes);
-            println!("Click Retention: {} days", self.click_retention_days);
-            println!("Allow Registration: {}", self.allow_registration);
-            println!("========================================");
-        }
+        tracing::info!(
+            mode = "standalone",
+            host = %self.host,
+            port = self.port,
+            host_url = %self.host_url,
+            db_path = %self.db_path,
+            jwt_expiry_hours = self.jwt_expiry_hours,
+            refresh_token_expiry_days = self.refresh_token_expiry_days,
+            max_url_length = self.max_url_length,
+            account_lockout_attempts = self.account_lockout_attempts,
+            account_lockout_duration_minutes = self.account_lockout_duration_minutes,
+            click_retention_days = self.click_retention_days,
+            allow_registration = self.allow_registration,
+            "RUS configuration loaded"
+        );
 
         #[cfg(feature = "saas")]
-        {
-            println!("========================================");
-            println!("  Rust URL Shortener - SaaS Mode");
-            println!("========================================");
-            println!("Host: {}", self.host);
-            println!("Port: {}", self.port);
-            println!("Host URL: {}", self.host_url);
-            println!("Database Path: {}", self.db_path);
-            println!("Max URL Length: {}", self.max_url_length);
-            println!("Click Retention: {} days", self.click_retention_days);
-            println!("SAAS JWT Secret: [set]");
-            println!("========================================");
-        }
+        tracing::info!(
+            mode = "saas",
+            host = %self.host,
+            port = self.port,
+            host_url = %self.host_url,
+            db_path = %self.db_path,
+            max_url_length = self.max_url_length,
+            click_retention_days = self.click_retention_days,
+            "RUS configuration loaded"
+        );
     }
 }
 

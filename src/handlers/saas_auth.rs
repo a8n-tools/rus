@@ -1,6 +1,7 @@
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, Result};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use std::sync::atomic::Ordering;
+use tracing::{debug, error, trace, warn};
 
 /// SaaS user claims extracted from access_token cookie
 #[derive(Debug, Clone)]
@@ -17,7 +18,7 @@ pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserC
     let cookie = match req.cookie("access_token") {
         Some(c) => c,
         None => {
-            eprintln!("saas_auth: no access_token cookie found");
+            debug!("No access_token cookie found");
             return None;
         }
     };
@@ -42,13 +43,13 @@ pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserC
     ) {
         Ok(data) => data,
         Err(e) => {
-            eprintln!("saas_auth: JWT decode failed: {e}");
+            warn!(error = %e, "JWT decode failed");
             return None;
         }
     };
 
     let payload = token_data.claims;
-    eprintln!("saas_auth: JWT decoded successfully, payload: {payload}");
+    trace!(payload = %payload, "JWT decoded successfully");
 
     // Extract user_id from JWT payload
     // The parent app's JWT may have user_id as "sub" (UUID or integer), "user_id", or "id"
@@ -75,9 +76,9 @@ pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserC
         .or_else(|| payload.get("id").and_then(|v| v.as_i64()));
 
     match user_id {
-        Some(id) => eprintln!("saas_auth: extracted user_id: {id}"),
+        Some(id) => debug!(user_id = id, "Extracted user_id from JWT"),
         None => {
-            eprintln!("saas_auth: could not extract user_id from payload");
+            warn!("Could not extract user_id from JWT payload");
             return None;
         }
     }
@@ -98,7 +99,7 @@ pub fn get_user_from_cookie(req: &HttpRequest, secret: &str) -> Option<SaasUserC
     // All valid JWT holders are returned so the middleware can decide
     // whether to redirect non-members to the membership page.
 
-    eprintln!("saas_auth: authentication successful, user_id={user_id}, email={email:?}, membership={membership_status:?}, is_admin={is_admin}");
+    debug!(user_id, email = ?email, membership_status = ?membership_status, is_admin, "SaaS authentication successful");
     Some(SaasUserClaims {
         user_id,
         email,
@@ -218,9 +219,10 @@ pub async fn saas_cookie_validator(
                 );
                 if !has_access {
                     let membership_url = &state.config.saas_membership_url;
-                    eprintln!(
-                        "saas_auth: user_id={} membership_status={:?}, redirecting to membership page",
-                        claims.user_id, claims.membership_status
+                    debug!(
+                        user_id = claims.user_id,
+                        membership_status = ?claims.membership_status,
+                        "Non-member redirected to membership page"
                     );
                     return Err(actix_web::error::InternalError::from_response(
                         "Membership required",
@@ -247,7 +249,7 @@ pub async fn saas_cookie_validator(
                     rusqlite::params![claims.user_id, username, claims.is_admin as i32],
                 )
                 .map_err(|e| {
-                    eprintln!("saas_auth: failed to provision user: {e}");
+                    error!(error = %e, "Failed to provision SaaS user");
                     actix_web::error::ErrorInternalServerError("Failed to provision user")
                 })?;
             }

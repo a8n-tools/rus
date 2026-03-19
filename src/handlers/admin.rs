@@ -1,5 +1,6 @@
 use actix_web::{web, HttpRequest, HttpResponse, Result};
 use rusqlite::params;
+use tracing::{info, warn};
 
 use crate::auth::get_claims;
 use crate::db::AppState;
@@ -52,6 +53,7 @@ pub async fn admin_delete_user(
 
     // Prevent admin from deleting themselves
     if claims.user_id == *user_id {
+        warn!(admin_user_id = claims.user_id, "Admin attempted to delete own account");
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Cannot delete your own account"
         })));
@@ -63,6 +65,7 @@ pub async fn admin_delete_user(
     match db.execute("DELETE FROM users WHERE userID = ?1", params![*user_id]) {
         Ok(rows_affected) => {
             if rows_affected > 0 {
+                info!(admin_user_id = claims.user_id, deleted_user_id = *user_id, "Admin deleted user");
                 Ok(HttpResponse::Ok().json(serde_json::json!({
                     "message": "User deleted successfully"
                 })))
@@ -115,9 +118,12 @@ pub async fn admin_promote_user(
                 "UPDATE users SET is_admin = 1 WHERE userID = ?1",
                 params![*user_id],
             ) {
-                Ok(_) => Ok(HttpResponse::Ok().json(serde_json::json!({
-                    "message": format!("User '{}' promoted to admin successfully", username)
-                }))),
+                Ok(_) => {
+                    info!(admin_user_id = _claims.user_id, promoted_user_id = *user_id, username = %username, "Admin promoted user to admin");
+                    Ok(HttpResponse::Ok().json(serde_json::json!({
+                        "message": format!("User '{}' promoted to admin successfully", username)
+                    })))
+                }
                 Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
                     "error": "Failed to promote user"
                 }))),

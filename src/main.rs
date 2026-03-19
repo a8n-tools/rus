@@ -2,6 +2,8 @@ use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware, web, App, HttpServer};
 #[cfg(feature = "standalone")]
 use actix_web_httpauth::middleware::HttpAuthentication;
+use tracing::info;
+use tracing_subscriber::{fmt, EnvFilter};
 
 #[cfg(feature = "standalone")]
 mod auth;
@@ -27,6 +29,17 @@ async fn main() -> std::io::Result<()> {
     // Load environment variables from .env file
     dotenvy::dotenv().ok();
 
+    // Initialize structured logging
+    fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("info,rus=debug")),
+        )
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_file(false)
+        .init();
+
     // Load configuration from environment
     let config = Config::from_env();
 
@@ -42,8 +55,8 @@ async fn main() -> std::io::Result<()> {
             .expect("Failed to connect to database. Check that DB_PATH is set to a valid, writable location.")
     );
 
-    println!("✓ Database connection established");
-    println!("🚀 Starting server on {}:{}", bind_host, bind_port);
+    info!("Database connection established");
+    info!(host = %bind_host, port = bind_port, "Starting server");
 
     HttpServer::new(move || {
         #[cfg(feature = "standalone")]
@@ -68,7 +81,7 @@ async fn main() -> std::io::Result<()> {
 
         let app = App::new()
             .app_data(app_state.clone())
-            .wrap(middleware::Logger::default())
+            .wrap(tracing_actix_web::TracingLogger::default())
             .wrap(
                 middleware::DefaultHeaders::new()
                     .add(("X-Content-Type-Options", "nosniff"))
