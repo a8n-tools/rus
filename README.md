@@ -1,4 +1,4 @@
-# rus
+# rus (0.4.0)
 
 **Rust URL Shortener** - A fast, secure URL shortening service built with Rust and Actix-web. Supports two deployment modes: standalone with built-in auth, or SaaS for integration with a parent application.
 
