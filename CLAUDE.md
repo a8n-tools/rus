@@ -125,6 +125,7 @@ APP_PORT=4001               # Server port
 HOST_URL=http://localhost:4001  # Public URL for shortened links
 MAX_URL_LENGTH=2048         # Maximum URL length
 CLICK_RETENTION_DAYS=30     # Days to retain click history
+RUST_LOG=info,rus=debug     # Log level filter (default: info,rus=debug)
 ```
 
 ### Standalone-only options

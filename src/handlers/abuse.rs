@@ -4,6 +4,7 @@ use actix_web::HttpRequest;
 #[cfg(feature = "standalone")]
 use chrono::Utc;
 use rusqlite::params;
+use tracing::info;
 
 #[cfg(feature = "standalone")]
 use crate::auth::get_claims;
@@ -67,9 +68,12 @@ pub async fn submit_abuse_report(
             req.description.as_deref()
         ],
     ) {
-        Ok(_) => Ok(HttpResponse::Created().json(serde_json::json!({
-            "message": "Report submitted successfully. Thank you for helping keep our service safe."
-        }))),
+        Ok(_) => {
+            info!(short_code = %req.short_code, "Abuse report submitted");
+            Ok(HttpResponse::Created().json(serde_json::json!({
+                "message": "Report submitted successfully. Thank you for helping keep our service safe."
+            })))
+        }
         Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
             "error": "Failed to submit report"
         }))),
@@ -177,6 +181,7 @@ pub async fn admin_resolve_report(
                 params![&now, claims.user_id, *report_id],
             );
 
+            info!(report_id = *report_id, action = "dismiss", admin_user_id = claims.user_id, "Abuse report resolved");
             Ok(HttpResponse::Ok().json(serde_json::json!({
                 "message": "Report dismissed"
             })))
@@ -193,6 +198,7 @@ pub async fn admin_resolve_report(
                 params![&now, claims.user_id, *report_id],
             );
 
+            info!(report_id = *report_id, action = "delete_url", admin_user_id = claims.user_id, short_code = %short_code, "Abuse report resolved");
             Ok(HttpResponse::Ok().json(serde_json::json!({
                 "message": "URL deleted and report resolved"
             })))
@@ -230,6 +236,7 @@ pub async fn admin_resolve_report(
                     params![&now, claims.user_id, *report_id],
                 );
 
+                info!(report_id = *report_id, action = "ban_user", admin_user_id = claims.user_id, banned_user_id = user_id, "Abuse report resolved");
                 Ok(HttpResponse::Ok().json(serde_json::json!({
                     "message": "User banned, all URLs deleted, and report resolved"
                 })))

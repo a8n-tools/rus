@@ -1,6 +1,7 @@
 use actix_web::{web, HttpRequest, HttpResponse, Result};
 use rand::Rng;
 use rusqlite::params;
+use tracing::{debug, error, info};
 
 #[cfg(feature = "standalone")]
 use crate::auth::get_claims;
@@ -66,7 +67,7 @@ pub async fn shorten_url(
     let mut stmt = db
         .prepare("SELECT short_code FROM urls WHERE user_id = ?1 AND original_url = ?2")
         .map_err(|e| {
-            eprintln!("shorten_url: prepare failed: {e}");
+            error!(error = %e, "shorten_url: DB prepare failed");
             actix_web::error::ErrorInternalServerError("Database error")
         })?;
 
@@ -104,13 +105,16 @@ pub async fn shorten_url(
         "INSERT INTO urls (user_id, original_url, short_code) VALUES (?1, ?2, ?3)",
         params![user_id, &req_payload.url, &short_code],
     ) {
-        Ok(_) => Ok(HttpResponse::Ok().json(ShortenResponse {
-            short_code: short_code.clone(),
-            short_url: format!("{}/{}", data.config.host_url, short_code),
-            original_url: req_payload.url.clone(),
-        })),
+        Ok(_) => {
+            info!(user_id, short_code = %short_code, "URL shortened");
+            Ok(HttpResponse::Ok().json(ShortenResponse {
+                short_code: short_code.clone(),
+                short_url: format!("{}/{}", data.config.host_url, short_code),
+                original_url: req_payload.url.clone(),
+            }))
+        }
         Err(e) => {
-            eprintln!("shorten_url: INSERT failed for user_id={user_id}: {e}");
+            error!(user_id, error = %e, "Failed to insert shortened URL");
             Ok(HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": "Failed to create short URL"
             })))
@@ -151,12 +155,13 @@ pub async fn redirect_url(
                 crate::db::cleanup_old_clicks(&db, data.config.click_retention_days);
             }
 
+            debug!(short_code = %code.as_str(), "Redirect");
             Ok(HttpResponse::Found()
                 .append_header(("Location", original_url))
                 .finish())
         }
         Err(_) => {
-            // Serve the 404 page
+            debug!(short_code = %code.as_str(), "Redirect failed: code not found");
             let html = include_str!("../../static/404.html");
             Ok(HttpResponse::NotFound()
                 .content_type("text/html; charset=utf-8")
@@ -267,6 +272,7 @@ pub async fn delete_url(
     ) {
         Ok(rows_affected) => {
             if rows_affected > 0 {
+                info!(user_id, short_code = %code.as_str(), "URL deleted");
                 Ok(HttpResponse::Ok().json(serde_json::json!({
                     "message": "URL deleted successfully"
                 })))
@@ -276,9 +282,12 @@ pub async fn delete_url(
                 })))
             }
         }
-        Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": "Failed to delete URL"
-        }))),
+        Err(e) => {
+            error!(user_id, short_code = %code.as_str(), error = %e, "Failed to delete URL");
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to delete URL"
+            })))
+        }
     }
 }
 
