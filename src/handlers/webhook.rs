@@ -215,4 +215,74 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 400);
     }
+
+    #[actix_web::test]
+    async fn malformed_json_body_returns_400() {
+        let state = make_test_state();
+        let app = build_app(state).await;
+
+        let body = b"this is not json";
+        let sig = sign_webhook_payload(body, TEST_SAAS_SECRET);
+
+        let req = test::TestRequest::post()
+            .uri("/webhooks/maintenance")
+            .insert_header(("X-Webhook-Signature", sig))
+            .insert_header(("Content-Type", "application/json"))
+            .set_payload(body.to_vec())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn maintenance_message_cleared_on_disable() {
+        let state = make_test_state();
+        let app = build_app(state.clone()).await;
+
+        // Enable maintenance with a message
+        let enable_payload = json!({
+            "event": "maintenance_mode_changed",
+            "maintenance_mode": true,
+            "maintenance_message": "Upgrading"
+        });
+        let enable_body = serde_json::to_vec(&enable_payload).unwrap();
+        let enable_sig = sign_webhook_payload(&enable_body, TEST_SAAS_SECRET);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/webhooks/maintenance")
+                .insert_header(("X-Webhook-Signature", enable_sig))
+                .insert_header(("Content-Type", "application/json"))
+                .set_payload(enable_body)
+                .to_request(),
+        )
+        .await;
+        assert!(state.maintenance_mode.load(Ordering::SeqCst));
+        assert_eq!(
+            *state.maintenance_message.read().unwrap(),
+            Some("Upgrading".to_string())
+        );
+
+        // Disable maintenance
+        let disable_payload = json!({
+            "event": "maintenance_mode_changed",
+            "maintenance_mode": false
+        });
+        let disable_body = serde_json::to_vec(&disable_payload).unwrap();
+        let disable_sig = sign_webhook_payload(&disable_body, TEST_SAAS_SECRET);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/webhooks/maintenance")
+                .insert_header(("X-Webhook-Signature", disable_sig))
+                .insert_header(("Content-Type", "application/json"))
+                .set_payload(disable_body)
+                .to_request(),
+        )
+        .await;
+        assert!(!state.maintenance_mode.load(Ordering::SeqCst));
+        assert_eq!(*state.maintenance_message.read().unwrap(), None);
+    }
 }

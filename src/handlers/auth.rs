@@ -725,4 +725,72 @@ mod tests {
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 401);
     }
+
+    #[actix_web::test]
+    async fn register_empty_password_returns_400() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({"username": "alice", "password": ""}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn login_with_bcrypt_hash_succeeds_and_rehashes() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+
+        // Insert user with a bcrypt-hashed password directly in DB
+        let bcrypt_hash = bcrypt::hash(TEST_PASSWORD, bcrypt::DEFAULT_COST).unwrap();
+        {
+            let db = state.db.lock().unwrap();
+            db.execute(
+                "INSERT INTO users (username, password, is_admin) VALUES ('alice', ?1, 0)",
+                rusqlite::params![&bcrypt_hash],
+            )
+            .unwrap();
+        }
+
+        // Login should succeed
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(serde_json::json!({"username": "alice", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+
+        // Verify the hash was migrated to argon2id
+        let new_hash: String = {
+            let db = state.db.lock().unwrap();
+            db.query_row(
+                "SELECT password FROM users WHERE username = 'alice'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert!(
+            new_hash.starts_with("$argon2id$"),
+            "expected argon2id hash, got: {}",
+            &new_hash[..20]
+        );
+    }
+
+    #[actix_web::test]
+    async fn login_returns_refresh_token() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(serde_json::json!({"username": "alice", "password": TEST_PASSWORD}))
+            .to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert!(body["refresh_token"].is_string());
+        assert!(!body["refresh_token"].as_str().unwrap().is_empty());
+    }
 }

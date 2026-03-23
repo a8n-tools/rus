@@ -346,6 +346,88 @@ mod tests {
         assert_eq!(body["username"], "saas_99");
     }
 
+    // --- get_user_from_cookie unit tests ---
+
+    #[actix_web::test]
+    async fn get_user_from_cookie_uuid_subject() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        let exp = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp();
+        let uuid = "550e8400-e29b-41d4-a716-446655440000";
+        let claims = serde_json::json!({"sub": uuid, "exp": exp});
+        let jwt = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(crate::testing::TEST_SAAS_SECRET.as_bytes()),
+        )
+        .unwrap();
+
+        let req = test::TestRequest::default()
+            .insert_header(("Cookie", format!("access_token={jwt}")))
+            .to_http_request();
+        let result = get_user_from_cookie(&req, crate::testing::TEST_SAAS_SECRET);
+        assert!(result.is_some(), "expected Some for UUID subject");
+        let claims = result.unwrap();
+        assert!(claims.user_id > 0, "user_id should be positive: {}", claims.user_id);
+    }
+
+    #[actix_web::test]
+    async fn get_user_from_cookie_user_id_field() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        let exp = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp();
+        let claims = serde_json::json!({"user_id": 42, "exp": exp});
+        let jwt = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(crate::testing::TEST_SAAS_SECRET.as_bytes()),
+        )
+        .unwrap();
+
+        let req = test::TestRequest::default()
+            .insert_header(("Cookie", format!("access_token={jwt}")))
+            .to_http_request();
+        let result = get_user_from_cookie(&req, crate::testing::TEST_SAAS_SECRET);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().user_id, 42);
+    }
+
+    #[actix_web::test]
+    async fn get_user_from_cookie_expired_jwt_returns_none() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        let exp = (chrono::Utc::now() - chrono::Duration::hours(1)).timestamp();
+        let claims = serde_json::json!({"sub": "99", "exp": exp});
+        let jwt = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(crate::testing::TEST_SAAS_SECRET.as_bytes()),
+        )
+        .unwrap();
+
+        let req = test::TestRequest::default()
+            .insert_header(("Cookie", format!("access_token={jwt}")))
+            .to_http_request();
+        let result = get_user_from_cookie(&req, crate::testing::TEST_SAAS_SECRET);
+        assert!(result.is_none());
+    }
+
+    #[actix_web::test]
+    async fn get_user_from_cookie_no_user_id_returns_none() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        let exp = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp();
+        let claims = serde_json::json!({"email": "test@example.com", "exp": exp});
+        let jwt = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(crate::testing::TEST_SAAS_SECRET.as_bytes()),
+        )
+        .unwrap();
+
+        let req = test::TestRequest::default()
+            .insert_header(("Cookie", format!("access_token={jwt}")))
+            .to_http_request();
+        let result = get_user_from_cookie(&req, crate::testing::TEST_SAAS_SECRET);
+        assert!(result.is_none());
+    }
+
     // --- saas_cookie_validator membership checks ---
 
     #[actix_web::test]
@@ -661,6 +743,24 @@ mod tests {
             .uri("/api/ping")
             .insert_header(("Cookie", cookie(&jwt)))
             .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn maintenance_allows_api_version() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let app = test::init_service(
+            App::new()
+                .app_data(state.clone())
+                .route("/api/version", web::get().to(|| async { "1.0.0" }))
+                .wrap(actix_web::middleware::from_fn(maintenance_guard)),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/api/version").to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 200);
     }

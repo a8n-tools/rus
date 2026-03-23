@@ -123,4 +123,15 @@ mod tests {
         let t2 = generate_refresh_token();
         assert_ne!(t1, t2);
     }
+
+    #[test]
+    fn create_jwt_with_zero_expiry_decodes_but_is_near_expired() {
+        // A 0-hour expiry sets exp to ~now. Token is valid for the current second
+        // but will expire almost immediately.
+        let token = create_jwt("alice", 1, false, SECRET, 0).unwrap();
+        let claims = decode_jwt(&token, SECRET).unwrap();
+        let now = chrono::Utc::now().timestamp() as usize;
+        // The exp should be very close to now (within a few seconds)
+        assert!(claims.exp <= now + 2, "exp should be near now");
+    }
 }
