@@ -651,3 +651,67 @@ async fn e2e_duplicate_url_returns_same_code() {
     let second = do_shorten(&app, token, "https://example.com/dup").await;
     assert_eq!(first["short_code"], second["short_code"]);
 }
+
+// =============================================================================
+// Abuse report → ban user
+// =============================================================================
+
+#[actix_web::test]
+async fn e2e_abuse_report_ban_user() {
+    let app = build_app().await;
+
+    // Admin registers (first user)
+    let admin = do_register(&app, "admin").await;
+    let admin_token = admin["token"].as_str().unwrap();
+
+    // Bad user registers
+    let bad_user = do_register(&app, "badguy").await;
+    let bad_token = bad_user["token"].as_str().unwrap();
+
+    // Bad user shortens a URL
+    let shortened = do_shorten(&app, bad_token, "https://evil.example.com").await;
+    let code = shortened["short_code"].as_str().unwrap();
+
+    // Abuse report is filed
+    let req = test::TestRequest::post()
+        .uri("/api/report-abuse")
+        .set_json(serde_json::json!({
+            "short_code": code,
+            "reason": "malware distribution"
+        }))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 201);
+
+    // Admin lists reports and gets the ID
+    let req = test::TestRequest::get()
+        .uri("/api/admin/reports")
+        .insert_header(("Authorization", format!("Bearer {admin_token}")))
+        .to_request();
+    let reports: Value = test::call_and_read_body_json(&app, req).await;
+    let report_id = reports[0]["id"].as_i64().unwrap();
+
+    // Admin bans the user via abuse report
+    let req = test::TestRequest::post()
+        .uri(&format!("/api/admin/reports/{report_id}"))
+        .insert_header(("Authorization", format!("Bearer {admin_token}")))
+        .set_json(serde_json::json!({"action": "ban_user"}))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+
+    // The URL should now 404
+    let req = test::TestRequest::get()
+        .uri(&format!("/{code}"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 404);
+
+    // The banned user cannot login
+    let req = test::TestRequest::post()
+        .uri("/api/login")
+        .set_json(serde_json::json!({"username": "badguy", "password": TEST_PASSWORD}))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}

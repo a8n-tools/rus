@@ -393,4 +393,40 @@ mod tests {
         assert_eq!(body["total_urls"], 1);
         assert_eq!(body["total_clicks"], 0);
     }
+
+    #[actix_web::test]
+    async fn delete_nonexistent_user_returns_404() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        let token = make_test_token("admin", uid, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::delete()
+            .uri("/api/admin/users/9999")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[actix_web::test]
+    async fn stats_with_clicks_counted() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        insert_test_url(&state, uid, "https://example.com", "abc123");
+        {
+            let db = state.db.lock().unwrap();
+            db.execute("UPDATE urls SET clicks = 5 WHERE short_code = 'abc123'", [])
+                .unwrap();
+        }
+        let token = make_test_token("admin", uid, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::get()
+            .uri("/api/admin/stats")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let body: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(body["total_clicks"], 5);
+    }
 }

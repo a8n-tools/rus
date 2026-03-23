@@ -968,6 +968,158 @@ mod tests {
         }
 
         #[actix_web::test]
+        async fn delete_url_removes_click_history() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "clk001");
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            // Create a click via redirect
+            test::call_service(
+                &app,
+                test::TestRequest::get().uri("/clk001").to_request(),
+            )
+            .await;
+
+            // Delete the URL
+            let req = test::TestRequest::delete()
+                .uri("/api/urls/clk001")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            test::call_service(&app, req).await;
+
+            // Verify click history is also gone (FK cascade)
+            let history_count: i64 = {
+                let db = state.db.lock().unwrap();
+                db.query_row("SELECT COUNT(*) FROM click_history", [], |r| r.get(0))
+                    .unwrap()
+            };
+            assert_eq!(history_count, 0);
+        }
+
+        #[actix_web::test]
+        async fn qr_code_nonexistent_url_returns_404() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls/xxxxxx/qr/png")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 404);
+        }
+
+        #[actix_web::test]
+        async fn shorten_different_users_same_url_get_different_codes() {
+            let state = make_test_state();
+            let uid_a = insert_test_user(&state, "alice", false);
+            let uid_b = insert_test_user(&state, "bob", false);
+            let token_a = make_test_token("alice", uid_a, false);
+            let token_b = make_test_token("bob", uid_b, false);
+            let app = setup_app!(state);
+
+            let body_a: Value = test::call_and_read_body_json(
+                &app,
+                test::TestRequest::post()
+                    .uri("/api/shorten")
+                    .insert_header(("Authorization", format!("Bearer {token_a}")))
+                    .set_json(serde_json::json!({"url": "https://shared.com"}))
+                    .to_request(),
+            )
+            .await;
+
+            let body_b: Value = test::call_and_read_body_json(
+                &app,
+                test::TestRequest::post()
+                    .uri("/api/shorten")
+                    .insert_header(("Authorization", format!("Bearer {token_b}")))
+                    .set_json(serde_json::json!({"url": "https://shared.com"}))
+                    .to_request(),
+            )
+            .await;
+
+            assert_ne!(body_a["short_code"], body_b["short_code"]);
+        }
+
+        #[actix_web::test]
+        async fn update_name_nonexistent_url_returns_404() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::patch()
+                .uri("/api/urls/xxxxxx/name")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"name": "Ghost"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 404);
+        }
+
+        #[actix_web::test]
+        async fn shorten_url_too_long_returns_400() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let long_url = format!("https://example.com/{}", "a".repeat(2048));
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"url": long_url}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 400);
+        }
+
+        #[actix_web::test]
+        async fn shorten_javascript_url_returns_400() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::post()
+                .uri("/api/shorten")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"url": "javascript:alert(1)"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 400);
+        }
+
+        #[actix_web::test]
+        async fn redirect_records_click_history() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://example.com", "hist01");
+            let app = setup_app!(state);
+
+            test::call_service(
+                &app,
+                test::TestRequest::get().uri("/hist01").to_request(),
+            )
+            .await;
+
+            let history_count: i64 = {
+                let db = state.db.lock().unwrap();
+                db.query_row(
+                    "SELECT COUNT(*) FROM click_history WHERE url_id = (SELECT id FROM urls WHERE short_code = 'hist01')",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+            };
+            assert_eq!(history_count, 1);
+        }
+
+        #[actix_web::test]
         async fn qr_code_for_other_users_url_returns_404() {
             let state = make_test_state();
             let uid_a = insert_test_user(&state, "alice", false);
@@ -1103,6 +1255,67 @@ mod tests {
                 .to_request();
             let resp = test::try_call_service(&app, req).await;
             assert!(resp.is_err() || resp.unwrap().status() == 403);
+        }
+
+        #[actix_web::test]
+        async fn saas_delete_own_url() {
+            let state = make_test_state();
+            insert_saas_user(&state, 42, "alice@example.com", false);
+            insert_saas_url(&state, 42, "https://alice.com", "del001");
+            let app = setup_app!(state);
+            let jwt = make_saas_jwt("42", "alice@example.com", "active", None);
+
+            let req = test::TestRequest::delete()
+                .uri("/api/urls/del001")
+                .insert_header(("Cookie", cookie(&jwt)))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+
+            let count: i64 = {
+                let db = state.db.lock().unwrap();
+                db.query_row(
+                    "SELECT COUNT(*) FROM urls WHERE short_code='del001'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+            };
+            assert_eq!(count, 0);
+        }
+
+        #[actix_web::test]
+        async fn saas_stats_for_own_url() {
+            let state = make_test_state();
+            insert_saas_user(&state, 42, "alice@example.com", false);
+            insert_saas_url(&state, 42, "https://alice.com", "sta001");
+            let app = setup_app!(state);
+            let jwt = make_saas_jwt("42", "alice@example.com", "active", None);
+
+            let req = test::TestRequest::get()
+                .uri("/api/stats/sta001")
+                .insert_header(("Cookie", cookie(&jwt)))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 200);
+            let body: Value = test::read_body_json(resp).await;
+            assert_eq!(body["short_code"], "sta001");
+        }
+
+        #[actix_web::test]
+        async fn saas_redirect_works() {
+            let state = make_test_state();
+            insert_saas_user(&state, 42, "alice@example.com", false);
+            insert_saas_url(&state, 42, "https://alice.com", "red001");
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get().uri("/red001").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 302);
+            assert_eq!(
+                resp.headers().get("Location").unwrap(),
+                "https://alice.com"
+            );
         }
 
         #[actix_web::test]
