@@ -235,23 +235,46 @@ pub async fn saas_cookie_validator(
                 }
             }
 
-            // Auto-provision SaaS user in local DB so FK constraints are satisfied
-            let username = claims
-                .email
-                .clone()
-                .filter(|e| !e.is_empty())
-                .unwrap_or_else(|| format!("saas_{}", claims.user_id));
+            // Auto-provision SaaS user in local DB so FK constraints are satisfied.
+            // Use UPDATE-first to avoid UNIQUE constraint conflicts on username
+            // when the user already exists (the common path).
             {
                 let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-                db.execute(
-                    "INSERT INTO users (userID, username, password, is_admin) VALUES (?1, ?2, '', ?3) \
-                     ON CONFLICT(userID) DO UPDATE SET is_admin = ?3",
-                    rusqlite::params![claims.user_id, username, claims.is_admin as i32],
+                let updated = db.execute(
+                    "UPDATE users SET is_admin = ?2 WHERE userID = ?1",
+                    rusqlite::params![claims.user_id, claims.is_admin as i32],
                 )
                 .map_err(|e| {
-                    error!(error = %e, "Failed to provision SaaS user");
+                    error!(error = %e, "Failed to update SaaS user");
                     actix_web::error::ErrorInternalServerError("Failed to provision user")
                 })?;
+
+                if updated == 0 {
+                    // New user — insert with email-derived username, falling back
+                    // to saas_{id} if another user already has that username.
+                    let username = claims
+                        .email
+                        .clone()
+                        .filter(|e| !e.is_empty())
+                        .unwrap_or_else(|| format!("saas_{}", claims.user_id));
+                    let result = db.execute(
+                        "INSERT INTO users (userID, username, password, is_admin) VALUES (?1, ?2, '', ?3)",
+                        rusqlite::params![claims.user_id, &username, claims.is_admin as i32],
+                    );
+                    if let Err(e) = result {
+                        // Username taken by a different user — use guaranteed-unique fallback
+                        debug!(error = %e, username, "Username taken, falling back to saas_{}", claims.user_id);
+                        let fallback = format!("saas_{}", claims.user_id);
+                        db.execute(
+                            "INSERT INTO users (userID, username, password, is_admin) VALUES (?1, ?2, '', ?3)",
+                            rusqlite::params![claims.user_id, &fallback, claims.is_admin as i32],
+                        )
+                        .map_err(|e| {
+                            error!(error = %e, "Failed to provision SaaS user");
+                            actix_web::error::ErrorInternalServerError("Failed to provision user")
+                        })?;
+                    }
+                }
             }
 
             req.extensions_mut().insert(claims);
