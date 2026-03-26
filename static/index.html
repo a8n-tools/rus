@@ -6,35 +6,19 @@
     <title>RUS - URL Shortener | Part of a8n-tools</title>
     <link rel="stylesheet" href="styles.css?v=3" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <script src="theme.js"></script>
     <style>
-      /* ============================================================
-         Light-theme overrides — landing page only
-         ============================================================ */
-      :root {
-        --l-bg:        hsl(240 20% 98%);
-        --l-bg-sec:    hsl(240 20% 95%);
-        --l-fg:        hsl(240 24% 10%);
-        --l-primary:   #f97316;
-        --l-primary-d: #ea6b0a;
-        --l-muted:     hsl(240 10% 46%);
-        --l-border:    hsl(240 15% 90%);
-        --l-card:      hsl(240 25% 100%);
-        --l-radius:    0.5rem;
-        --l-indigo:    #6366f1;
-        --l-cyan:      #22d3ee;
-      }
-
       body {
-        background: var(--l-bg);
-        color: var(--l-fg);
+        background: var(--bg-darker);
+        color: var(--text-primary);
         font-family: ui-sans-serif, system-ui, sans-serif;
         padding-bottom: 0;
       }
 
       /* ---- Nav ---- */
       .navbar {
-        background: var(--l-card);
-        border-bottom: 1px solid var(--l-border);
+        background: var(--bg-card);
+        border-bottom: 1px solid var(--border-color);
         backdrop-filter: none;
         -webkit-backdrop-filter: none;
         box-shadow: none;
@@ -42,7 +26,7 @@
       }
 
       .nav-brand {
-        color: var(--l-fg);
+        color: var(--text-primary);
         font-size: 1.2rem;
         font-weight: 700;
       }
@@ -50,25 +34,25 @@
       .nav-brand:hover { opacity: 0.75; }
 
       .nav-links a {
-        color: var(--l-muted);
+        color: var(--text-secondary);
         font-size: 0.9rem;
         font-weight: 500;
       }
 
-      .nav-links a:hover { color: var(--l-fg); }
+      .nav-links a:hover { color: var(--text-primary); }
 
       .nav-cta {
-        background: var(--l-primary) !important;
+        background: var(--rust-orange) !important;
         color: #fff !important;
         padding: 7px 18px;
-        border-radius: var(--l-radius);
+        border-radius: 0.5rem;
         font-weight: 600;
         font-size: 0.875rem;
         transition: background 0.2s !important;
       }
 
       .nav-cta:hover {
-        background: var(--l-primary-d) !important;
+        background: var(--rust-orange-dark) !important;
         color: #fff !important;
         opacity: 1 !important;
       }
@@ -88,15 +72,16 @@
         align-items: center;
         text-align: center;
         padding: 80px 20px 100px;
-        background: var(--l-bg);
+        background: var(--bg-darker);
       }
 
       .hero-badge {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        background: hsl(240 24% 10%);
-        color: hsl(240 10% 75%);
+        background: var(--bg-card);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-color);
         border-radius: 50px;
         padding: 6px 18px;
         margin-bottom: 32px;
@@ -106,7 +91,7 @@
       }
 
       .hero-badge a {
-        color: var(--l-primary);
+        color: var(--rust-orange);
         text-decoration: none;
         font-weight: 600;
       }
@@ -122,7 +107,7 @@
       .hero-title {
         font-size: clamp(2.8rem, 8vw, 5rem);
         font-weight: 800;
-        color: var(--l-fg);
+        color: var(--text-primary);
         letter-spacing: -0.03em;
         line-height: 1.1;
         margin-bottom: 22px;
@@ -139,7 +124,7 @@
 
       .hero-subtitle {
         font-size: 1.1rem;
-        color: var(--l-muted);
+        color: var(--text-secondary);
         max-width: 540px;
         margin: 0 auto 40px;
         line-height: 1.7;
@@ -154,7 +139,7 @@
 
       .cta-btn {
         padding: 11px 26px;
-        border-radius: var(--l-radius);
+        border-radius: 0.5rem;
         font-size: 0.95rem;
         font-weight: 600;
         cursor: pointer;
@@ -166,35 +151,35 @@
       }
 
       .cta-primary {
-        background: var(--l-primary);
+        background: var(--rust-orange);
         color: #fff;
         border: none;
         box-shadow: 0 1px 4px rgba(249, 115, 22, 0.3);
       }
 
       .cta-primary:hover {
-        background: var(--l-primary-d);
+        background: var(--rust-orange-dark);
         transform: translateY(-1px);
         box-shadow: 0 6px 18px rgba(249, 115, 22, 0.35);
       }
 
       .cta-secondary {
         background: transparent;
-        color: var(--l-fg);
-        border: 1.5px solid var(--l-border);
+        color: var(--text-primary);
+        border: 1.5px solid var(--border-color);
       }
 
       .cta-secondary:hover {
-        border-color: var(--l-muted);
+        border-color: var(--text-secondary);
         transform: translateY(-1px);
       }
 
       /* ---- Features section ---- */
       .features-section {
         padding: 80px 20px;
-        background: var(--l-bg-sec);
-        border-top: 1px solid var(--l-border);
-        border-bottom: 1px solid var(--l-border);
+        background: var(--bg-dark);
+        border-top: 1px solid var(--border-color);
+        border-bottom: 1px solid var(--border-color);
       }
 
       .features-container { max-width: 1100px; margin: 0 auto; }
@@ -205,7 +190,7 @@
         font-weight: 700;
         letter-spacing: 0.1em;
         text-transform: uppercase;
-        color: var(--l-primary);
+        color: var(--rust-orange);
         margin-bottom: 10px;
       }
 
@@ -213,14 +198,14 @@
         text-align: center;
         font-size: clamp(1.6rem, 4vw, 2.2rem);
         font-weight: 800;
-        color: var(--l-fg);
+        color: var(--text-primary);
         margin-bottom: 8px;
         letter-spacing: -0.02em;
       }
 
       .section-subtitle {
         text-align: center;
-        color: var(--l-muted);
+        color: var(--text-secondary);
         font-size: 0.95rem;
         margin-bottom: 48px;
       }
@@ -232,10 +217,10 @@
       }
 
       .feature-card {
-        background: var(--l-card);
-        border-radius: var(--l-radius);
+        background: var(--bg-card);
+        border-radius: 0.5rem;
         padding: 28px;
-        border: 1px solid var(--l-border);
+        border: 1px solid var(--border-color);
         position: relative;
       }
 
@@ -268,12 +253,12 @@
       .feature-card h3 {
         font-size: 1rem;
         font-weight: 700;
-        color: var(--l-fg);
+        color: var(--text-primary);
         margin-bottom: 8px;
       }
 
       .feature-card p {
-        color: var(--l-muted);
+        color: var(--text-secondary);
         font-size: 0.875rem;
         line-height: 1.65;
       }
@@ -281,7 +266,7 @@
       /* ---- About / Suite section ---- */
       .about-section {
         padding: 80px 20px;
-        background: var(--l-bg);
+        background: var(--bg-darker);
       }
 
       .about-container {
@@ -293,13 +278,13 @@
       .about-section h2 {
         font-size: clamp(1.6rem, 4vw, 2.2rem);
         font-weight: 800;
-        color: var(--l-fg);
+        color: var(--text-primary);
         margin-bottom: 16px;
         letter-spacing: -0.02em;
       }
 
       .about-section p {
-        color: var(--l-muted);
+        color: var(--text-secondary);
         font-size: 1rem;
         line-height: 1.75;
         margin-bottom: 28px;
@@ -309,7 +294,7 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        color: var(--l-primary);
+        color: var(--rust-orange);
         font-weight: 600;
         text-decoration: none;
         font-size: 0.95rem;
@@ -354,8 +339,8 @@
       /* ---- Footer ---- */
       .landing-footer {
         padding: 52px 20px 32px;
-        background: var(--l-card);
-        border-top: 1px solid var(--l-border);
+        background: var(--bg-card);
+        border-top: 1px solid var(--border-color);
       }
 
       .footer-inner {
@@ -369,7 +354,7 @@
       .footer-brand-col .footer-logo {
         font-size: 1.15rem;
         font-weight: 700;
-        color: var(--l-fg);
+        color: var(--text-primary);
         text-decoration: none;
         display: inline-block;
         margin-bottom: 10px;
@@ -377,7 +362,7 @@
 
       .footer-tagline {
         font-size: 0.85rem;
-        color: var(--l-muted);
+        color: var(--text-secondary);
         line-height: 1.55;
       }
 
@@ -386,41 +371,41 @@
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.08em;
-        color: var(--l-fg);
+        color: var(--text-primary);
         margin-bottom: 14px;
       }
 
       .footer-col a {
         display: block;
         font-size: 0.875rem;
-        color: var(--l-muted);
+        color: var(--text-secondary);
         text-decoration: none;
         margin-bottom: 9px;
         transition: color 0.2s;
       }
 
-      .footer-col a:hover { color: var(--l-fg); }
+      .footer-col a:hover { color: var(--text-primary); }
 
       .footer-bottom {
         max-width: 1100px;
         margin: 0 auto;
         padding-top: 24px;
-        border-top: 1px solid var(--l-border);
+        border-top: 1px solid var(--border-color);
         display: flex;
         justify-content: center;
         align-items: center;
         gap: 8px;
         font-size: 0.8rem;
-        color: var(--l-muted);
+        color: var(--text-secondary);
       }
 
       .footer-bottom a {
-        color: var(--l-muted);
+        color: var(--text-secondary);
         text-decoration: none;
         transition: color 0.2s;
       }
 
-      .footer-bottom a:hover { color: var(--l-primary); }
+      .footer-bottom a:hover { color: var(--rust-orange); }
 
       /* ---- Responsive ---- */
       @media (max-width: 768px) {
@@ -439,12 +424,15 @@
   <body>
     <nav class="navbar">
       <div class="nav-content">
-        <a href="/" class="nav-brand">🦀 <span style="color: #f97316; font-weight: 700;">RUS</span></a>
+        <a href="/" class="nav-brand">🦀 <span style="color: var(--rust-orange); font-weight: 700;">RUS</span></a>
         <div class="nav-links" id="navLinks">
           <a href="#features">Features</a>
           <a href="#about">About</a>
           <a href="login.html">Log In</a>
           <a href="signup.html" class="nav-cta" id="signupLink">Sign Up</a>
+          <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
+            <i class="fa-solid fa-moon"></i>
+          </button>
         </div>
       </div>
     </nav>
@@ -456,7 +444,7 @@
       </div>
       <div class="hero-icon">🔗</div>
       <h1 class="hero-title">
-        <span style="color: var(--l-primary);">RUS</span> - <span class="gradient-word">URL Shortener</span>
+        <span style="color: var(--rust-orange);">RUS</span> - <span class="gradient-word">URL Shortener</span>
       </h1>
       <p class="hero-subtitle">
         Create short, trackable links in seconds. Built with Rust for blazing fast performance and rock-solid reliability.
@@ -622,7 +610,11 @@
             <a href="#about">About</a>
             <a href="dashboard.html">Dashboard</a>
             <a href="${loginUrl}">Log In</a>
+            <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
+              <i class="fa-solid fa-moon"></i>
+            </button>
           `;
+          __updateThemeIcon();
           heroCta.innerHTML = `
             <a href="dashboard.html" class="cta-btn cta-primary">Go to Dashboard</a>
             <a href="${loginUrl}" class="cta-btn cta-secondary">Log In</a>
@@ -634,7 +626,11 @@
             <a href="#about">About</a>
             <a href="dashboard.html">Dashboard</a>
             <button class="logout-btn" onclick="handleLogout()">Log Out</button>
+            <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
+              <i class="fa-solid fa-moon"></i>
+            </button>
           `;
+          __updateThemeIcon();
           heroCta.innerHTML = `
             <a href="dashboard.html" class="cta-btn cta-primary">Go to Dashboard</a>
           `;

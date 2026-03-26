@@ -26,7 +26,7 @@ pub use auth::{get_current_user, login, refresh_token, register};
 pub use pages::{
     admin_page, check_setup_required, login_page, setup_page, signup_page,
 };
-pub use pages::{dashboard_page, get_config, get_version, health_check, index, report_page, serve_auth_js, serve_css};
+pub use pages::{dashboard_page, get_config, get_version, health_check, index, report_page, serve_auth_js, serve_css, serve_theme_js};
 #[cfg(feature = "saas")]
 pub use pages::serve_saas_refresh_js;
 pub use urls::{

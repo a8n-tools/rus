@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard - Rust URL Shortener</title>
     <link rel="stylesheet" href="styles.css?v=3" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <script src="theme.js"></script>
   </head>
   <body>
     <nav class="navbar">
@@ -15,6 +17,9 @@
           <a href="admin.html" id="adminLink" style="display: none" class="admin-link">⚙️ Admin</a>
           <span class="user-info">👤 <span id="username"></span></span>
           <button id="logoutBtn" class="logout-btn">Log Out</button>
+                <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
+                    <i class="fa-solid fa-moon"></i>
+                </button>
         </div>
       </div>
     </nav>
