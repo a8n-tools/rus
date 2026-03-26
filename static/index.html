@@ -614,15 +614,7 @@
               <i class="fa-solid fa-moon"></i>
             </button>
           `;
-          // Update theme toggle icon after nav rebuild
-          (function() {
-            var tb = document.getElementById('themeToggle');
-            if (tb) {
-              var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-              tb.innerHTML = isDark ? '<i class="fa-solid fa-sun"></i>' : '<i class="fa-solid fa-moon"></i>';
-              tb.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
-            }
-          })();
+          __updateThemeIcon();
           heroCta.innerHTML = `
             <a href="dashboard.html" class="cta-btn cta-primary">Go to Dashboard</a>
             <a href="${loginUrl}" class="cta-btn cta-secondary">Log In</a>
@@ -638,15 +630,7 @@
               <i class="fa-solid fa-moon"></i>
             </button>
           `;
-          // Update theme toggle icon after nav rebuild
-          (function() {
-            var tb = document.getElementById('themeToggle');
-            if (tb) {
-              var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-              tb.innerHTML = isDark ? '<i class="fa-solid fa-sun"></i>' : '<i class="fa-solid fa-moon"></i>';
-              tb.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
-            }
-          })();
+          __updateThemeIcon();
           heroCta.innerHTML = `
             <a href="dashboard.html" class="cta-btn cta-primary">Go to Dashboard</a>
           `;

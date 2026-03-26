@@ -23,6 +23,8 @@
     }
   });
 
+  window.__updateThemeIcon = updateToggleIcon;
+
   function updateToggleIcon() {
     var btn = document.getElementById('themeToggle');
     if (!btn) return;
