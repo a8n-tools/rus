@@ -148,6 +148,7 @@ async fn main() -> std::io::Result<()> {
             .route("/report.html", web::get().to(report_page))
             .route("/styles.css", web::get().to(serve_css))
             .route("/k9f3x2m7.js", web::get().to(serve_auth_js))
+            .route("/theme.js", web::get().to(serve_theme_js))
             .route("/health", web::get().to(health_check))
             // Catch-all route for short code redirects (MUST BE LAST)
             .route("/{code}", web::get().to(redirect_url));
@@ -183,6 +184,7 @@ async fn main() -> std::io::Result<()> {
             .route("/report.html", web::get().to(report_page))
             .route("/styles.css", web::get().to(serve_css))
             .route("/k9f3x2m7.js", web::get().to(serve_auth_js))
+            .route("/theme.js", web::get().to(serve_theme_js))
             .route("/saas-refresh.js", web::get().to(serve_saas_refresh_js))
             .route("/health", web::get().to(health_check))
             // Catch-all route for short code redirects (MUST BE LAST)

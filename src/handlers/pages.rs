@@ -85,6 +85,12 @@ pub async fn serve_css() -> Result<HttpResponse> {
         .body(include_str!("../../static/styles.css")))
 }
 
+pub async fn serve_theme_js() -> Result<HttpResponse> {
+    Ok(HttpResponse::Ok()
+        .content_type("application/javascript; charset=utf-8")
+        .body(include_str!("../../static/theme.js")))
+}
+
 pub async fn serve_auth_js() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok()
         .content_type("application/javascript; charset=utf-8")
