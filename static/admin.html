@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - Rust URL Shortener</title>
     <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <script src="theme.js"></script>
 </head>
 <body>
     <nav class="navbar">
@@ -14,6 +16,9 @@
                 <a href="dashboard.html">My Dashboard</a>
                 <span class="user-info">👤 <span id="username"></span> (Admin)</span>
                 <button id="logoutBtn" class="logout-btn">Log Out</button>
+                <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
+                    <i class="fa-solid fa-moon"></i>
+                </button>
             </div>
         </div>
     </nav>
@@ -612,7 +617,7 @@
             background: var(--bg-card);
             padding: 1.5rem;
             border-radius: 12px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 4px 15px var(--card-shadow);
             border: 1px solid var(--border-color);
             display: flex;
             align-items: center;
@@ -622,7 +627,7 @@
 
         .stat-card:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+            box-shadow: 0 6px 20px var(--card-shadow-hover);
         }
 
         .stat-icon {
@@ -644,7 +649,7 @@
             background: var(--bg-card);
             padding: 2rem;
             border-radius: 20px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 4px 15px var(--card-shadow);
             border: 1px solid var(--border-color);
         }
 
@@ -689,7 +694,7 @@
 
         .promote-user-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(247, 76, 0, 0.5);
+            box-shadow: 0 4px 12px var(--btn-hover-shadow);
         }
 
         .delete-user-btn {

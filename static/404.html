@@ -5,11 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Short Code Not Found - Rust URL Shortener</title>
     <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <script src="theme.js"></script>
     <style>
         .error-container {
             background: var(--bg-card);
             border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            box-shadow: 0 20px 60px var(--heavy-shadow);
             padding: 60px 40px;
             max-width: 600px;
             margin: 80px auto;
@@ -123,6 +125,9 @@
                 <a href="/">Home</a>
                 <a href="login.html">Log In</a>
                 <a href="signup.html">Sign Up</a>
+                <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
+                    <i class="fa-solid fa-moon"></i>
+                </button>
             </div>
         </div>
     </nav>
@@ -159,7 +164,19 @@
                 <a href="/">Home</a>
                 <a href="dashboard.html">Dashboard</a>
                 <button class="logout-btn" onclick="handleLogout()">Log Out</button>
+                <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
+                    <i class="fa-solid fa-moon"></i>
+                </button>
             `;
+          // Update theme toggle icon after nav rebuild
+          (function() {
+            var tb = document.getElementById('themeToggle');
+            if (tb) {
+              var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+              tb.innerHTML = isDark ? '<i class="fa-solid fa-sun"></i>' : '<i class="fa-solid fa-moon"></i>';
+              tb.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+            }
+          })();
         }
 
         function handleLogout() {
