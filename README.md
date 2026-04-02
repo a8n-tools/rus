@@ -75,21 +75,19 @@ The application starts on `http://localhost:4001`.
 
 ### Docker Deployment
 
-```bash
-# Standalone (default)
-docker build -t rus .
-docker compose up --build
+Each developer gets their own HTTPS instance at `https://{USER}-rus.a8n.run` (where `{USER}` is your OS username), routed via Traefik:
 
-# SaaS mode
-docker build --build-arg BUILD_MODE=saas -t rus-saas .
+```bash
+just dev                 # Start standalone instance
+just dev saas            # Start SaaS mode instance
+just dev-stop            # Stop instance
 ```
 
-### Task Runner (just)
+For local development without Traefik (cargo-watch with hot-reload on localhost:4001):
 
 ```bash
-just check-standalone    # Compile-check standalone via Docker
-just check-saas          # Compile-check saas via Docker
-just check-all           # Check both modes
+just dev-local           # Start local dev server
+just dev-local-stop      # Stop local dev server
 ```
 
 ## Usage
@@ -221,6 +219,7 @@ rus/
 ├── Cargo.toml
 ├── Dockerfile
 ├── compose.yml
+├── compose.dev.yml          # Per-developer Traefik compose
 ├── justfile                 # Task runner recipes
 ├── .env.standalone          # Env template for standalone mode
 └── .env.saas                # Env template for saas mode
@@ -315,14 +314,13 @@ rus/
 ## Development
 
 ```bash
-cargo run                    # Run in standalone mode (default)
-cargo test                   # Run tests
-cargo clippy                 # Lint
-cargo fmt                    # Format
-
-# SaaS mode
-cargo run --no-default-features --features saas
-cargo test --no-default-features --features saas
+just dev                     # Traefik-routed instance (standalone)
+just dev saas                # Traefik-routed instance (saas)
+just dev-local               # Local dev with hot-reload
+just test                    # Run tests (standalone)
+just test-saas               # Run tests (saas)
+just lint                    # Clippy
+just fmt                     # Format
 ```
 
 ### Short Code Generation
