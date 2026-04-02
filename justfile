@@ -4,25 +4,41 @@
 default:
     @just --list
 
-# Create .env from .env.standalone if it doesn't exist
+# Copy the appropriate .env file for the given mode
 [private]
-ensure-env:
-    @test -f .env || cp .env.standalone .env
+ensure-env mode="standalone":
+    @cp .env.{{ mode }} .env
 
-# Start dev server in Docker
-dev: ensure-env
+# Start dev server with Traefik routing (mode: standalone or saas)
+dev mode="standalone": (ensure-env mode)
+    BUILD_MODE={{ mode }} docker compose -f compose.dev.yml up --build app
+
+# Start dev server with Traefik routing, detached (mode: standalone or saas)
+dev-detach mode="standalone": (ensure-env mode)
+    BUILD_MODE={{ mode }} docker compose -f compose.dev.yml up --build --detach app
+
+# Stop Traefik-routed dev containers
+dev-stop:
+    docker compose -f compose.dev.yml down
+
+# Remove Traefik-routed dev containers and volumes
+dev-clean:
+    docker compose -f compose.dev.yml down --remove-orphans
+
+# Start local dev server in Docker (cargo-watch, localhost:4001)
+dev-local: (ensure-env "standalone")
     docker compose up --build app
 
-# Start dev server in Docker (detached)
-dev-detach: ensure-env
+# Start local dev server in Docker, detached
+dev-local-detach: (ensure-env "standalone")
     docker compose up --build --detach app
 
-# Stop dev containers
-dev-stop:
+# Stop local dev containers
+dev-local-stop:
     docker compose down
 
-# Remove dev containers, volumes, and networks
-dev-clean:
+# Remove local dev containers and volumes
+dev-local-clean:
     docker compose down --remove-orphans
 
 # Remove dev containers, volumes, networks, and all named Docker volumes
