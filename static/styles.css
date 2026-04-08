@@ -930,6 +930,10 @@ button[type="submit"]:disabled {
     border-color: var(--text-muted);
 }
 
+.contrast-toggle-btn.active {
+    color: var(--rust-orange);
+}
+
 /* ============================================================
    High-contrast dark overrides
    ============================================================ */

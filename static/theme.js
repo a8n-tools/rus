@@ -57,7 +57,7 @@
     var btn = document.getElementById('contrastToggle');
     if (!btn) return;
     var isHigh = document.documentElement.getAttribute('data-contrast') === 'high';
-    btn.style.color = isHigh ? 'var(--rust-orange)' : '';
+    btn.classList.toggle('active', isHigh);
     btn.title = isHigh ? 'Switch to normal contrast' : 'Switch to high contrast';
   }
 

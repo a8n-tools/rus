@@ -122,5 +122,6 @@ Add contrast toggle button to the left of the existing theme toggle button.
 | `static/admin.html` | Add contrast button, reorder nav items |
 | `static/report.html` | Add contrast button, reorder nav items |
 | `static/setup.html` | Add contrast button, reorder nav items |
-| `static/maintenance.html` | Add contrast button, reorder nav items |
 | `static/404.html` | Add contrast button, reorder nav items |
+
+Note: `maintenance.html` has no navbar (standalone error page), so it is excluded. It still benefits from high contrast CSS overrides if contrast was toggled on a previous page.
