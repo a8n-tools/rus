@@ -14,11 +14,14 @@
             <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
             <div class="nav-links">
                 <a href="dashboard.html">My Dashboard</a>
-                <span class="user-info">👤 <span id="username"></span> (Admin)</span>
-                <button id="logoutBtn" class="logout-btn">Log Out</button>
+                <button id="contrastToggle" class="contrast-toggle-btn" onclick="__toggleContrast()" aria-label="Toggle contrast">
+                    <i class="fa-solid fa-circle-half-stroke"></i>
+                </button>
                 <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
                     <i class="fa-solid fa-moon"></i>
                 </button>
+                <span class="user-info">👤 <span id="username"></span> (Admin)</span>
+                <button id="logoutBtn" class="logout-btn">Log Out</button>
             </div>
         </div>
     </nav>
