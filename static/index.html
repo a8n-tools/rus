@@ -424,15 +424,20 @@
   <body>
     <nav class="navbar">
       <div class="nav-content">
-        <a href="/" class="nav-brand">🦀 <span style="color: var(--rust-orange); font-weight: 700;">RUS</span></a>
+        <div style="display: flex; align-items: center; gap: 20px;">
+          <a href="/" class="nav-brand">🦀 <span style="color: var(--rust-orange); font-weight: 700;">RUS</span></a>
+          <a href="#features" style="color: var(--text-secondary); text-decoration: none; font-size: 0.9rem; font-weight: 500;">Features</a>
+          <a href="#about" style="color: var(--text-secondary); text-decoration: none; font-size: 0.9rem; font-weight: 500;">About</a>
+        </div>
         <div class="nav-links" id="navLinks">
-          <a href="#features">Features</a>
-          <a href="#about">About</a>
-          <a href="login.html">Log In</a>
-          <a href="signup.html" class="nav-cta" id="signupLink">Sign Up</a>
+          <button id="contrastToggle" class="contrast-toggle-btn" onclick="__toggleContrast()" aria-label="Toggle contrast">
+            <i class="fa-solid fa-circle-half-stroke"></i>
+          </button>
           <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
             <i class="fa-solid fa-moon"></i>
           </button>
+          <a href="login.html">Log In</a>
+          <a href="signup.html" class="nav-cta" id="signupLink">Sign Up</a>
         </div>
       </div>
     </nav>
@@ -606,15 +611,17 @@
           const dashboardUrl = encodeURIComponent(`${window.location.origin}/dashboard.html`);
           const loginUrl = `${config.login_url || '/'}?redirect=${dashboardUrl}`;
           navLinks.innerHTML = `
-            <a href="#features">Features</a>
-            <a href="#about">About</a>
-            <a href="dashboard.html">Dashboard</a>
-            <a href="${loginUrl}">Log In</a>
+            <button id="contrastToggle" class="contrast-toggle-btn" onclick="__toggleContrast()" aria-label="Toggle contrast">
+              <i class="fa-solid fa-circle-half-stroke"></i>
+            </button>
             <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
               <i class="fa-solid fa-moon"></i>
             </button>
+            <a href="dashboard.html">Dashboard</a>
+            <a href="${loginUrl}">Log In</a>
           `;
           __updateThemeIcon();
+          __updateContrastIcon();
           heroCta.innerHTML = `
             <a href="dashboard.html" class="cta-btn cta-primary">Go to Dashboard</a>
             <a href="${loginUrl}" class="cta-btn cta-secondary">Log In</a>
@@ -622,15 +629,17 @@
         } else if (isAuthenticated()) {
           // Standalone mode - user is logged in
           navLinks.innerHTML = `
-            <a href="#features">Features</a>
-            <a href="#about">About</a>
-            <a href="dashboard.html">Dashboard</a>
-            <button class="logout-btn" onclick="handleLogout()">Log Out</button>
+            <button id="contrastToggle" class="contrast-toggle-btn" onclick="__toggleContrast()" aria-label="Toggle contrast">
+              <i class="fa-solid fa-circle-half-stroke"></i>
+            </button>
             <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
               <i class="fa-solid fa-moon"></i>
             </button>
+            <a href="dashboard.html">Dashboard</a>
+            <button class="logout-btn" onclick="handleLogout()">Log Out</button>
           `;
           __updateThemeIcon();
+          __updateContrastIcon();
           heroCta.innerHTML = `
             <a href="dashboard.html" class="cta-btn cta-primary">Go to Dashboard</a>
           `;
