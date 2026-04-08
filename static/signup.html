@@ -13,11 +13,14 @@
         <div class="nav-content">
             <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
             <div class="nav-links">
-                <a href="/">Home</a>
-                <a href="login.html">Log In</a>
+                <button id="contrastToggle" class="contrast-toggle-btn" onclick="__toggleContrast()" aria-label="Toggle contrast">
+                    <i class="fa-solid fa-circle-half-stroke"></i>
+                </button>
                 <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
                     <i class="fa-solid fa-moon"></i>
                 </button>
+                <a href="/">Home</a>
+                <a href="login.html">Log In</a>
             </div>
         </div>
     </nav>

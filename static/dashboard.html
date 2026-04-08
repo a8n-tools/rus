@@ -15,11 +15,14 @@
         <div class="nav-links">
           <span id="maintenanceBadge" class="maintenance-badge" style="display: none">Maintenance Mode</span>
           <a href="admin.html" id="adminLink" style="display: none" class="admin-link">⚙️ Admin</a>
+          <button id="contrastToggle" class="contrast-toggle-btn" onclick="__toggleContrast()" aria-label="Toggle contrast">
+            <i class="fa-solid fa-circle-half-stroke"></i>
+          </button>
+          <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
+            <i class="fa-solid fa-moon"></i>
+          </button>
           <span class="user-info">👤 <span id="username"></span></span>
           <button id="logoutBtn" class="logout-btn">Log Out</button>
-                <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
-                    <i class="fa-solid fa-moon"></i>
-                </button>
         </div>
       </div>
     </nav>
