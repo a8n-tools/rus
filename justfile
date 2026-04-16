@@ -175,34 +175,3 @@ create-release bump:
     print $"Create PR: ($base_url)/compare/main...($release_branch)"
     print $"After merging, the create-release workflow will tag and release ($tag) automatically."
 
-
-# Test the release flow: create major release, cancel CI, delete tag, and revert commit (requires FORGEJO_TOKEN)
-test-release:
-    #!/usr/bin/env nu
-    let token = ($env | get --ignore-errors FORGEJO_TOKEN | default "")
-    if ($token | is-empty) { print $"(ansi red)FORGEJO_TOKEN env var required(ansi reset)"; exit 1 }
-    let current = (open Cargo.toml | get package.version | split row "." | each { into int })
-    let bare = $"($current.0 + 1).0.0"
-    let tag = $"v($bare)"
-    just create-release major
-    print "Waiting for CI to pick up the tag..."
-    sleep 5sec
-    let headers = {Authorization: $"token ($token)"}
-    let runs = (http get --headers $headers "https://dev.a8n.run/api/v1/repos/a8n-tools/rus/actions/runs")
-    let matched = ($runs.workflow_runs | where prettyref == $tag)
-    if ($matched | is-empty) {
-        print $"(ansi yellow)No workflow run found for ($tag) — skipping cancel(ansi reset)"
-    } else {
-        let run_id = ($matched | first | get id)
-        try {
-            http post --headers $headers --content-type "application/json" $"https://dev.a8n.run/api/v1/repos/a8n-tools/rus/actions/runs/($run_id)/cancel" {}
-            print $"Cancelled workflow run ($run_id)"
-        } catch {
-            print $"(ansi yellow)Could not cancel run ($run_id) — may have already completed(ansi reset)"
-        }
-    }
-    ^git tag --delete $tag
-    ^git push origin --delete $tag
-    ^git revert --no-edit HEAD
-    ^git push
-    print $"Done — ($tag) cleaned up"
