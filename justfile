@@ -118,25 +118,63 @@ check-docker-saas:
 build-docker mode="standalone":
     docker buildx build --build-arg BUILD_MODE={{ mode }} -t rus:local -f oci-build/Dockerfile .
 
-# Release
-# Create a release: bump major (vx.0.0) or minor version (v0.x.0), commit, tag, and push
+# ── Release ──────────────────────────────────────────────────────────────────
+
+# Create a release: bump major (vx.0.0), minor (v0.x.0), or hotfix (v0.0.x) version, commit, tag, and push
+# After the PR is merged, the create-release workflow creates the tag and release automatically
 create-release bump:
     #!/usr/bin/env nu
     let bump = "{{ bump }}"
-    let current = (open Cargo.toml | get package.version | split row "." | each { into int })
+
+    # Abort if there are uncommitted changes
+    let status = git status --porcelain | str trim
+    if ($status | is-not-empty) {
+        print $"(ansi red)Working tree is dirty. Please stash or commit your changes first.(ansi reset)"
+        exit 1
+    }
+
+	# Switch to main if not already there
+	let branch = git branch --show-current | str trim
+	if $branch != "main" {
+		print $"Switching from ($branch) to main..."
+        git checkout main
+    }
+
+    # Pull latest changes
+    git pull --rebase origin main
+
+	# Calculate next version
+	let current = (open Cargo.toml | get package.version | split row "." | each { into int })
     let next = match $bump {
         "major" => [$"($current.0 + 1)" "0" "0"],
         "minor" => [$"($current.0)" $"($current.1 + 1)" "0"],
-        _ => { print $"(ansi red)Usage: just create-release <major|minor>(ansi reset)"; exit 1 }
+        "hotfix" => [$"($current.0)" $"($current.1)" $"($current.2 + 1)"],
+		_ => { print $"(ansi red)Usage: just create-release <major|minor|hotfix>(ansi reset)"; exit 1 }
     }
     let bare = ($next | str join ".")
     let tag = $"v($bare)"
+    let release_branch = $"release/($tag)"
+
+    # Create release branch, bump version, and commit
+    git checkout -b $release_branch
     open Cargo.toml | update package.version $bare | to toml | collect | save --force Cargo.toml
     git add Cargo.toml
     git commit --signoff --message $"Release ($tag)"
-    git tag --annotate $tag --message $"Release ($tag)"
-    git push --follow-tags
-    print $"Released ($tag)"
+
+    # Push release branch
+    git push --set-upstream origin $release_branch
+
+    # Print PR and release links
+    let remote = git remote get-url origin
+    let base_url = if ($remote | str starts-with "ssh://") {
+        $remote | str replace "ssh://git@" "https://" | str replace "git.a8n.run" "dev.a8n.run" | str replace ".git" ""
+    } else {
+        $remote | str replace --regex "git@([^:]+):" "https://$1/" | str replace "git.a8n.run" "dev.a8n.run" | str replace ".git" ""
+    }
+    print $"(ansi green)Pushed ($release_branch)(ansi reset)"
+    print $"Create PR: ($base_url)/compare/main...($release_branch)"
+    print $"After merging, the create-release workflow will tag and release ($tag) automatically."
+
 
 # Test the release flow: create major release, cancel CI, delete tag, and revert commit (requires FORGEJO_TOKEN)
 test-release:
