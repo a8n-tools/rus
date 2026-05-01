@@ -190,3 +190,237 @@ pub fn load_or_provision(
         session_version: 0,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{id_claims, make_test_state};
+
+    const SUB_A: &str = "11111111-1111-1111-1111-111111111111";
+    const SUB_B: &str = "22222222-2222-2222-2222-222222222222";
+
+    #[test]
+    fn first_login_provisions_user() {
+        let state = make_test_state();
+        let claims = id_claims(SUB_A, Some("alice@example.com"), true, true, None);
+        let db = state.db.lock().unwrap();
+        let p = load_or_provision(&db, &claims).expect("provision");
+        assert!(p.user_id > 0);
+        assert!(!p.is_admin);
+        assert_eq!(p.session_version, 0);
+
+        let (uname, saas_id, is_admin): (String, String, i32) = db
+            .query_row(
+                "SELECT username, saas_user_id, is_admin FROM users WHERE userID = ?1",
+                params![p.user_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(uname, "alice");
+        assert_eq!(saas_id, SUB_A);
+        assert_eq!(is_admin, 0);
+    }
+
+    #[test]
+    fn admin_role_sets_is_admin() {
+        let state = make_test_state();
+        let claims = id_claims(SUB_A, Some("admin@example.com"), true, true, Some("admin"));
+        let db = state.db.lock().unwrap();
+        let p = load_or_provision(&db, &claims).unwrap();
+        assert!(p.is_admin);
+    }
+
+    #[test]
+    fn second_login_returns_existing_user() {
+        let state = make_test_state();
+        let claims = id_claims(SUB_A, Some("alice@example.com"), true, true, None);
+        let db = state.db.lock().unwrap();
+        let p1 = load_or_provision(&db, &claims).unwrap();
+        let p2 = load_or_provision(&db, &claims).unwrap();
+        assert_eq!(p1.user_id, p2.user_id);
+        let count: i64 = db
+            .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn admin_status_synced_on_each_login() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        let _ = load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some("u@example.com"), true, true, None),
+        )
+        .unwrap();
+        // Promotes
+        let _ = load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some("u@example.com"), true, true, Some("admin")),
+        )
+        .unwrap();
+        let is_admin: i32 = db
+            .query_row(
+                "SELECT is_admin FROM users WHERE saas_user_id = ?1",
+                params![SUB_A],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(is_admin, 1);
+        // Demotes
+        let _ = load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some("u@example.com"), true, true, None),
+        )
+        .unwrap();
+        let is_admin: i32 = db
+            .query_row(
+                "SELECT is_admin FROM users WHERE saas_user_id = ?1",
+                params![SUB_A],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(is_admin, 0);
+    }
+
+    #[test]
+    fn email_not_verified_is_forbidden_first_login() {
+        let state = make_test_state();
+        let claims = id_claims(SUB_A, Some("u@example.com"), false, true, None);
+        let db = state.db.lock().unwrap();
+        match load_or_provision(&db, &claims) {
+            Err(JitError::Forbidden(m)) => assert!(m.to_lowercase().contains("verify")),
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_membership_is_forbidden_first_login() {
+        let state = make_test_state();
+        let claims = id_claims(SUB_A, Some("u@example.com"), true, false, None);
+        let db = state.db.lock().unwrap();
+        match load_or_provision(&db, &claims) {
+            Err(JitError::Forbidden(m)) => assert!(m.to_lowercase().contains("membership")),
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_membership_blocks_existing_user() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some("u@example.com"), true, true, None),
+        )
+        .unwrap();
+        match load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some("u@example.com"), true, false, None),
+        ) {
+            Err(JitError::Forbidden(_)) => {}
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn suspended_existing_user_is_forbidden() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some("u@example.com"), true, true, None),
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE users SET suspended_at = '2026-01-01T00:00:00Z' WHERE saas_user_id = ?1",
+            params![SUB_A],
+        )
+        .unwrap();
+        match load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some("u@example.com"), true, true, None),
+        ) {
+            Err(JitError::Forbidden(m)) => assert!(m.to_lowercase().contains("suspended")),
+            other => panic!("expected Forbidden, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_sub_uuid_is_internal_error() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        let mut claims = id_claims("not-a-uuid", Some("u@example.com"), true, true, None);
+        claims.sub = "not-a-uuid".into();
+        match load_or_provision(&db, &claims) {
+            Err(JitError::Internal(m)) => assert!(m.contains("sub")),
+            other => panic!("expected Internal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_email_first_login_is_internal_error() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        let claims = id_claims(SUB_A, None, true, true, None);
+        match load_or_provision(&db, &claims) {
+            Err(JitError::Internal(m)) => assert!(m.contains("email")),
+            other => panic!("expected Internal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn links_existing_standalone_account_by_email() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        // Pre-existing standalone user
+        db.execute(
+            "INSERT INTO users (username, password, email) VALUES ('alice', 'hash', 'alice@example.com')",
+            [],
+        )
+        .unwrap();
+        let pre_id = db.last_insert_rowid();
+
+        let claims = id_claims(SUB_A, Some("alice@example.com"), true, true, None);
+        let p = load_or_provision(&db, &claims).unwrap();
+        assert_eq!(p.user_id, pre_id, "should reuse the standalone row, not insert");
+        let count: i64 = db
+            .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        let saas_id: String = db
+            .query_row(
+                "SELECT saas_user_id FROM users WHERE userID = ?1",
+                params![pre_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(saas_id, SUB_A);
+    }
+
+    #[test]
+    fn username_collision_bumps_suffix() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        // First user takes username "alice"
+        load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some("alice@example.com"), true, true, None),
+        )
+        .unwrap();
+        // Second user, different sub, same email local-part -> should get "alice_1"
+        let p2 = load_or_provision(
+            &db,
+            &id_claims(SUB_B, Some("alice@other.example"), true, true, None),
+        )
+        .unwrap();
+        let uname: String = db
+            .query_row(
+                "SELECT username FROM users WHERE userID = ?1",
+                params![p2.user_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(uname, "alice_1");
+    }
+}

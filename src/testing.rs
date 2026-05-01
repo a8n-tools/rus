@@ -173,6 +173,30 @@ pub fn sign_webhook_payload(body: &[u8], secret: &str) -> String {
     hex::encode(mac.finalize().into_bytes())
 }
 
+/// Build an `IdTokenClaims` fixture for JIT tests.
+#[cfg(feature = "saas")]
+pub fn id_claims(
+    sub: &str,
+    email: Option<&str>,
+    email_verified: bool,
+    has_member_access: bool,
+    role: Option<&str>,
+) -> crate::oidc::verifier::IdTokenClaims {
+    crate::oidc::verifier::IdTokenClaims {
+        iss: "https://idp.example.com".to_string(),
+        sub: sub.to_string(),
+        aud: serde_json::json!("rus-test-client"),
+        exp: 0,
+        iat: 0,
+        nonce: Some("test-nonce".to_string()),
+        email: email.map(String::from),
+        email_verified: Some(email_verified),
+        name: None,
+        role: role.map(String::from),
+        has_member_access: Some(has_member_access),
+    }
+}
+
 /// Insert a URL directly for SaaS tests. Returns the new row id.
 #[cfg(feature = "saas")]
 pub fn insert_saas_url(

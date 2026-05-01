@@ -625,3 +625,171 @@ pub async fn dev_seed_session(
         .append_header((header::LOCATION, "/dashboard.html"))
         .finish()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::OidcConfig;
+    use crate::testing::{insert_saas_user, make_saas_session, make_test_state};
+    use actix_web::{test, App};
+
+    const SUB_A: &str = "11111111-1111-1111-1111-111111111111";
+
+    fn rp_state(enabled: bool) -> web::Data<OidcRpState> {
+        let mut cfg = OidcConfig {
+            issuer: if enabled { "https://idp.example.com".into() } else { String::new() },
+            audience: "https://rus.example.com/api".into(),
+            jwks_url: "https://idp.example.com/.well-known/jwks.json".into(),
+            jwks_cache_ttl: 300,
+            client_id: "test-client".into(),
+            client_secret: "secret".into(),
+            redirect_uri: "https://rus.example.com/oauth2/callback".into(),
+            post_logout_redirect_uri: "https://rus.example.com/".into(),
+            leeway_seconds: 30,
+            lifecycle_jti_cache_ttl: 300,
+            session_ttl_seconds: 1_209_600,
+        };
+        if !enabled {
+            cfg.issuer = String::new();
+        }
+        let verifier = std::sync::Arc::new(OidcVerifier::new(cfg.clone()));
+        web::Data::new(OidcRpState::new(cfg, verifier))
+    }
+
+    #[actix_web::test]
+    async fn login_returns_404_when_oidc_disabled() {
+        let app = test::init_service(
+            App::new()
+                .app_data(make_test_state())
+                .app_data(rp_state(false))
+                .route("/oauth2/login", web::get().to(login)),
+        )
+        .await;
+        let req = test::TestRequest::get().uri("/oauth2/login").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[actix_web::test]
+    async fn login_redirects_to_authorize_with_pkce() {
+        let app_state = make_test_state();
+        let app = test::init_service(
+            App::new()
+                .app_data(app_state.clone())
+                .app_data(rp_state(true))
+                .route("/oauth2/login", web::get().to(login)),
+        )
+        .await;
+        let req = test::TestRequest::get().uri("/oauth2/login").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 303);
+        let loc = resp
+            .headers()
+            .get("Location")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(loc.starts_with("https://idp.example.com/oauth2/authorize?"));
+        assert!(loc.contains("client_id=test-client"));
+        assert!(loc.contains("code_challenge_method=S256"));
+        assert!(loc.contains("response_type=code"));
+
+        // rp_session row should have been written
+        let count: i64 = app_state
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM rp_sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[actix_web::test]
+    async fn callback_propagates_idp_error_via_redirect() {
+        let app = test::init_service(
+            App::new()
+                .app_data(make_test_state())
+                .app_data(rp_state(true))
+                .route("/oauth2/callback", web::get().to(callback)),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri("/oauth2/callback?error=access_denied&error_description=nope")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 303);
+        let loc = resp.headers().get("Location").unwrap().to_str().unwrap();
+        assert!(loc.starts_with("/?error=access_denied"));
+    }
+
+    #[actix_web::test]
+    async fn callback_400_when_missing_code() {
+        let app = test::init_service(
+            App::new()
+                .app_data(make_test_state())
+                .app_data(rp_state(true))
+                .route("/oauth2/callback", web::get().to(callback)),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri("/oauth2/callback?state=abc")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn callback_400_when_missing_state() {
+        let app = test::init_service(
+            App::new()
+                .app_data(make_test_state())
+                .app_data(rp_state(true))
+                .route("/oauth2/callback", web::get().to(callback)),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri("/oauth2/callback?code=xyz")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn logout_clears_cookie_and_redirects() {
+        let app_state = make_test_state();
+        let uid = insert_saas_user(&app_state, "alice", SUB_A, false);
+        let token = make_saas_session(&app_state, uid);
+        let app = test::init_service(
+            App::new()
+                .app_data(app_state.clone())
+                .app_data(rp_state(true))
+                .route("/oauth2/logout", web::get().to(logout)),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri("/oauth2/logout")
+            .insert_header(("Cookie", format!("{RUS_SESSION_COOKIE}={token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 303);
+        let set_cookie = resp
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(set_cookie.contains(&format!("{RUS_SESSION_COOKIE}=")));
+        assert!(set_cookie.contains("Max-Age=0"));
+        let loc = resp.headers().get("Location").unwrap().to_str().unwrap();
+        assert!(loc.starts_with("https://idp.example.com/oauth2/logout"));
+
+        // user_sessions row deleted
+        let count: i64 = app_state
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM user_sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+}

@@ -493,3 +493,55 @@ fn ed25519_spki_pem_from_x(x_b64url: &str) -> Result<String, String> {
         "-----BEGIN PUBLIC KEY-----\n{b64}\n-----END PUBLIC KEY-----\n"
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reproduce a known-good Ed25519 SPKI byte sequence so the helper can't
+    /// silently drift from the OIDC JWK -> SPKI contract.
+    #[test]
+    fn ed25519_spki_pem_matches_expected_format() {
+        // 32 zero bytes encoded as base64url
+        let zeros_b64 = URL_SAFE_NO_PAD.encode([0u8; 32]);
+        let pem = ed25519_spki_pem_from_x(&zeros_b64).unwrap();
+        assert!(pem.starts_with("-----BEGIN PUBLIC KEY-----\n"));
+        assert!(pem.ends_with("\n-----END PUBLIC KEY-----\n"));
+        // jsonwebtoken should be able to parse what we built.
+        DecodingKey::from_ed_pem(pem.as_bytes()).expect("valid Ed25519 SPKI PEM");
+    }
+
+    #[test]
+    fn ed25519_spki_rejects_wrong_length() {
+        let bad = URL_SAFE_NO_PAD.encode([0u8; 31]);
+        let err = ed25519_spki_pem_from_x(&bad).unwrap_err();
+        assert!(err.contains("32-byte"));
+    }
+
+    #[test]
+    fn ed25519_spki_rejects_bad_base64() {
+        let err = ed25519_spki_pem_from_x("!!!not-b64!!!").unwrap_err();
+        assert!(err.contains("base64url"));
+    }
+
+    #[actix_web::test]
+    async fn at_jwt_bad_header_rejected() {
+        let cfg = crate::config::OidcConfig {
+            issuer: "https://idp.example.com".into(),
+            audience: "https://rus.example.com/api".into(),
+            jwks_url: String::new(),
+            jwks_cache_ttl: 300,
+            client_id: "c".into(),
+            client_secret: "s".into(),
+            redirect_uri: "https://rus.example.com/oauth2/callback".into(),
+            post_logout_redirect_uri: "https://rus.example.com/".into(),
+            leeway_seconds: 30,
+            lifecycle_jti_cache_ttl: 300,
+            session_ttl_seconds: 1_209_600,
+        };
+        let v = OidcVerifier::new(cfg);
+        // Garbage tokens get rejected at header parse without a network call.
+        let result = v.verify_access_token("not-a-jwt").await;
+        assert!(matches!(result, Err(OidcError::InvalidToken(_))));
+    }
+}

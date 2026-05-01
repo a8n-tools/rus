@@ -176,3 +176,142 @@ impl FromRequest for AuthenticatedUser {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::{insert_saas_user, make_saas_session, make_test_state};
+
+    const SUB: &str = "11111111-1111-1111-1111-111111111111";
+
+    #[test]
+    fn lookup_returns_user_for_valid_session() {
+        let state = make_test_state();
+        let uid = insert_saas_user(&state, "alice", SUB, false);
+        let token = make_saas_session(&state, uid);
+        let db = state.db.lock().unwrap();
+        let user = lookup_session(&db, &token).unwrap().expect("session valid");
+        assert_eq!(user.user_id, uid);
+        assert_eq!(user.username, "alice");
+        assert!(!user.is_admin);
+        assert!(user.auth_via_oidc);
+    }
+
+    #[test]
+    fn lookup_returns_none_for_unknown_token() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        assert!(lookup_session(&db, "totally-fake-token").unwrap().is_none());
+    }
+
+    #[test]
+    fn lookup_uses_hash_not_plaintext() {
+        let state = make_test_state();
+        let uid = insert_saas_user(&state, "alice", SUB, false);
+        let token = make_saas_session(&state, uid);
+        let db = state.db.lock().unwrap();
+        // Plaintext token should NEVER appear in the DB.
+        let stored: Vec<u8> = db
+            .query_row(
+                "SELECT session_token_hash FROM user_sessions WHERE user_id = ?1",
+                rusqlite::params![uid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_ne!(stored.as_slice(), token.as_bytes());
+        assert_eq!(stored.len(), 32, "must be SHA-256 = 32 bytes");
+    }
+
+    #[test]
+    fn lookup_returns_none_when_session_expired() {
+        let state = make_test_state();
+        let uid = insert_saas_user(&state, "alice", SUB, false);
+        let token = make_saas_session(&state, uid);
+        let db = state.db.lock().unwrap();
+        // Expire the session
+        db.execute(
+            "UPDATE user_sessions SET expires_at = '2020-01-01T00:00:00Z' WHERE user_id = ?1",
+            rusqlite::params![uid],
+        )
+        .unwrap();
+        assert!(lookup_session(&db, &token).unwrap().is_none());
+    }
+
+    #[test]
+    fn lookup_returns_none_on_session_version_mismatch() {
+        let state = make_test_state();
+        let uid = insert_saas_user(&state, "alice", SUB, false);
+        let token = make_saas_session(&state, uid);
+        let db = state.db.lock().unwrap();
+        // Bump the user's session_version (simulate back-channel logout)
+        db.execute(
+            "UPDATE users SET session_version = session_version + 1 WHERE userID = ?1",
+            rusqlite::params![uid],
+        )
+        .unwrap();
+        assert!(lookup_session(&db, &token).unwrap().is_none());
+    }
+
+    #[test]
+    fn lookup_returns_none_when_user_suspended() {
+        let state = make_test_state();
+        let uid = insert_saas_user(&state, "alice", SUB, false);
+        let token = make_saas_session(&state, uid);
+        let db = state.db.lock().unwrap();
+        db.execute(
+            "UPDATE users SET suspended_at = '2026-01-01T00:00:00Z' WHERE userID = ?1",
+            rusqlite::params![uid],
+        )
+        .unwrap();
+        assert!(lookup_session(&db, &token).unwrap().is_none());
+    }
+
+    #[test]
+    fn admin_flag_propagates() {
+        let state = make_test_state();
+        let uid = insert_saas_user(&state, "admin", SUB, true);
+        let token = make_saas_session(&state, uid);
+        let db = state.db.lock().unwrap();
+        let user = lookup_session(&db, &token).unwrap().unwrap();
+        assert!(user.is_admin);
+    }
+
+    #[actix_web::test]
+    async fn require_session_middleware_rejects_no_cookie() {
+        use actix_web::{test, web, App};
+        let state = make_test_state();
+        let app = test::init_service(
+            App::new().app_data(state).service(
+                web::scope("/api")
+                    .wrap(actix_web::middleware::from_fn(require_session))
+                    .route("/ping", web::get().to(|| async { "pong" })),
+            ),
+        )
+        .await;
+        let req = test::TestRequest::get().uri("/api/ping").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
+    #[actix_web::test]
+    async fn require_session_middleware_admits_valid_session() {
+        use actix_web::{test, web, App};
+        let state = make_test_state();
+        let uid = insert_saas_user(&state, "alice", SUB, false);
+        let token = make_saas_session(&state, uid);
+        let app = test::init_service(
+            App::new().app_data(state.clone()).service(
+                web::scope("/api")
+                    .wrap(actix_web::middleware::from_fn(require_session))
+                    .route("/ping", web::get().to(|| async { "pong" })),
+            ),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri("/api/ping")
+            .insert_header(("Cookie", format!("{RUS_SESSION_COOKIE}={token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+}

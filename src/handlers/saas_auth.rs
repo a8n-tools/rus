@@ -109,3 +109,152 @@ pub async fn maintenance_guard(
             .body(html),
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::oidc::session::RUS_SESSION_COOKIE;
+    use crate::testing::{insert_saas_user, make_saas_session, make_test_state};
+    use actix_web::{test, App};
+    use std::sync::atomic::Ordering;
+
+    const SUB_ADMIN: &str = "11111111-1111-1111-1111-111111111111";
+    const SUB_USER: &str = "22222222-2222-2222-2222-222222222222";
+
+    fn build(state: actix_web::web::Data<crate::db::AppState>) -> App<impl actix_web::dev::ServiceFactory<actix_web::dev::ServiceRequest, Config = (), Response = actix_web::dev::ServiceResponse, Error = actix_web::Error, InitError = ()>> {
+        App::new()
+            .app_data(state)
+            .route("/api/ping", web::get().to(|| async { "pong" }))
+            .route("/dashboard.html", web::get().to(|| async { "dash" }))
+            .route("/health", web::get().to(|| async { "ok" }))
+            .route("/api/config", web::get().to(|| async { "config" }))
+            .route("/oauth2/login", web::get().to(|| async { "login" }))
+            .route("/webhooks/maintenance", web::post().to(|| async { "wh" }))
+            .wrap(actix_web::middleware::from_fn(maintenance_guard))
+    }
+
+    #[actix_web::test]
+    async fn passes_through_when_maintenance_off() {
+        let state = make_test_state();
+        let app = test::init_service(build(state)).await;
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get().uri("/api/ping").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn maintenance_on_blocks_api_with_503_json() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, Ordering::SeqCst);
+        *state.maintenance_message.write().unwrap() = Some("upgrading".into());
+        let app = test::init_service(build(state)).await;
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get().uri("/api/ping").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 503);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["maintenance"], true);
+        assert_eq!(body["message"], "upgrading");
+    }
+
+    #[actix_web::test]
+    async fn maintenance_on_blocks_pages_with_503_html() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, Ordering::SeqCst);
+        let app = test::init_service(build(state)).await;
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get().uri("/dashboard.html").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 503);
+        assert_eq!(
+            resp.headers().get("content-type").unwrap(),
+            "text/html; charset=utf-8"
+        );
+    }
+
+    #[actix_web::test]
+    async fn allowlist_paths_bypass_maintenance() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, Ordering::SeqCst);
+        let app = test::init_service(build(state)).await;
+        for path in &["/health", "/api/config"] {
+            let resp = test::call_service(
+                &app,
+                test::TestRequest::get().uri(path).to_request(),
+            )
+            .await;
+            assert_eq!(resp.status(), 200, "expected 200 for {path}");
+        }
+    }
+
+    #[actix_web::test]
+    async fn oauth2_routes_bypass_maintenance() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, Ordering::SeqCst);
+        let app = test::init_service(build(state)).await;
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get().uri("/oauth2/login").to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn webhook_routes_bypass_maintenance() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, Ordering::SeqCst);
+        let app = test::init_service(build(state)).await;
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/webhooks/maintenance")
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn admin_with_valid_session_bypasses_maintenance() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, Ordering::SeqCst);
+        let uid = insert_saas_user(&state, "admin", SUB_ADMIN, true);
+        let token = make_saas_session(&state, uid);
+        let app = test::init_service(build(state)).await;
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/api/ping")
+                .insert_header(("Cookie", format!("{RUS_SESSION_COOKIE}={token}")))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn non_admin_session_blocked_by_maintenance() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, Ordering::SeqCst);
+        let uid = insert_saas_user(&state, "alice", SUB_USER, false);
+        let token = make_saas_session(&state, uid);
+        let app = test::init_service(build(state)).await;
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/api/ping")
+                .insert_header(("Cookie", format!("{RUS_SESSION_COOKIE}={token}")))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 503);
+    }
+}
