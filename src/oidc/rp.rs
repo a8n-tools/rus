@@ -372,9 +372,11 @@ pub async fn callback(
     let secure = state.config.redirect_uri.starts_with("https://");
     let cookie = build_session_cookie(&session_token, state.config.session_ttl_seconds, secure);
 
+    // Same-origin only. `s.starts_with('/')` alone would accept protocol-relative
+    // paths like `//evil.com/x`, which browsers resolve as `https://evil.com/x`.
     let destination = return_to
         .as_deref()
-        .filter(|s| s.starts_with('/'))
+        .filter(|s| s.starts_with('/') && !s.starts_with("//"))
         .unwrap_or("/dashboard.html");
 
     HttpResponse::SeeOther()

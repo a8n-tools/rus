@@ -147,35 +147,40 @@ pub fn load_or_provision(
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| email.split('@').next().unwrap_or("user").to_string());
 
+    // Try the derived username, then numeric suffixes, falling back to a
+    // saas-uuid-derived name. The INSERT itself is the race-safe arbiter:
+    // a concurrent first-login that picked the same username will lose the
+    // UNIQUE race and we'll bump the suffix and retry.
     let mut username = base_username.clone();
-    let mut suffix = 0u32;
-    loop {
-        let taken: bool = db
-            .query_row(
-                "SELECT 1 FROM users WHERE username = ?1",
-                params![&username],
-                |_| Ok(true),
-            )
-            .optional()?
-            .unwrap_or(false);
-        if !taken {
-            break;
+    let mut suffix: u32 = 0;
+    let user_id = loop {
+        match db.execute(
+            "INSERT INTO users (username, password, is_admin, saas_user_id, email, session_version)
+             VALUES (?1, '!sso:no-password', ?2, ?3, ?4, 0)",
+            params![&username, is_admin as i32, &saas_uuid_str, email],
+        ) {
+            Ok(_) => break db.last_insert_rowid(),
+            Err(e) => {
+                let msg = e.to_string();
+                let unique_violation = msg.contains("UNIQUE constraint failed");
+                if !unique_violation {
+                    return Err(JitError::Internal(format!("user insert failed: {msg}")));
+                }
+                suffix += 1;
+                if suffix > 1000 {
+                    // Last-resort guaranteed-unique fallback.
+                    username = format!("sso_{}", &saas_uuid_str[..8]);
+                    db.execute(
+                        "INSERT INTO users (username, password, is_admin, saas_user_id, email, session_version)
+                         VALUES (?1, '!sso:no-password', ?2, ?3, ?4, 0)",
+                        params![&username, is_admin as i32, &saas_uuid_str, email],
+                    )?;
+                    break db.last_insert_rowid();
+                }
+                username = format!("{base_username}_{suffix}");
+            }
         }
-        suffix += 1;
-        username = format!("{base_username}_{suffix}");
-        if suffix > 1000 {
-            // Last-resort fallback that cannot collide.
-            username = format!("sso_{}", &saas_uuid_str[..8]);
-            break;
-        }
-    }
-
-    db.execute(
-        "INSERT INTO users (username, password, is_admin, saas_user_id, email, session_version)
-         VALUES (?1, '!sso:no-password', ?2, ?3, ?4, 0)",
-        params![&username, is_admin as i32, &saas_uuid_str, email],
-    )?;
-    let user_id = db.last_insert_rowid();
+    };
 
     tracing::info!(user_id, saas_user_id = %saas_uuid, username = %username, "SSO user JIT-provisioned");
 
