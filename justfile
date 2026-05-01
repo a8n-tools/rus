@@ -4,38 +4,44 @@
 default:
     @just --list
 
+# Use the per-developer Traefik-routed dev compose file
+compose := "docker compose -f compose.dev.yml "
+
 # Copy the appropriate .env file for the given mode
 [private]
 ensure-env mode="standalone":
     @cp .env.{{ mode }} .env
 
-# Start dev server with Traefik routing (mode: standalone or saas)
+# Build and start dev server with Traefik routing on a8n.run (mode: standalone or saas)
 dev mode="standalone": (ensure-env mode)
-    BUILD_MODE={{ mode }} docker compose -f compose.dev.yml up --build app
+    BUILD_MODE={{ mode }} {{ compose }}up --build --detach app
+    @echo ""
+    @echo "Service started!"
+    @echo "  App: https://{{env('USER')}}-rus.a8n.run"
 
-# Start dev server with Traefik routing, detached (mode: standalone or saas)
-dev-detach mode="standalone": (ensure-env mode)
-    BUILD_MODE={{ mode }} docker compose -f compose.dev.yml up --build --detach app
+# Build and start local dev server in Docker (cargo-watch, localhost:4001)
+dev-local: (ensure-env "standalone")
+    docker compose up --build --detach app
+    @echo ""
+    @echo "Service started!"
+    @echo "  App: http://localhost:4001"
 
-# Stop Traefik-routed dev containers
-dev-stop:
-    docker compose -f compose.dev.yml down
+# Stop every dev stack started by `just dev` / `just dev-local` (Traefik + localhost)
+down:
+    {{ compose }}down --remove-orphans
+    docker compose down --remove-orphans
+
+# Tail logs for the Traefik-routed dev container
+logs:
+    {{ compose }}logs --follow app
+
+# Tail logs for the localhost dev container
+logs-local:
+    docker compose logs --follow app
 
 # Remove Traefik-routed dev containers and volumes
 dev-clean:
-    docker compose -f compose.dev.yml down --remove-orphans
-
-# Start local dev server in Docker (cargo-watch, localhost:4001)
-dev-local: (ensure-env "standalone")
-    docker compose up --build app
-
-# Start local dev server in Docker, detached
-dev-local-detach: (ensure-env "standalone")
-    docker compose up --build --detach app
-
-# Stop local dev containers
-dev-local-stop:
-    docker compose down
+    {{ compose }}down --remove-orphans
 
 # Remove local dev containers and volumes
 dev-local-clean:
@@ -133,23 +139,23 @@ create-release bump:
         exit 1
     }
 
-	# Switch to main if not already there
-	let branch = git branch --show-current | str trim
-	if $branch != "main" {
-		print $"Switching from ($branch) to main..."
+    # Switch to main if not already there
+    let branch = git branch --show-current | str trim
+    if $branch != "main" {
+        print $"Switching from ($branch) to main..."
         git checkout main
     }
 
     # Pull latest changes
     git pull --rebase origin main
 
-	# Calculate next version
-	let current = (open Cargo.toml | get package.version | split row "." | each { into int })
+    # Calculate next version
+    let current = (open Cargo.toml | get package.version | split row "." | each { into int })
     let next = match $bump {
         "major" => [$"($current.0 + 1)" "0" "0"],
         "minor" => [$"($current.0)" $"($current.1 + 1)" "0"],
         "hotfix" => [$"($current.0)" $"($current.1)" $"($current.2 + 1)"],
-		_ => { print $"(ansi red)Usage: just create-release <major|minor|hotfix>(ansi reset)"; exit 1 }
+        _ => { print $"(ansi red)Usage: just create-release <major|minor|hotfix>(ansi reset)"; exit 1 }
     }
     let bare = ($next | str join ".")
     let tag = $"v($bare)"
