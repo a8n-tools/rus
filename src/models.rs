@@ -119,7 +119,7 @@ pub struct ConfigResponse {
     #[cfg(feature = "saas")]
     pub logout_url: String,
     #[cfg(feature = "saas")]
-    pub refresh_url: String,
+    pub oidc_enabled: bool,
     #[cfg(feature = "saas")]
     pub maintenance_mode: bool,
     #[cfg(feature = "saas")]

@@ -600,16 +600,11 @@
           console.error('Failed to check config:', error);
         }
 
-        // Update a8n-tools links to point to SaaS login (or '#' for standalone)
-        const a8nUrl = config.login_url || '#';
-        document.querySelectorAll('#a8nLinkFooter, #a8nLinkNav').forEach(link => {
-          link.href = a8nUrl;
-        });
-
         if (config.auth_mode === 'saas') {
-          // SaaS mode - redirect to parent app for auth, with redirect back to dashboard
-          const dashboardUrl = encodeURIComponent(`${window.location.origin}/dashboard.html`);
-          const loginUrl = `${config.login_url || '/'}?redirect=${dashboardUrl}`;
+          // SaaS mode - login goes to the local OIDC RP which then redirects to the IdP.
+          const returnTo = encodeURIComponent('/dashboard.html');
+          const loginUrl = `${config.login_url || '/oauth2/login'}?return_to=${returnTo}`;
+          const logoutUrl = config.logout_url || '/oauth2/logout';
           navLinks.innerHTML = `
             <button id="contrastToggle" class="contrast-toggle-btn" onclick="__toggleContrast()" aria-label="Toggle contrast">
               <i class="fa-solid fa-circle-half-stroke"></i>

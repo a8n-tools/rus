@@ -105,18 +105,22 @@ impl AppState {
             "
         )?;
 
-        // SaaS mode: simplified schema without user management tables
-        // A minimal users table is required so that urls.user_id FK is satisfied
-        // when SaaS-authenticated users are auto-provisioned.
+        // SaaS mode: simplified schema without user management tables.
+        // The `users` table here uses an AUTOINCREMENT PK, distinct from the SaaS
+        // identity (`saas_user_id` UUID) which is stored alongside.
         #[cfg(feature = "saas")]
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS users (
-                userID INTEGER PRIMARY KEY,
+                userID INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
                 password TEXT NOT NULL DEFAULT '',
                 is_admin INTEGER NOT NULL DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                saas_user_id TEXT,
+                email TEXT,
+                suspended_at TEXT,
+                session_version INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS urls (
@@ -149,6 +153,26 @@ impl AppState {
                 resolved_by INTEGER
             );
 
+            CREATE TABLE IF NOT EXISTS rp_sessions (
+                id            TEXT PRIMARY KEY,
+                state         TEXT NOT NULL UNIQUE,
+                nonce         TEXT NOT NULL,
+                code_verifier TEXT NOT NULL,
+                return_to     TEXT,
+                created_at    TEXT NOT NULL,
+                expires_at    TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id                 TEXT PRIMARY KEY,
+                session_token_hash BLOB NOT NULL UNIQUE,
+                user_id            INTEGER NOT NULL REFERENCES users(userID) ON DELETE CASCADE,
+                session_version    INTEGER NOT NULL,
+                auth_via_oidc      INTEGER NOT NULL DEFAULT 0,
+                created_at         TEXT NOT NULL,
+                expires_at         TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_short_code ON urls(short_code);
             CREATE INDEX IF NOT EXISTS idx_user_id ON urls(user_id);
             CREATE INDEX IF NOT EXISTS idx_click_history_url_id ON click_history(url_id);
@@ -156,8 +180,31 @@ impl AppState {
             CREATE INDEX IF NOT EXISTS idx_abuse_reports_short_code ON abuse_reports(short_code);
             CREATE INDEX IF NOT EXISTS idx_abuse_reports_status ON abuse_reports(status);
             CREATE INDEX IF NOT EXISTS idx_abuse_reports_created_at ON abuse_reports(created_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_saas_user_id ON users(saas_user_id) WHERE saas_user_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_rp_sessions_expires ON rp_sessions(expires_at);
             "
         )?;
+
+        // SaaS mode: best-effort migration to add SSO columns to a pre-existing
+        // users table (silently ignore "duplicate column name" errors).
+        #[cfg(feature = "saas")]
+        {
+            for stmt in [
+                "ALTER TABLE users ADD COLUMN saas_user_id TEXT",
+                "ALTER TABLE users ADD COLUMN email TEXT",
+                "ALTER TABLE users ADD COLUMN suspended_at TEXT",
+                "ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0",
+            ] {
+                if let Err(e) = conn.execute(stmt, []) {
+                    let msg = e.to_string();
+                    if !msg.contains("duplicate column name") {
+                        tracing::debug!(stmt = %stmt, error = %msg, "SSO column migration skipped");
+                    }
+                }
+            }
+        }
 
         Ok(AppState {
             db: Mutex::new(conn),

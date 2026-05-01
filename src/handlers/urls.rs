@@ -8,7 +8,7 @@ use crate::auth::get_claims;
 #[cfg(feature = "saas")]
 use actix_web::HttpMessage;
 #[cfg(feature = "saas")]
-use super::saas_auth::SaasUserClaims;
+use crate::oidc::session::{lookup_session, AuthenticatedUser};
 use crate::db::AppState;
 use crate::models::{
     ClickHistoryEntry, ClickStats, ShortenRequest, ShortenResponse, UpdateUrlNameRequest,
@@ -24,11 +24,19 @@ fn get_user_id(http_req: &HttpRequest) -> Option<i64> {
 
 #[cfg(feature = "saas")]
 fn get_user_id(http_req: &HttpRequest) -> Option<i64> {
-    // In SaaS mode with middleware, claims are stored in request extensions
-    http_req
-        .extensions()
-        .get::<SaasUserClaims>()
-        .map(|c| c.user_id)
+    // Cached identity inserted by an upstream extractor.
+    if let Some(u) = http_req.extensions().get::<AuthenticatedUser>().cloned() {
+        return Some(u.user_id);
+    }
+    // Fall back to direct cookie lookup (used by the cookie middleware).
+    let cookie = http_req.cookie(crate::oidc::RUS_SESSION_COOKIE)?;
+    let state = http_req.app_data::<actix_web::web::Data<AppState>>()?;
+    let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+    let user = lookup_session(&db, cookie.value()).ok().flatten()?;
+    let user_id = user.user_id;
+    drop(db);
+    http_req.extensions_mut().insert(user);
+    Some(user_id)
 }
 
 /// Protected API endpoint to shorten a URL
@@ -1138,13 +1146,14 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // SaaS tests
+    // SaaS tests (BFF session cookie)
     // -------------------------------------------------------------------------
     #[cfg(feature = "saas")]
     mod saas {
         use super::*;
-        use crate::handlers::saas_auth::saas_cookie_validator;
-        use crate::testing::{insert_saas_url, insert_saas_user, make_saas_jwt, make_test_state};
+        use crate::oidc::require_session;
+        use crate::oidc::session::RUS_SESSION_COOKIE;
+        use crate::testing::{insert_saas_url, insert_saas_user, make_saas_session, make_test_state};
 
         macro_rules! setup_app {
             ($state:expr) => {{
@@ -1153,7 +1162,7 @@ mod tests {
                         .app_data($state.clone())
                         .service(
                             web::scope("/api")
-                                .wrap(actix_web::middleware::from_fn(saas_cookie_validator))
+                                .wrap(actix_web::middleware::from_fn(require_session))
                                 .route("/shorten", web::post().to(shorten_url))
                                 .route("/urls", web::get().to(get_user_urls))
                                 .route("/urls/{code}", web::delete().to(delete_url))
@@ -1165,19 +1174,20 @@ mod tests {
             }};
         }
 
-        fn cookie(jwt: &str) -> String {
-            format!("access_token={jwt}")
+        fn cookie(token: &str) -> String {
+            format!("{RUS_SESSION_COOKIE}={token}")
         }
 
         #[actix_web::test]
-        async fn shorten_url_with_valid_member_cookie() {
+        async fn shorten_url_with_valid_session() {
             let state = make_test_state();
+            let uid = insert_saas_user(&state, "alice", "11111111-1111-1111-1111-111111111111", false);
+            let token = make_saas_session(&state, uid);
             let app = setup_app!(state);
-            let jwt = make_saas_jwt("42", "alice@example.com", "active", None);
 
             let req = test::TestRequest::post()
                 .uri("/api/shorten")
-                .insert_header(("Cookie", cookie(&jwt)))
+                .insert_header(("Cookie", cookie(&token)))
                 .set_json(serde_json::json!({"url": "https://example.com"}))
                 .to_request();
             let resp = test::call_service(&app, req).await;
@@ -1193,81 +1203,21 @@ mod tests {
                 .uri("/api/shorten")
                 .set_json(serde_json::json!({"url": "https://example.com"}))
                 .to_request();
-            let resp = test::try_call_service(&app, req).await;
-            assert!(resp.is_err() || resp.unwrap().status() == 401);
-        }
-
-        #[actix_web::test]
-        async fn non_member_gets_403_with_redirect() {
-            let state = make_test_state();
-            let app = setup_app!(state);
-            let jwt = make_saas_jwt("99", "noone@example.com", "none", None);
-
-            let req = test::TestRequest::post()
-                .uri("/api/shorten")
-                .insert_header(("Cookie", cookie(&jwt)))
-                .set_json(serde_json::json!({"url": "https://example.com"}))
-                .to_request();
-            let resp = test::try_call_service(&app, req).await;
-            assert!(resp.is_err() || resp.unwrap().status() == 403);
-        }
-
-        #[actix_web::test]
-        async fn admin_bypasses_membership_check() {
-            let state = make_test_state();
-            let app = setup_app!(state);
-            let jwt = make_saas_jwt("1", "admin@example.com", "none", Some("admin"));
-
-            let req = test::TestRequest::post()
-                .uri("/api/shorten")
-                .insert_header(("Cookie", cookie(&jwt)))
-                .set_json(serde_json::json!({"url": "https://example.com"}))
-                .to_request();
             let resp = test::call_service(&app, req).await;
-            assert_eq!(resp.status(), 200);
-        }
-
-        #[actix_web::test]
-        async fn grace_period_member_allowed() {
-            let state = make_test_state();
-            let app = setup_app!(state);
-            let jwt = make_saas_jwt("55", "grace@example.com", "grace_period", None);
-
-            let req = test::TestRequest::post()
-                .uri("/api/shorten")
-                .insert_header(("Cookie", cookie(&jwt)))
-                .set_json(serde_json::json!({"url": "https://example.com"}))
-                .to_request();
-            let resp = test::call_service(&app, req).await;
-            assert_eq!(resp.status(), 200);
-        }
-
-        #[actix_web::test]
-        async fn canceled_member_gets_403() {
-            let state = make_test_state();
-            let app = setup_app!(state);
-            let jwt = make_saas_jwt("77", "old@example.com", "canceled", None);
-
-            let req = test::TestRequest::post()
-                .uri("/api/shorten")
-                .insert_header(("Cookie", cookie(&jwt)))
-                .set_json(serde_json::json!({"url": "https://example.com"}))
-                .to_request();
-            let resp = test::try_call_service(&app, req).await;
-            assert!(resp.is_err() || resp.unwrap().status() == 403);
+            assert_eq!(resp.status(), 401);
         }
 
         #[actix_web::test]
         async fn saas_delete_own_url() {
             let state = make_test_state();
-            insert_saas_user(&state, 42, "alice@example.com", false);
-            insert_saas_url(&state, 42, "https://alice.com", "del001");
+            let uid = insert_saas_user(&state, "alice", "22222222-2222-2222-2222-222222222222", false);
+            insert_saas_url(&state, uid, "https://alice.com", "del001");
+            let token = make_saas_session(&state, uid);
             let app = setup_app!(state);
-            let jwt = make_saas_jwt("42", "alice@example.com", "active", None);
 
             let req = test::TestRequest::delete()
                 .uri("/api/urls/del001")
-                .insert_header(("Cookie", cookie(&jwt)))
+                .insert_header(("Cookie", cookie(&token)))
                 .to_request();
             let resp = test::call_service(&app, req).await;
             assert_eq!(resp.status(), 200);
@@ -1287,14 +1237,14 @@ mod tests {
         #[actix_web::test]
         async fn saas_stats_for_own_url() {
             let state = make_test_state();
-            insert_saas_user(&state, 42, "alice@example.com", false);
-            insert_saas_url(&state, 42, "https://alice.com", "sta001");
+            let uid = insert_saas_user(&state, "alice", "33333333-3333-3333-3333-333333333333", false);
+            insert_saas_url(&state, uid, "https://alice.com", "sta001");
+            let token = make_saas_session(&state, uid);
             let app = setup_app!(state);
-            let jwt = make_saas_jwt("42", "alice@example.com", "active", None);
 
             let req = test::TestRequest::get()
                 .uri("/api/stats/sta001")
-                .insert_header(("Cookie", cookie(&jwt)))
+                .insert_header(("Cookie", cookie(&token)))
                 .to_request();
             let resp = test::call_service(&app, req).await;
             assert_eq!(resp.status(), 200);
@@ -1305,8 +1255,8 @@ mod tests {
         #[actix_web::test]
         async fn saas_redirect_works() {
             let state = make_test_state();
-            insert_saas_user(&state, 42, "alice@example.com", false);
-            insert_saas_url(&state, 42, "https://alice.com", "red001");
+            let uid = insert_saas_user(&state, "alice", "44444444-4444-4444-4444-444444444444", false);
+            insert_saas_url(&state, uid, "https://alice.com", "red001");
             let app = setup_app!(state);
 
             let req = test::TestRequest::get().uri("/red001").to_request();
@@ -1321,16 +1271,16 @@ mod tests {
         #[actix_web::test]
         async fn saas_user_can_only_see_own_urls() {
             let state = make_test_state();
-            insert_saas_user(&state, 42, "alice@example.com", false);
-            insert_saas_user(&state, 43, "bob@example.com", false);
-            insert_saas_url(&state, 42, "https://alice.com", "aaa111");
-            insert_saas_url(&state, 43, "https://bob.com", "bbb222");
+            let alice = insert_saas_user(&state, "alice", "55555555-5555-5555-5555-555555555555", false);
+            let bob = insert_saas_user(&state, "bob", "66666666-6666-6666-6666-666666666666", false);
+            insert_saas_url(&state, alice, "https://alice.com", "aaa111");
+            insert_saas_url(&state, bob, "https://bob.com", "bbb222");
+            let token = make_saas_session(&state, alice);
             let app = setup_app!(state);
-            let jwt = make_saas_jwt("42", "alice@example.com", "active", None);
 
             let req = test::TestRequest::get()
                 .uri("/api/urls")
-                .insert_header(("Cookie", cookie(&jwt)))
+                .insert_header(("Cookie", cookie(&token)))
                 .to_request();
             let body: Value = test::call_and_read_body_json(&app, req).await;
             let arr = body.as_array().unwrap();
