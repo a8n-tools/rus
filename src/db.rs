@@ -180,7 +180,6 @@ impl AppState {
             CREATE INDEX IF NOT EXISTS idx_abuse_reports_short_code ON abuse_reports(short_code);
             CREATE INDEX IF NOT EXISTS idx_abuse_reports_status ON abuse_reports(status);
             CREATE INDEX IF NOT EXISTS idx_abuse_reports_created_at ON abuse_reports(created_at);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_saas_user_id ON users(saas_user_id) WHERE saas_user_id IS NOT NULL;
             CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
             CREATE INDEX IF NOT EXISTS idx_rp_sessions_expires ON rp_sessions(expires_at);
@@ -204,6 +203,12 @@ impl AppState {
                     }
                 }
             }
+            // Index requires saas_user_id; create it after the migration block so a
+            // pre-existing users table (added the column above) doesn't trip CREATE INDEX.
+            conn.execute_batch(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_saas_user_id
+                     ON users(saas_user_id) WHERE saas_user_id IS NOT NULL;"
+            )?;
         }
 
         Ok(AppState {
