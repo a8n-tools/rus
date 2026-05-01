@@ -135,6 +135,27 @@ ACCOUNT_LOCKOUT_DURATION=30 # Lockout duration in minutes (default: 30)
 ALLOW_REGISTRATION=true     # Allow public signups (default: true)
 ```
 
+### SaaS-only options (OIDC SSO + webhook)
+```
+# OIDC SSO (BFF Authorization Code + PKCE flow)
+OIDC_ISSUER=https://api.a8n.tools          # Empty disables /oauth2/* routes
+OIDC_AUDIENCE=<HOST_URL>/api               # `aud` claim in at+jwt tokens
+OIDC_JWKS_URL=                             # Default: <issuer>/.well-known/jwks.json
+OIDC_JWKS_CACHE_TTL=300                    # JWKS cache TTL (seconds)
+OIDC_CLIENT_ID=                            # Required when OIDC_ISSUER is set
+OIDC_CLIENT_SECRET=                        # Or mount at /run/secrets/oidc_client_secret
+OIDC_REDIRECT_URI=<HOST_URL>/oauth2/callback
+OIDC_POST_LOGOUT_REDIRECT_URI=<HOST_URL>/
+OIDC_LEEWAY_SECONDS=30                     # Clock-skew tolerance
+OIDC_LIFECYCLE_JTI_CACHE_TTL=300           # Idempotency window for lifecycle/logout events
+OIDC_SESSION_TTL_SECONDS=1209600           # `rus_session` cookie lifetime (14 days)
+
+# Maintenance webhook (HMAC-SHA256 signed; previously reused SAAS_JWT_SECRET)
+WEBHOOK_SECRET=                            # Required to validate /webhooks/maintenance
+```
+
+The legacy `SAAS_JWT_SECRET`, `SAAS_LOGIN_URL`, `SAAS_LOGOUT_URL`, `SAAS_MEMBERSHIP_URL`, and `SAAS_REFRESH_URL` env vars from the deprecated cookie-JWT path have been removed.
+
 **Important:** When adding or changing environment variables, update both `.env.standalone` and `.env.saas` to keep them in sync. Shared variables go in both files; mode-specific variables go only in the relevant file.
 
 ## Database Schema

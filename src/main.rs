@@ -11,6 +11,8 @@ mod config;
 mod db;
 mod handlers;
 mod models;
+#[cfg(feature = "saas")]
+mod oidc;
 #[cfg(feature = "standalone")]
 mod security;
 mod url;
@@ -56,6 +58,18 @@ async fn main() -> std::io::Result<()> {
     );
 
     info!("Database connection established");
+
+    // Build the OIDC verifier + RP state once and share across workers.
+    #[cfg(feature = "saas")]
+    let oidc_state = {
+        use std::sync::Arc;
+        let verifier = Arc::new(oidc::OidcVerifier::new(app_state.config.oidc.clone()));
+        web::Data::new(oidc::OidcRpState::new(
+            app_state.config.oidc.clone(),
+            verifier,
+        ))
+    };
+
     info!(host = %bind_host, port = bind_port, "Starting server");
 
     HttpServer::new(move || {
@@ -154,43 +168,61 @@ async fn main() -> std::io::Result<()> {
             .route("/{code}", web::get().to(redirect_url));
 
         #[cfg(feature = "saas")]
-        let app = app
-            // Webhook endpoint (outside maintenance guard allowlist, but also explicitly allowed)
-            .route("/webhooks/maintenance", web::post().to(handle_maintenance_webhook))
-            // SaaS mode: minimal public API routes
-            .route("/api/config", web::get().to(get_config))
-            .route("/api/version", web::get().to(get_version))
-            .service(
-                web::resource("/api/report-abuse")
-                    .wrap(Governor::new(&moderate_rate_limit))
-                    .route(web::post().to(submit_abuse_report))
-            )
-            // SaaS mode: protected routes use cookie-based auth with JWT verification
-            .service(
-                web::scope("/api")
-                    .wrap(actix_web::middleware::from_fn(saas_cookie_validator))
-                    .route("/me", web::get().to(saas_me))
-                    .route("/shorten", web::post().to(shorten_url))
-                    .route("/stats/{code}", web::get().to(get_stats))
-                    .route("/urls", web::get().to(get_user_urls))
-                    .route("/urls/{code}", web::delete().to(delete_url))
-                    .route("/urls/{code}/name", web::patch().to(update_url_name))
-                    .route("/urls/{code}/clicks", web::get().to(get_click_history))
-                    .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code))
-            )
-            // Public page routes
-            .route("/", web::get().to(index))
-            .route("/dashboard.html", web::get().to(dashboard_page))
-            .route("/report.html", web::get().to(report_page))
-            .route("/styles.css", web::get().to(serve_css))
-            .route("/k9f3x2m7.js", web::get().to(serve_auth_js))
-            .route("/theme.js", web::get().to(serve_theme_js))
-            .route("/saas-refresh.js", web::get().to(serve_saas_refresh_js))
-            .route("/health", web::get().to(health_check))
-            // Catch-all route for short code redirects (MUST BE LAST)
-            .route("/{code}", web::get().to(redirect_url))
-            // Maintenance guard: outermost middleware (last .wrap() = runs first)
-            .wrap(actix_web::middleware::from_fn(maintenance_guard));
+        let app = {
+            let mut app = app
+                .app_data(oidc_state.clone())
+                // Webhook endpoint
+                .route("/webhooks/maintenance", web::post().to(handle_maintenance_webhook))
+                // Public API
+                .route("/api/config", web::get().to(get_config))
+                .route("/api/version", web::get().to(get_version))
+                .service(
+                    web::resource("/api/report-abuse")
+                        .wrap(Governor::new(&moderate_rate_limit))
+                        .route(web::post().to(submit_abuse_report))
+                )
+                // Protected /api routes (BFF session cookie)
+                .service(
+                    web::scope("/api")
+                        .wrap(actix_web::middleware::from_fn(oidc::require_session))
+                        .route("/me", web::get().to(saas_me))
+                        .route("/shorten", web::post().to(shorten_url))
+                        .route("/stats/{code}", web::get().to(get_stats))
+                        .route("/urls", web::get().to(get_user_urls))
+                        .route("/urls/{code}", web::delete().to(delete_url))
+                        .route("/urls/{code}/name", web::patch().to(update_url_name))
+                        .route("/urls/{code}/clicks", web::get().to(get_click_history))
+                        .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code))
+                )
+                // OIDC RP routes
+                .route("/oauth2/login", web::get().to(oidc::rp::login))
+                .route("/oauth2/callback", web::get().to(oidc::rp::callback))
+                .route("/oauth2/logout", web::get().to(oidc::rp::logout))
+                .route("/oauth2/backchannel-logout", web::post().to(oidc::rp::backchannel_logout))
+                .route("/oauth2/lifecycle-event", web::post().to(oidc::rp::lifecycle_event));
+
+            // Dev-only seed-session for local testing.
+            #[cfg(debug_assertions)]
+            {
+                app = app
+                    .route("/dev/seed-session", web::get().to(oidc::rp::dev_seed_session))
+                    .route("/dev/logout", web::get().to(oidc::rp::dev_logout));
+            }
+
+            app
+                // Public page routes
+                .route("/", web::get().to(index))
+                .route("/dashboard.html", web::get().to(dashboard_page))
+                .route("/report.html", web::get().to(report_page))
+                .route("/styles.css", web::get().to(serve_css))
+                .route("/k9f3x2m7.js", web::get().to(serve_auth_js))
+                .route("/theme.js", web::get().to(serve_theme_js))
+                .route("/health", web::get().to(health_check))
+                // Catch-all route for short code redirects (MUST BE LAST)
+                .route("/{code}", web::get().to(redirect_url))
+                // Maintenance guard: outermost middleware
+                .wrap(actix_web::middleware::from_fn(maintenance_guard))
+        };
 
         app
     })

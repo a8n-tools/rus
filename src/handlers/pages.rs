@@ -7,7 +7,7 @@ use crate::db::AppState;
 use crate::models::SetupCheckResponse;
 use crate::models::{ConfigResponse, HealthResponse, VersionResponse};
 #[cfg(feature = "saas")]
-use super::saas_auth::get_user_from_cookie;
+use crate::oidc::session::lookup_session;
 
 /// Serve static HTML pages
 pub async fn index() -> Result<HttpResponse> {
@@ -38,19 +38,20 @@ pub async fn dashboard_page() -> Result<HttpResponse> {
         .body(include_str!("../../static/dashboard.html")))
 }
 
-/// Dashboard page for SaaS mode - verifies access_token cookie signature
+/// Dashboard page for SaaS mode - requires a valid OIDC BFF session.
 #[cfg(feature = "saas")]
 pub async fn dashboard_page(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
-    // Verify JWT signature and check claims
-    if get_user_from_cookie(&req, &data.config.saas_jwt_secret).is_none() {
-        let return_to = format!("{}/dashboard.html", data.config.host_url);
-        let redirect = url::Url::parse_with_params(
-            &data.config.saas_login_url,
-            &[("redirect", return_to.as_str())],
-        )
-        .unwrap_or_else(|_| url::Url::parse(&data.config.saas_login_url).unwrap());
+    let authed = req
+        .cookie(crate::oidc::RUS_SESSION_COOKIE)
+        .and_then(|c| {
+            let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
+            lookup_session(&db, c.value()).ok().flatten()
+        })
+        .is_some();
+
+    if !authed {
         return Ok(HttpResponse::Found()
-            .append_header(("Location", redirect.to_string()))
+            .append_header(("Location", "/oauth2/login?return_to=/dashboard.html"))
             .finish());
     }
 
@@ -97,13 +98,6 @@ pub async fn serve_auth_js() -> Result<HttpResponse> {
         .body(include_str!("../../static/auth.js")))
 }
 
-#[cfg(feature = "saas")]
-pub async fn serve_saas_refresh_js() -> Result<HttpResponse> {
-    Ok(HttpResponse::Ok()
-        .content_type("application/javascript; charset=utf-8")
-        .body(include_str!("../../static/saas-refresh.js")))
-}
-
 /// Health check endpoint for monitoring and Docker health checks
 pub async fn health_check(data: web::Data<AppState>) -> Result<HttpResponse> {
     let uptime = data.start_time.elapsed().as_secs();
@@ -127,11 +121,11 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
         #[cfg(feature = "standalone")]
         allow_registration: data.config.allow_registration,
         #[cfg(feature = "saas")]
-        login_url: data.config.saas_login_url.clone(),
+        login_url: "/oauth2/login".to_string(),
         #[cfg(feature = "saas")]
-        logout_url: data.config.saas_logout_url.clone(),
+        logout_url: "/oauth2/logout".to_string(),
         #[cfg(feature = "saas")]
-        refresh_url: data.config.saas_refresh_url.clone(),
+        oidc_enabled: data.config.oidc.enabled(),
         #[cfg(feature = "saas")]
         maintenance_mode: data.maintenance_mode.load(std::sync::atomic::Ordering::SeqCst),
         #[cfg(feature = "saas")]
@@ -444,6 +438,8 @@ mod tests {
     #[cfg(feature = "saas")]
     mod saas {
         use super::*;
+        use crate::oidc::session::RUS_SESSION_COOKIE;
+        use crate::testing::{insert_saas_user, make_saas_session};
 
         #[actix_web::test]
         async fn dashboard_redirects_without_valid_cookie() {
@@ -459,13 +455,19 @@ mod tests {
             let resp = test::call_service(&app, req).await;
             assert_eq!(resp.status(), 302);
             let location = resp.headers().get("Location").unwrap().to_str().unwrap();
-            assert!(location.contains("login") || location.contains("app.example.com"));
+            assert!(location.contains("/oauth2/login"));
         }
 
         #[actix_web::test]
-        async fn dashboard_returns_html_with_valid_cookie() {
+        async fn dashboard_returns_html_with_valid_session() {
             let state = crate::testing::make_test_state();
-            let jwt = crate::testing::make_saas_jwt("42", "alice@example.com", "active", None);
+            let uid = insert_saas_user(
+                &state,
+                "alice",
+                "77777777-7777-7777-7777-777777777777",
+                false,
+            );
+            let token = make_saas_session(&state, uid);
             let app = test::init_service(
                 App::new()
                     .app_data(state)
@@ -475,33 +477,10 @@ mod tests {
 
             let req = test::TestRequest::get()
                 .uri("/dashboard.html")
-                .insert_header(("Cookie", format!("access_token={jwt}")))
+                .insert_header(("Cookie", format!("{RUS_SESSION_COOKIE}={token}")))
                 .to_request();
             let resp = test::call_service(&app, req).await;
             assert_eq!(resp.status(), 200);
-            assert_eq!(
-                resp.headers().get("content-type").unwrap(),
-                "text/html; charset=utf-8"
-            );
-        }
-
-        #[actix_web::test]
-        async fn serve_saas_refresh_js_returns_200() {
-            let state = crate::testing::make_test_state();
-            let app = test::init_service(
-                App::new()
-                    .app_data(state)
-                    .route("/saas-refresh.js", web::get().to(serve_saas_refresh_js)),
-            )
-            .await;
-
-            let req = test::TestRequest::get().uri("/saas-refresh.js").to_request();
-            let resp = test::call_service(&app, req).await;
-            assert_eq!(resp.status(), 200);
-            assert_eq!(
-                resp.headers().get("content-type").unwrap(),
-                "application/javascript; charset=utf-8"
-            );
         }
     }
 }

@@ -94,7 +94,7 @@
 
     <script src="k9f3x2m7.js"></script>
     <script>
-      // Determine auth mode and login redirect URL
+      // Determine auth mode and login/logout URLs.
       let authMode = 'standalone';
       let loginRedirect = 'login.html';
       let logoutRedirect = 'login.html';
@@ -104,22 +104,13 @@
           const configResp = await fetch('/api/config');
           const config = await configResp.json();
           authMode = config.auth_mode || 'standalone';
-          if (authMode === 'saas' && config.login_url) {
-            const returnUrl = encodeURIComponent(window.location.href);
-            loginRedirect = `${config.login_url}?redirect=${returnUrl}`;
-            if (config.logout_url) {
-              logoutRedirect = `${config.logout_url}?url=${returnUrl}`;
-            }
+          if (authMode === 'saas') {
+            const returnTo = encodeURIComponent('/dashboard.html');
+            loginRedirect = `${config.login_url || '/oauth2/login'}?return_to=${returnTo}`;
+            logoutRedirect = config.logout_url || '/oauth2/logout';
           }
-          // Show maintenance badge if active
           if (config.maintenance_mode) {
             document.getElementById('maintenanceBadge').style.display = 'inline-flex';
-          }
-          // Load SaaS token refresh script
-          if (authMode === 'saas') {
-            var s = document.createElement('script');
-            s.src = 'saas-refresh.js';
-            document.head.appendChild(s);
           }
         } catch (e) {
           console.error('Failed to load config:', e);

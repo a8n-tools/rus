@@ -9,7 +9,7 @@ pub mod saas_auth;
 #[cfg(feature = "saas")]
 pub mod webhook;
 #[cfg(feature = "saas")]
-pub use saas_auth::{maintenance_guard, saas_cookie_validator, saas_me};
+pub use saas_auth::{maintenance_guard, saas_me};
 #[cfg(feature = "saas")]
 pub use webhook::handle_maintenance_webhook;
 pub mod urls;
@@ -27,8 +27,6 @@ pub use pages::{
     admin_page, check_setup_required, login_page, setup_page, signup_page,
 };
 pub use pages::{dashboard_page, get_config, get_version, health_check, index, report_page, serve_auth_js, serve_css, serve_theme_js};
-#[cfg(feature = "saas")]
-pub use pages::serve_saas_refresh_js;
 pub use urls::{
     delete_url, get_click_history, get_qr_code, get_stats, get_user_urls, redirect_url,
     shorten_url, update_url_name,
