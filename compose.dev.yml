@@ -8,6 +8,9 @@ services:
       dockerfile: oci-build/Dockerfile
       args:
         BUILD_MODE: ${BUILD_MODE:-standalone}
+        GIT_TAG: ${GIT_TAG:-unknown}
+        GIT_HASH: ${GIT_HASH:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     container_name: rus-dev-${USER}
     restart: unless-stopped
     env_file:

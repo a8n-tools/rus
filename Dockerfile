@@ -1,11 +1,11 @@
 FROM rust:1.93-alpine
 
-RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static git
 RUN cargo install cargo-watch
 
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs && touch src/lib.rs && cargo build && rm -rf src
 
 COPY static ./static
