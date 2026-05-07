@@ -174,6 +174,14 @@ impl Config {
 
     /// Print configuration banner on startup
     pub fn print_banner(&self) {
+        tracing::info!(
+            version = env!("CARGO_PKG_VERSION"),
+            git_tag = env!("GIT_TAG"),
+            git_hash = env!("GIT_HASH"),
+            build_date = env!("BUILD_DATE"),
+            "RUS build info"
+        );
+
         #[cfg(feature = "standalone")]
         tracing::info!(
             mode = "standalone",

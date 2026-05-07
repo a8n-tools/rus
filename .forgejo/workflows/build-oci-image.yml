@@ -14,6 +14,7 @@ on:
       - "static/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "build.rs"
       - "Dockerfile"
       - "oci-build/**"
       - ".forgejo/workflows/build-oci-image.yml"
@@ -64,6 +65,20 @@ jobs:
           let tags = (^nu oci-build/get-tags.nu --joined)
           $"tags=($tags)\n" | save --append $env.GITHUB_OUTPUT
 
+      - name: Capture version metadata
+        id: version
+        shell: nu {0}
+        run: |
+          let git_tag = (^git describe --tags --always --dirty | str trim)
+          let git_hash = (^git rev-parse --short=12 HEAD | str trim)
+          let build_date = (date now | format date "%Y-%m-%dT%H:%M:%SZ")
+          $"git_tag=($git_tag)\n" | save --append $env.GITHUB_OUTPUT
+          $"git_hash=($git_hash)\n" | save --append $env.GITHUB_OUTPUT
+          $"build_date=($build_date)\n" | save --append $env.GITHUB_OUTPUT
+          print $"GIT_TAG=($git_tag)"
+          print $"GIT_HASH=($git_hash)"
+          print $"BUILD_DATE=($build_date)"
+
       - name: Log in to container registry
         shell: nu {0}
         run: |
@@ -76,11 +91,24 @@ jobs:
           let tags = ($tags_str | split row ",")
           let image = "${{ matrix.image }}"
           let build_mode = "${{ matrix.build_mode }}"
+          let git_tag = "${{ steps.version.outputs.git_tag }}"
+          let git_hash = "${{ steps.version.outputs.git_hash }}"
+          let build_date = "${{ steps.version.outputs.build_date }}"
           let registry = $env.IMAGE_REGISTRY
           let tag_args = ($tags | each {|tag| [-t $"($registry)/($image):($tag)"]} | flatten)
           let cache_from = $"type=registry,ref=($registry)/($image):latest"
           print $"Building and pushing ($image) [($build_mode) mode] with tags: ($tags_str)"
-          ^docker buildx build --push --build-arg $"BUILD_MODE=($build_mode)" --cache-from $cache_from --cache-to type=inline ...$tag_args -f oci-build/Dockerfile .
+          (
+            ^docker buildx build --push
+              --build-arg $"BUILD_MODE=($build_mode)"
+              --build-arg $"GIT_TAG=($git_tag)"
+              --build-arg $"GIT_HASH=($git_hash)"
+              --build-arg $"BUILD_DATE=($build_date)"
+              --cache-from $cache_from
+              --cache-to type=inline
+              ...$tag_args
+              -f oci-build/Dockerfile .
+          )
 
       - name: Print image URLs
         shell: nu {0}

@@ -105,6 +105,9 @@ pub async fn health_check(data: web::Data<AppState>) -> Result<HttpResponse> {
     Ok(HttpResponse::Ok().json(HealthResponse {
         status: "healthy".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
+        git_tag: env!("GIT_TAG").to_string(),
+        git_hash: env!("GIT_HASH").to_string(),
+        build_date: env!("BUILD_DATE").to_string(),
         uptime_seconds: uptime,
     }))
 }
@@ -151,6 +154,9 @@ pub async fn check_setup_required(data: web::Data<AppState>) -> Result<HttpRespo
 pub async fn get_version() -> Result<HttpResponse> {
     Ok(HttpResponse::Ok().json(VersionResponse {
         version: env!("CARGO_PKG_VERSION").to_string(),
+        git_tag: env!("GIT_TAG").to_string(),
+        git_hash: env!("GIT_HASH").to_string(),
+        build_date: env!("BUILD_DATE").to_string(),
     }))
 }
 
@@ -195,6 +201,9 @@ mod tests {
         let body: Value = test::call_and_read_body_json(&app, req).await;
         assert_eq!(body["status"], "healthy");
         assert!(body["version"].is_string());
+        assert!(body["git_tag"].is_string());
+        assert!(body["git_hash"].is_string());
+        assert!(body["build_date"].is_string());
         assert!(body["uptime_seconds"].is_number());
     }
 
@@ -248,6 +257,12 @@ mod tests {
         let body: Value = test::call_and_read_body_json(&app, req).await;
         assert!(body["version"].is_string());
         assert!(!body["version"].as_str().unwrap().is_empty());
+        assert!(body["git_tag"].is_string());
+        assert!(!body["git_tag"].as_str().unwrap().is_empty());
+        assert!(body["git_hash"].is_string());
+        assert!(!body["git_hash"].as_str().unwrap().is_empty());
+        assert!(body["build_date"].is_string());
+        assert!(!body["build_date"].as_str().unwrap().is_empty());
     }
 
     // --- static page handlers ---

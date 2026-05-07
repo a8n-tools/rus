@@ -3,6 +3,7 @@ name = "rus"
 version = "0.15.1"
 edition = "2021"
 default-run = "rus"
+build = "build.rs"
 
 [lib]
 name = "rus"

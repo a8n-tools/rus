@@ -580,7 +580,9 @@
         try {
           const response = await fetch('/api/version');
           const data = await response.json();
-          document.getElementById('version').textContent = `v${data.version}`;
+          const el = document.getElementById('version');
+          el.textContent = `v${data.version}`;
+          el.title = `git: ${data.git_tag} (${data.git_hash}) built ${data.build_date}`;
         } catch (error) {
           console.error('Failed to load version:', error);
         }
