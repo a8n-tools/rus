@@ -1,0 +1,43 @@
+---
+name: rus-${USER}
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: oci-build/Dockerfile
+      args:
+        BUILD_MODE: ${BUILD_MODE:-standalone}
+        GIT_TAG: ${GIT_TAG:-unknown}
+        GIT_HASH: ${GIT_HASH:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
+    container_name: rus-dev-${USER}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 4001
+      HOST_URL: https://${USER}-rus.a8n.run
+      RUST_LOG: info,rus=debug
+    volumes:
+      - rus-data:/data
+    networks:
+      - default
+      - network-traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=network-traefik-public"
+      - "traefik.http.routers.rus-${USER}.rule=Host(`${USER}-rus.a8n.run`)"
+      - "traefik.http.routers.rus-${USER}.service=rus-${USER}@docker"
+      - "traefik.http.routers.rus-${USER}.entrypoints=web-secure"
+      - "traefik.http.routers.rus-${USER}.tls.certresolver=cert-cloudflare"
+      - "traefik.http.services.rus-${USER}.loadbalancer.server.port=4001"
+
+volumes:
+  rus-data:
+    name: rus-data-${USER}
+
+networks:
+  network-traefik-public:
+    external: true

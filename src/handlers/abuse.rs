@@ -4,6 +4,7 @@ use actix_web::HttpRequest;
 #[cfg(feature = "standalone")]
 use chrono::Utc;
 use rusqlite::params;
+use tracing::info;
 
 #[cfg(feature = "standalone")]
 use crate::auth::get_claims;
@@ -67,9 +68,12 @@ pub async fn submit_abuse_report(
             req.description.as_deref()
         ],
     ) {
-        Ok(_) => Ok(HttpResponse::Created().json(serde_json::json!({
-            "message": "Report submitted successfully. Thank you for helping keep our service safe."
-        }))),
+        Ok(_) => {
+            info!(short_code = %req.short_code, "Abuse report submitted");
+            Ok(HttpResponse::Created().json(serde_json::json!({
+                "message": "Report submitted successfully. Thank you for helping keep our service safe."
+            })))
+        }
         Err(_) => Ok(HttpResponse::InternalServerError().json(serde_json::json!({
             "error": "Failed to submit report"
         }))),
@@ -177,6 +181,7 @@ pub async fn admin_resolve_report(
                 params![&now, claims.user_id, *report_id],
             );
 
+            info!(report_id = *report_id, action = "dismiss", admin_user_id = claims.user_id, "Abuse report resolved");
             Ok(HttpResponse::Ok().json(serde_json::json!({
                 "message": "Report dismissed"
             })))
@@ -193,6 +198,7 @@ pub async fn admin_resolve_report(
                 params![&now, claims.user_id, *report_id],
             );
 
+            info!(report_id = *report_id, action = "delete_url", admin_user_id = claims.user_id, short_code = %short_code, "Abuse report resolved");
             Ok(HttpResponse::Ok().json(serde_json::json!({
                 "message": "URL deleted and report resolved"
             })))
@@ -230,6 +236,7 @@ pub async fn admin_resolve_report(
                     params![&now, claims.user_id, *report_id],
                 );
 
+                info!(report_id = *report_id, action = "ban_user", admin_user_id = claims.user_id, banned_user_id = user_id, "Abuse report resolved");
                 Ok(HttpResponse::Ok().json(serde_json::json!({
                     "message": "User banned, all URLs deleted, and report resolved"
                 })))
@@ -249,10 +256,10 @@ pub async fn admin_resolve_report(
 mod tests {
     use super::*;
     use actix_web::{test, App};
-    use serde_json::Value;
 
     #[cfg(feature = "standalone")]
     use {
+        serde_json::Value,
         actix_web_httpauth::middleware::HttpAuthentication,
         crate::auth::middleware::admin_validator,
         crate::testing::{insert_test_url, insert_test_user, make_test_state, make_test_token},
@@ -369,6 +376,61 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn submit_report_with_description_returns_201() {
+        let state = make_test_state();
+        #[cfg(feature = "standalone")]
+        {
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://bad.com", "desc01");
+        }
+        #[cfg(feature = "saas")]
+        {
+            let db = state.db.lock().unwrap();
+            db.execute("INSERT INTO users (userID, username, password) VALUES (1, 'u', '')", []).unwrap();
+            db.execute("INSERT INTO urls (user_id, original_url, short_code) VALUES (1, 'https://bad.com', 'desc01')", []).unwrap();
+        }
+        let app = setup_abuse_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/api/report-abuse")
+            .set_json(serde_json::json!({
+                "short_code": "desc01",
+                "reason": "spam",
+                "description": "This URL sends phishing emails"
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 201);
+    }
+
+    #[actix_web::test]
+    async fn submit_report_without_email_returns_201() {
+        let state = make_test_state();
+        #[cfg(feature = "standalone")]
+        {
+            let uid = insert_test_user(&state, "alice", false);
+            insert_test_url(&state, uid, "https://bad.com", "noem01");
+        }
+        #[cfg(feature = "saas")]
+        {
+            let db = state.db.lock().unwrap();
+            db.execute("INSERT INTO users (userID, username, password) VALUES (1, 'u', '')", []).unwrap();
+            db.execute("INSERT INTO urls (user_id, original_url, short_code) VALUES (1, 'https://bad.com', 'noem01')", []).unwrap();
+        }
+        let app = setup_abuse_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/api/report-abuse")
+            .set_json(serde_json::json!({
+                "short_code": "noem01",
+                "reason": "spam"
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 201);
     }
 
     #[actix_web::test]
@@ -554,6 +616,133 @@ mod tests {
         )
         .await;
         assert_eq!(resp.status(), 400);
+    }
+
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn admin_ban_user_via_abuse_report() {
+        let state = make_test_state();
+        let admin_uid = insert_test_user(&state, "admin", true);
+        let bad_uid = insert_test_user(&state, "badguy", false);
+        insert_test_url(&state, bad_uid, "https://evil.com", "evil42");
+        let token = make_test_token("admin", admin_uid, true);
+        let app = setup_abuse_app!(state);
+
+        // Submit a report
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/report-abuse")
+                .set_json(serde_json::json!({"short_code": "evil42", "reason": "malware"}))
+                .to_request(),
+        )
+        .await;
+
+        let report_id: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT id FROM abuse_reports LIMIT 1", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        // Ban the user
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri(&format!("/api/admin/reports/{report_id}"))
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"action": "ban_user"}))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+
+        // User and their URL should be gone
+        let db = state.db.lock().unwrap();
+        let user_count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE userID=?1",
+                [bad_uid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_count, 0);
+
+        let url_count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM urls WHERE short_code='evil42'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(url_count, 0);
+
+        let status: String = db
+            .query_row(
+                "SELECT status FROM abuse_reports WHERE id=?1",
+                [report_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "resolved");
+    }
+
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn admin_ban_admin_user_returns_400() {
+        let state = make_test_state();
+        let admin_uid = insert_test_user(&state, "admin", true);
+        let other_admin_uid = insert_test_user(&state, "admin2", true);
+        insert_test_url(&state, other_admin_uid, "https://admin2.com", "adm123");
+        let token = make_test_token("admin", admin_uid, true);
+        let app = setup_abuse_app!(state);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/report-abuse")
+                .set_json(serde_json::json!({"short_code": "adm123", "reason": "test"}))
+                .to_request(),
+        )
+        .await;
+
+        let report_id: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT id FROM abuse_reports LIMIT 1", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri(&format!("/api/admin/reports/{report_id}"))
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"action": "ban_user"}))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 400);
+        let body: Value = test::read_body_json(resp).await;
+        assert!(body["error"].as_str().unwrap().contains("Cannot ban admin"));
+    }
+
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn admin_resolve_nonexistent_report_returns_404() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        let token = make_test_token("admin", uid, true);
+        let app = setup_abuse_app!(state);
+
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/admin/reports/9999")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"action": "dismiss"}))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 404);
     }
 
     #[cfg(feature = "standalone")]

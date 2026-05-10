@@ -97,6 +97,9 @@ pub struct Claims {
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
+    pub git_tag: String,
+    pub git_hash: String,
+    pub build_date: String,
     pub uptime_seconds: u64,
 }
 
@@ -104,6 +107,9 @@ pub struct HealthResponse {
 #[derive(Serialize)]
 pub struct VersionResponse {
     pub version: String,
+    pub git_tag: String,
+    pub git_hash: String,
+    pub build_date: String,
 }
 
 /// Public configuration response
@@ -119,7 +125,7 @@ pub struct ConfigResponse {
     #[cfg(feature = "saas")]
     pub logout_url: String,
     #[cfg(feature = "saas")]
-    pub refresh_url: String,
+    pub oidc_enabled: bool,
     #[cfg(feature = "saas")]
     pub maintenance_mode: bool,
     #[cfg(feature = "saas")]

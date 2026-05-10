@@ -36,7 +36,12 @@ pub async fn handle_maintenance_webhook(
     };
 
     // Compute HMAC-SHA256 of raw body
-    let mut mac = HmacSha256::new_from_slice(state.config.saas_jwt_secret.as_bytes())
+    if state.config.webhook_secret.is_empty() {
+        return Err(actix_web::error::ErrorServiceUnavailable(
+            "WEBHOOK_SECRET not configured",
+        ));
+    }
+    let mut mac = HmacSha256::new_from_slice(state.config.webhook_secret.as_bytes())
         .map_err(|_| actix_web::error::ErrorInternalServerError("HMAC key error"))?;
     mac.update(&body);
 
@@ -71,10 +76,7 @@ pub async fn handle_maintenance_webhook(
         };
     }
 
-    eprintln!(
-        "webhook: maintenance_mode set to {}",
-        payload.maintenance_mode
-    );
+    tracing::info!(maintenance_mode = payload.maintenance_mode, "Maintenance mode updated via webhook");
 
     Ok(HttpResponse::Ok().json(serde_json::json!({ "status": "ok" })))
 }
@@ -83,7 +85,9 @@ pub async fn handle_maintenance_webhook(
 mod tests {
     use super::*;
     use actix_web::{test, web, App};
-    use crate::testing::{make_test_state, sign_webhook_payload, TEST_SAAS_SECRET};
+    use crate::testing::{make_test_state, sign_webhook_payload, TEST_WEBHOOK_SECRET};
+    #[allow(unused_imports)]
+    use std::sync::atomic::Ordering;
     use serde_json::json;
 
     fn build_app(
@@ -118,7 +122,7 @@ mod tests {
             "timestamp": "2026-03-12T15:30:45Z"
         });
         let body = serde_json::to_vec(&payload).unwrap();
-        let sig = sign_webhook_payload(&body, TEST_SAAS_SECRET);
+        let sig = sign_webhook_payload(&body, TEST_WEBHOOK_SECRET);
 
         let req = test::TestRequest::post()
             .uri("/webhooks/maintenance")
@@ -151,7 +155,7 @@ mod tests {
             "timestamp": "2026-03-12T16:00:00Z"
         });
         let body = serde_json::to_vec(&payload).unwrap();
-        let sig = sign_webhook_payload(&body, TEST_SAAS_SECRET);
+        let sig = sign_webhook_payload(&body, TEST_WEBHOOK_SECRET);
 
         let req = test::TestRequest::post()
             .uri("/webhooks/maintenance")
@@ -207,7 +211,7 @@ mod tests {
 
         let payload = json!({"event": "user_deleted", "maintenance_mode": true});
         let body = serde_json::to_vec(&payload).unwrap();
-        let sig = sign_webhook_payload(&body, TEST_SAAS_SECRET);
+        let sig = sign_webhook_payload(&body, TEST_WEBHOOK_SECRET);
 
         let req = test::TestRequest::post()
             .uri("/webhooks/maintenance")
@@ -217,5 +221,75 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn malformed_json_body_returns_400() {
+        let state = make_test_state();
+        let app = build_app(state).await;
+
+        let body = b"this is not json";
+        let sig = sign_webhook_payload(body, TEST_WEBHOOK_SECRET);
+
+        let req = test::TestRequest::post()
+            .uri("/webhooks/maintenance")
+            .insert_header(("X-Webhook-Signature", sig))
+            .insert_header(("Content-Type", "application/json"))
+            .set_payload(body.to_vec())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    #[actix_web::test]
+    async fn maintenance_message_cleared_on_disable() {
+        let state = make_test_state();
+        let app = build_app(state.clone()).await;
+
+        // Enable maintenance with a message
+        let enable_payload = json!({
+            "event": "maintenance_mode_changed",
+            "maintenance_mode": true,
+            "maintenance_message": "Upgrading"
+        });
+        let enable_body = serde_json::to_vec(&enable_payload).unwrap();
+        let enable_sig = sign_webhook_payload(&enable_body, TEST_WEBHOOK_SECRET);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/webhooks/maintenance")
+                .insert_header(("X-Webhook-Signature", enable_sig))
+                .insert_header(("Content-Type", "application/json"))
+                .set_payload(enable_body)
+                .to_request(),
+        )
+        .await;
+        assert!(state.maintenance_mode.load(Ordering::SeqCst));
+        assert_eq!(
+            *state.maintenance_message.read().unwrap(),
+            Some("Upgrading".to_string())
+        );
+
+        // Disable maintenance
+        let disable_payload = json!({
+            "event": "maintenance_mode_changed",
+            "maintenance_mode": false
+        });
+        let disable_body = serde_json::to_vec(&disable_payload).unwrap();
+        let disable_sig = sign_webhook_payload(&disable_body, TEST_WEBHOOK_SECRET);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/webhooks/maintenance")
+                .insert_header(("X-Webhook-Signature", disable_sig))
+                .insert_header(("Content-Type", "application/json"))
+                .set_payload(disable_body)
+                .to_request(),
+        )
+        .await;
+        assert!(!state.maintenance_mode.load(Ordering::SeqCst));
+        assert_eq!(*state.maintenance_message.read().unwrap(), None);
     }
 }

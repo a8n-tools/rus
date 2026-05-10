@@ -188,4 +188,26 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
     }
+
+    #[test]
+    fn lockout_expires_after_duration() {
+        let conn = setup_db();
+        // Insert 5 failed attempts with timestamps older than the lockout window
+        for _ in 0..5 {
+            conn.execute(
+                "INSERT INTO login_attempts (username, success, attempted_at)
+                 VALUES ('alice', 0, datetime('now', '-31 minutes'))",
+                [],
+            )
+            .unwrap();
+        }
+        // Lockout window is 30 minutes — these attempts are outside it
+        assert!(!is_account_locked(&conn, "alice", 5, 30));
+    }
+
+    #[test]
+    fn password_empty_string_rejected() {
+        let err = validate_password("").unwrap_err();
+        assert!(err.contains("8 characters"), "unexpected: {err}");
+    }
 }

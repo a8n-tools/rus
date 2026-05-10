@@ -3,6 +3,7 @@ name = "rus"
 version = "0.15.1"
 edition = "2021"
 default-run = "rus"
+build = "build.rs"
 
 [lib]
 name = "rus"
@@ -21,14 +22,22 @@ required-features = ["saas"]
 [features]
 default = ["standalone"]
 standalone = ["dep:bcrypt", "dep:argon2", "dep:actix-web-httpauth"]
-saas = ["dep:hmac", "dep:sha2", "dep:hex"]
+saas = [
+    "dep:hmac",
+    "dep:sha2",
+    "dep:hex",
+    "dep:uuid",
+    "dep:reqwest",
+    "dep:urlencoding",
+    "dep:moka",
+]
 
 [dependencies]
 actix-web = "4.4"
 actix-governor = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.35", features = ["full", "time"] }
+tokio = { version = "1.35", features = ["full", "time", "sync"] }
 rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }
 bcrypt = { version = "0.15", optional = true }
@@ -44,6 +53,16 @@ url = "2.5"
 hmac = { version = "0.12", optional = true }
 sha2 = { version = "0.10", optional = true }
 hex = { version = "0.4", optional = true }
+uuid = { version = "1", features = ["v4", "serde"], optional = true }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
+urlencoding = { version = "2", optional = true }
+moka = { version = "0.12", features = ["future"], optional = true }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-actix-web = "0.7"
 
 [dev-dependencies]
 actix-http = "3"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"

@@ -37,26 +37,24 @@ cargo build --release --no-default-features --features saas
 ## Common Commands
 
 ```bash
-# Development (standalone mode - default)
-cargo run                              # Build and run (debug mode)
-cargo build --release                  # Production build
-cargo test                             # Run tests
-cargo clippy                           # Lint code
-cargo fmt                              # Format code
+# Dev server — Traefik-routed (see "Per-Developer Instances" below)
+just dev                               # Standalone mode (default)
+just dev saas                          # SaaS mode
+just dev-stop                          # Stop containers
+just dev-clean                         # Remove containers and volumes
 
-# Development (saas mode)
-cargo run --no-default-features --features saas
-cargo build --release --no-default-features --features saas
-cargo test --no-default-features --features saas
+# Local dev server — cargo-watch on localhost:4001
+just dev-local                         # Start with hot-reload
+just dev-local-stop                    # Stop containers
+just dev-local-clean                   # Remove containers and volumes
 
-# Docker deployment (standalone - default)
-docker build -t rus .
-docker compose up --build              # Build and start
-
-# Docker deployment (saas)
-docker build --build-arg BUILD_MODE=saas -t rus-saas .
-
-docker compose down                    # Stop containers
+# Build, test, lint
+just build                             # Release build (standalone)
+just build-saas                        # Release build (saas)
+just test                              # Run tests (standalone)
+just test-saas                         # Run tests (saas)
+just lint                              # Clippy (standalone)
+just fmt                               # Format code
 ```
 
 ## Architecture
@@ -125,6 +123,7 @@ APP_PORT=4001               # Server port
 HOST_URL=http://localhost:4001  # Public URL for shortened links
 MAX_URL_LENGTH=2048         # Maximum URL length
 CLICK_RETENTION_DAYS=30     # Days to retain click history
+RUST_LOG=info,rus=debug     # Log level filter (default: info,rus=debug)
 ```
 
 ### Standalone-only options
@@ -135,6 +134,27 @@ ACCOUNT_LOCKOUT_ATTEMPTS=5  # Failed attempts before lockout (default: 5)
 ACCOUNT_LOCKOUT_DURATION=30 # Lockout duration in minutes (default: 30)
 ALLOW_REGISTRATION=true     # Allow public signups (default: true)
 ```
+
+### SaaS-only options (OIDC SSO + webhook)
+```
+# OIDC SSO (BFF Authorization Code + PKCE flow)
+OIDC_ISSUER=https://api.a8n.tools          # Empty disables /oauth2/* routes
+OIDC_AUDIENCE=<HOST_URL>/api               # `aud` claim in at+jwt tokens
+OIDC_JWKS_URL=                             # Default: <issuer>/.well-known/jwks.json
+OIDC_JWKS_CACHE_TTL=300                    # JWKS cache TTL (seconds)
+OIDC_CLIENT_ID=                            # Required when OIDC_ISSUER is set
+OIDC_CLIENT_SECRET=                        # Or mount at /run/secrets/oidc_client_secret
+OIDC_REDIRECT_URI=<HOST_URL>/oauth2/callback
+OIDC_POST_LOGOUT_REDIRECT_URI=<HOST_URL>/
+OIDC_LEEWAY_SECONDS=30                     # Clock-skew tolerance
+OIDC_LIFECYCLE_JTI_CACHE_TTL=300           # Idempotency window for lifecycle/logout events
+OIDC_SESSION_TTL_SECONDS=1209600           # `rus_session` cookie lifetime (14 days)
+
+# Maintenance webhook (HMAC-SHA256 signed; previously reused SAAS_JWT_SECRET)
+WEBHOOK_SECRET=                            # Required to validate /webhooks/maintenance
+```
+
+The legacy `SAAS_JWT_SECRET`, `SAAS_LOGIN_URL`, `SAAS_LOGOUT_URL`, `SAAS_MEMBERSHIP_URL`, and `SAAS_REFRESH_URL` env vars from the deprecated cookie-JWT path have been removed.
 
 **Important:** When adding or changing environment variables, update both `.env.standalone` and `.env.saas` to keep them in sync. Shared variables go in both files; mode-specific variables go only in the relevant file.
 
@@ -162,6 +182,27 @@ curl -X POST http://localhost:4001/api/shorten \
   -H "Authorization: Bearer {TOKEN}" \
   -d '{"url":"https://example.com"}'
 ```
+
+## Per-Developer Instances
+
+Each developer gets their own instance at `https://{USER}-rus.a8n.run`, where `{USER}` is your OS username. This uses `compose.dev.yml` with Traefik for HTTPS routing.
+
+**Prerequisites:**
+- The `network-traefik-public` Docker network must exist (`docker network create network-traefik-public`)
+- Traefik must be running and configured with the `cert-cloudflare` resolver
+- DNS wildcard for `*.a8n.run` pointing to the host
+
+**How it works:**
+- `just dev` builds the production image (not cargo-watch) and starts it behind Traefik
+- `just dev saas` does the same but builds in SaaS mode and copies `.env.saas`
+- `HOST_URL` is automatically set to `https://{USER}-rus.a8n.run`
+- Data is isolated per-developer in the `rus-data-{USER}` volume
+
+**If you don't have Traefik**, use `just dev-local` for a localhost:4001 setup with cargo-watch hot-reload.
+
+### Docker Compose Files
+- **`compose.dev.yml`** — Per-developer Traefik instance (production Dockerfile, `oci-build/Dockerfile`)
+- **`compose.yml`** — Local dev with cargo-watch (dev Dockerfile, `./Dockerfile`)
 
 ## Build System
 

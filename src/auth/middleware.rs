@@ -260,4 +260,40 @@ mod tests {
         let body: serde_json::Value = test::call_and_read_body_json(&app, req).await;
         assert_eq!(body["is_admin"], true);
     }
+
+    #[actix_web::test]
+    async fn jwt_validator_rejects_expired_token() {
+        use jsonwebtoken::{encode, EncodingKey, Header};
+        use crate::models::Claims;
+
+        let state = make_test_state();
+        let exp = (chrono::Utc::now() - chrono::Duration::hours(1)).timestamp() as usize;
+        let claims = Claims {
+            sub: "alice".into(),
+            user_id: 1,
+            is_admin: false,
+            exp,
+        };
+        let expired_token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(crate::testing::TEST_JWT_SECRET.as_ref()),
+        )
+        .unwrap();
+
+        let auth = HttpAuthentication::bearer(jwt_validator);
+        let app = test::init_service(
+            App::new()
+                .app_data(state)
+                .service(web::scope("/api").wrap(auth).route("/test", web::get().to(dummy_handler))),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/test")
+            .insert_header(("Authorization", format!("Bearer {expired_token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
 }

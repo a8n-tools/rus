@@ -10,6 +10,8 @@ pub mod config;
 pub mod db;
 pub mod handlers;
 pub mod models;
+#[cfg(feature = "saas")]
+pub mod oidc;
 #[cfg(feature = "standalone")]
 pub mod security;
 pub mod url;
