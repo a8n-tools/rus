@@ -7,7 +7,7 @@
 ARG BUILD_MODE=standalone
 
 # Build stage
-FROM rust:1.93-alpine AS builder
+FROM ghcr.io/niceguyit/rust-builder-musl:v1.0.0-rust1.94-alpine AS builder
 
 ARG BUILD_MODE
 # Version metadata baked into the binary (surfaced via /api/version, /health,
