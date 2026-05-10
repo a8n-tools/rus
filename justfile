@@ -7,6 +7,34 @@ default:
 # Use the per-developer Traefik-routed dev compose file
 compose := "docker compose -f compose.dev.yml "
 
+# Install the git pre-commit hook (run once per fresh clone). Writes a stub at .git/hooks/pre-commit that execs `just pre-commit`. Bypass with `git commit --no-verify`.
+install-hooks:
+    #!/usr/bin/env nu
+    let hook = ".git/hooks/pre-commit"
+    # Remove first so a leftover symlink from an older install does not get
+    # written through to its target file. `try` swallows the not-found case.
+    try { rm $hook }
+    "#!/usr/bin/env sh\nexec just pre-commit\n" | save $hook
+    ^chmod +x $hook
+    print $"Wrote ($hook) -> just pre-commit"
+
+# Run the same checks as .forgejo/workflows/check.yml inside the dev compose `app` container, exercising both `standalone` (default) and `saas` feature modes.
+pre-commit: ensure-env
+    #!/usr/bin/env nu
+    print "\n[pre-commit] cargo fmt --check"
+    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo fmt --check
+    print "\n[pre-commit] cargo clippy --all-targets -- -D warnings (standalone)"
+    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo clippy --all-targets -- -D warnings
+    print "\n[pre-commit] cargo clippy --all-targets --no-default-features --features saas -- -D warnings"
+    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo clippy --all-targets --no-default-features --features saas -- -D warnings
+    print "\n[pre-commit] cargo build --all-targets (standalone)"
+    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo build --all-targets
+    print "\n[pre-commit] cargo build --all-targets --no-default-features --features saas"
+    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo build --all-targets --no-default-features --features saas
+    print "\n[pre-commit] cargo test --lib (standalone)"
+    ^docker compose -f compose.dev.yml run --rm --no-deps -e JWT_SECRET=test-secret-at-least-32-chars-ok! app cargo test --lib
+    print "\n[pre-commit] all checks passed"
+
 # Copy the appropriate .env file for the given mode
 [private]
 ensure-env mode="standalone":
