@@ -22,6 +22,8 @@ services:
       - ./tests:/app/tests
       - ./Cargo.toml:/app/Cargo.toml
       - ./Cargo.lock:/app/Cargo.lock
+      - ./build.rs:/app/build.rs
+      - ./.git:/app/.git:ro
       - cargo_target:/app/target
       - rus-data:/data
 

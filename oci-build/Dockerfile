@@ -10,6 +10,15 @@ ARG BUILD_MODE=standalone
 FROM rust:1.93-alpine AS builder
 
 ARG BUILD_MODE
+# Version metadata baked into the binary (surfaced via /api/version, /health,
+# and the startup banner). Pass these from CI; fall back to "unknown" so local
+# `docker build` still works.
+ARG GIT_TAG=unknown
+ARG GIT_HASH=unknown
+ARG BUILD_DATE=unknown
+ENV GIT_TAG=${GIT_TAG} \
+    GIT_HASH=${GIT_HASH} \
+    BUILD_DATE=${BUILD_DATE}
 
 WORKDIR /build
 
@@ -18,6 +27,7 @@ RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static
 
 # Copy cargo files for dependency caching
 COPY Cargo.toml Cargo.lock ./
+COPY build.rs ./
 
 # Create dummy src for dependency compilation
 RUN mkdir src && echo "fn main() {}" > src/main.rs && touch src/lib.rs

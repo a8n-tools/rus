@@ -14,10 +14,14 @@ ensure-env mode="standalone":
 
 # Build and start dev server with Traefik routing on a8n.run (mode: standalone or saas)
 dev mode="standalone": (ensure-env mode)
-    BUILD_MODE={{ mode }} {{ compose }}up --build --detach app
-    @echo ""
-    @echo "Service started!"
-    @echo "  App: https://{{env('USER')}}-rus.a8n.run"
+    #!/usr/bin/env nu
+    let git_tag = (^git describe --tags --always --dirty | str trim)
+    let git_hash = (^git rev-parse --short=12 HEAD | str trim)
+    let build_date = (date now | format date "%Y-%m-%dT%H:%M:%SZ")
+    BUILD_MODE={{ mode }} GIT_TAG=$git_tag GIT_HASH=$git_hash BUILD_DATE=$build_date {{ compose }}up --build --detach app
+    print ""
+    print "Service started!"
+    print $"  App: https://($env.USER)-rus.a8n.run"
 
 # Build and start local dev server in Docker (cargo-watch, localhost:4001)
 dev-local: (ensure-env "standalone")
