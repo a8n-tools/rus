@@ -1,7 +1,6 @@
-FROM rust:1.93-alpine
+FROM ghcr.io/niceguyit/rust-builder-musl:v1.0.0-rust1.94-alpine
 
 RUN apk add --no-cache musl-dev pkgconfig openssl-dev openssl-libs-static git
-RUN cargo install cargo-watch
 
 WORKDIR /app
 
