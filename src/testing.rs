@@ -1,8 +1,8 @@
 //! Shared test utilities - compiled only when running `cargo test`.
 
-use actix_web::web;
 use crate::config::Config;
 use crate::db::AppState;
+use actix_web::web;
 
 /// JWT secret used in standalone tests (must be >32 chars for HS256).
 #[cfg(feature = "standalone")]

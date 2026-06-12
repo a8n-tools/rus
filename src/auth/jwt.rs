@@ -80,12 +80,17 @@ mod tests {
 
     #[test]
     fn decode_fails_for_expired_token() {
+        use crate::models::Claims;
         use chrono::{Duration, Utc};
         use jsonwebtoken::{encode, EncodingKey, Header};
-        use crate::models::Claims;
 
         let exp = (Utc::now() - Duration::hours(1)).timestamp() as usize;
-        let claims = Claims { sub: "alice".into(), user_id: 1, is_admin: false, exp };
+        let claims = Claims {
+            sub: "alice".into(),
+            user_id: 1,
+            is_admin: false,
+            exp,
+        };
         let token = encode(
             &Header::default(),
             &claims,
@@ -106,7 +111,9 @@ mod tests {
     fn refresh_token_is_url_safe_base64() {
         let token = generate_refresh_token();
         assert!(
-            token.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'),
+            token
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_'),
             "token contains non-URL-safe chars: {token}"
         );
     }

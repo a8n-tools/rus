@@ -53,7 +53,10 @@ pub async fn admin_delete_user(
 
     // Prevent admin from deleting themselves
     if claims.user_id == *user_id {
-        warn!(admin_user_id = claims.user_id, "Admin attempted to delete own account");
+        warn!(
+            admin_user_id = claims.user_id,
+            "Admin attempted to delete own account"
+        );
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Cannot delete your own account"
         })));
@@ -65,7 +68,11 @@ pub async fn admin_delete_user(
     match db.execute("DELETE FROM users WHERE userID = ?1", params![*user_id]) {
         Ok(rows_affected) => {
             if rows_affected > 0 {
-                info!(admin_user_id = claims.user_id, deleted_user_id = *user_id, "Admin deleted user");
+                info!(
+                    admin_user_id = claims.user_id,
+                    deleted_user_id = *user_id,
+                    "Admin deleted user"
+                );
                 Ok(HttpResponse::Ok().json(serde_json::json!({
                     "message": "User deleted successfully"
                 })))
@@ -148,7 +155,9 @@ pub async fn admin_get_stats(data: web::Data<AppState>) -> Result<HttpResponse> 
         .unwrap_or(0);
 
     let total_clicks: i64 = db
-        .query_row("SELECT COALESCE(SUM(clicks), 0) FROM urls", [], |row| row.get(0))
+        .query_row("SELECT COALESCE(SUM(clicks), 0) FROM urls", [], |row| {
+            row.get(0)
+        })
         .unwrap_or(0);
 
     Ok(HttpResponse::Ok().json(AdminStatsResponse {
@@ -161,26 +170,27 @@ pub async fn admin_get_stats(data: web::Data<AppState>) -> Result<HttpResponse> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{test, App};
-    use actix_web_httpauth::middleware::HttpAuthentication;
     use crate::auth::middleware::admin_validator;
     use crate::testing::{insert_test_url, insert_test_user, make_test_state, make_test_token};
+    use actix_web::{test, App};
+    use actix_web_httpauth::middleware::HttpAuthentication;
     use serde_json::Value;
 
     macro_rules! setup_app {
         ($state:expr) => {{
             let admin_auth = HttpAuthentication::bearer(admin_validator);
             test::init_service(
-                App::new()
-                    .app_data($state.clone())
-                    .service(
-                        web::scope("/api/admin")
-                            .wrap(admin_auth)
-                            .route("/users", web::get().to(admin_list_users))
-                            .route("/users/{user_id}", web::delete().to(admin_delete_user))
-                            .route("/users/{user_id}/promote", web::post().to(admin_promote_user))
-                            .route("/stats", web::get().to(admin_get_stats)),
-                    ),
+                App::new().app_data($state.clone()).service(
+                    web::scope("/api/admin")
+                        .wrap(admin_auth)
+                        .route("/users", web::get().to(admin_list_users))
+                        .route("/users/{user_id}", web::delete().to(admin_delete_user))
+                        .route(
+                            "/users/{user_id}/promote",
+                            web::post().to(admin_promote_user),
+                        )
+                        .route("/stats", web::get().to(admin_get_stats)),
+                ),
             )
             .await
         }};
@@ -267,8 +277,12 @@ mod tests {
         // Verify user is gone
         let count: i64 = {
             let db = state.db.lock().unwrap();
-            db.query_row("SELECT COUNT(*) FROM users WHERE userID=?1", [uid_bob], |r| r.get(0))
-                .unwrap()
+            db.query_row(
+                "SELECT COUNT(*) FROM users WHERE userID=?1",
+                [uid_bob],
+                |r| r.get(0),
+            )
+            .unwrap()
         };
         assert_eq!(count, 0);
     }
@@ -308,8 +322,12 @@ mod tests {
 
         let url_count: i64 = {
             let db = state.db.lock().unwrap();
-            db.query_row("SELECT COUNT(*) FROM urls WHERE user_id=?1", [uid_bob], |r| r.get(0))
-                .unwrap()
+            db.query_row(
+                "SELECT COUNT(*) FROM urls WHERE user_id=?1",
+                [uid_bob],
+                |r| r.get(0),
+            )
+            .unwrap()
         };
         assert_eq!(url_count, 0);
     }

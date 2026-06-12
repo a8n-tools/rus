@@ -383,7 +383,10 @@ mod tests {
 
         let claims = id_claims(SUB_A, Some("alice@example.com"), true, true, None);
         let p = load_or_provision(&db, &claims).unwrap();
-        assert_eq!(p.user_id, pre_id, "should reuse the standalone row, not insert");
+        assert_eq!(
+            p.user_id, pre_id,
+            "should reuse the standalone row, not insert"
+        );
         let count: i64 = db
             .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
             .unwrap();
