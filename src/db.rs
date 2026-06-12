@@ -1,8 +1,8 @@
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection};
-use std::sync::Mutex;
 #[cfg(feature = "saas")]
 use std::sync::atomic::AtomicBool;
+use std::sync::Mutex;
 #[cfg(feature = "saas")]
 use std::sync::RwLock;
 
@@ -183,7 +183,7 @@ impl AppState {
             CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
             CREATE INDEX IF NOT EXISTS idx_rp_sessions_expires ON rp_sessions(expires_at);
-            "
+            ",
         )?;
 
         // SaaS mode: best-effort migration to add SSO columns to a pre-existing
@@ -207,7 +207,7 @@ impl AppState {
             // pre-existing users table (added the column above) doesn't trip CREATE INDEX.
             conn.execute_batch(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_saas_user_id
-                     ON users(saas_user_id) WHERE saas_user_id IS NOT NULL;"
+                     ON users(saas_user_id) WHERE saas_user_id IS NOT NULL;",
             )?;
         }
 
@@ -427,7 +427,9 @@ mod tests {
     #[test]
     fn saas_maintenance_mode_defaults_to_false() {
         let state = crate::testing::make_test_state();
-        assert!(!state.maintenance_mode.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!state
+            .maintenance_mode
+            .load(std::sync::atomic::Ordering::SeqCst));
         assert!(state.maintenance_message.read().unwrap().is_none());
     }
 }

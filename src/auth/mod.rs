@@ -1,8 +1,8 @@
 pub mod jwt;
 pub mod middleware;
 
-use actix_web::{HttpMessage, HttpRequest};
 use crate::models::Claims;
+use actix_web::{HttpMessage, HttpRequest};
 
 /// Extract claims from request (helper function)
 pub fn get_claims(req: &HttpRequest) -> Option<Claims> {

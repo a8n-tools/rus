@@ -73,7 +73,10 @@ async fn build_app_with_state(
                     .wrap(admin_auth)
                     .route("/users", web::get().to(admin_list_users))
                     .route("/users/{user_id}", web::delete().to(admin_delete_user))
-                    .route("/users/{user_id}/promote", web::post().to(admin_promote_user))
+                    .route(
+                        "/users/{user_id}/promote",
+                        web::post().to(admin_promote_user),
+                    )
                     .route("/stats", web::get().to(admin_get_stats))
                     .route("/reports", web::get().to(admin_list_reports))
                     .route("/reports/{report_id}", web::post().to(admin_resolve_report)),

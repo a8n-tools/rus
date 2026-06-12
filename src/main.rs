@@ -34,8 +34,7 @@ async fn main() -> std::io::Result<()> {
     // Initialize structured logging
     fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,rus=debug")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,rus=debug")),
         )
         .with_target(true)
         .with_thread_ids(false)
@@ -52,10 +51,9 @@ async fn main() -> std::io::Result<()> {
     let bind_port = config.port;
 
     // Initialize database connection
-    let app_state = web::Data::new(
-        AppState::new(config)
-            .expect("Failed to connect to database. Check that DB_PATH is set to a valid, writable location.")
-    );
+    let app_state = web::Data::new(AppState::new(config).expect(
+        "Failed to connect to database. Check that DB_PATH is set to a valid, writable location.",
+    ));
 
     info!("Database connection established");
 
@@ -101,7 +99,7 @@ async fn main() -> std::io::Result<()> {
                     .add(("X-Content-Type-Options", "nosniff"))
                     .add(("X-Frame-Options", "DENY"))
                     .add(("X-XSS-Protection", "1; mode=block"))
-                    .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
+                    .add(("Referrer-Policy", "strict-origin-when-cross-origin")),
             );
 
         // Configure routes based on feature
@@ -111,12 +109,12 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::resource("/api/register")
                     .wrap(Governor::new(&strict_rate_limit))
-                    .route(web::post().to(register))
+                    .route(web::post().to(register)),
             )
             .service(
                 web::resource("/api/login")
                     .wrap(Governor::new(&strict_rate_limit))
-                    .route(web::post().to(login))
+                    .route(web::post().to(login)),
             )
             // Public API routes - MUST BE BEFORE scoped /api routes
             .route("/api/refresh", web::post().to(refresh_token))
@@ -126,7 +124,7 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::resource("/api/report-abuse")
                     .wrap(Governor::new(&moderate_rate_limit))
-                    .route(web::post().to(submit_abuse_report))
+                    .route(web::post().to(submit_abuse_report)),
             )
             // Admin-only routes - MUST BE BEFORE /api scope
             .service(
@@ -134,10 +132,13 @@ async fn main() -> std::io::Result<()> {
                     .wrap(admin_auth)
                     .route("/users", web::get().to(admin_list_users))
                     .route("/users/{user_id}", web::delete().to(admin_delete_user))
-                    .route("/users/{user_id}/promote", web::post().to(admin_promote_user))
+                    .route(
+                        "/users/{user_id}/promote",
+                        web::post().to(admin_promote_user),
+                    )
                     .route("/stats", web::get().to(admin_get_stats))
                     .route("/reports", web::get().to(admin_list_reports))
-                    .route("/reports/{report_id}", web::post().to(admin_resolve_report))
+                    .route("/reports/{report_id}", web::post().to(admin_resolve_report)),
             )
             // Protected routes (require authentication)
             .service(
@@ -150,7 +151,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/urls/{code}", web::delete().to(delete_url))
                     .route("/urls/{code}/name", web::patch().to(update_url_name))
                     .route("/urls/{code}/clicks", web::get().to(get_click_history))
-                    .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code))
+                    .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code)),
             )
             // Public page routes
             .route("/", web::get().to(index))
@@ -172,14 +173,17 @@ async fn main() -> std::io::Result<()> {
             let mut app = app
                 .app_data(oidc_state.clone())
                 // Webhook endpoint
-                .route("/webhooks/maintenance", web::post().to(handle_maintenance_webhook))
+                .route(
+                    "/webhooks/maintenance",
+                    web::post().to(handle_maintenance_webhook),
+                )
                 // Public API
                 .route("/api/config", web::get().to(get_config))
                 .route("/api/version", web::get().to(get_version))
                 .service(
                     web::resource("/api/report-abuse")
                         .wrap(Governor::new(&moderate_rate_limit))
-                        .route(web::post().to(submit_abuse_report))
+                        .route(web::post().to(submit_abuse_report)),
                 )
                 // Protected /api routes (BFF session cookie)
                 .service(
@@ -192,20 +196,29 @@ async fn main() -> std::io::Result<()> {
                         .route("/urls/{code}", web::delete().to(delete_url))
                         .route("/urls/{code}/name", web::patch().to(update_url_name))
                         .route("/urls/{code}/clicks", web::get().to(get_click_history))
-                        .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code))
+                        .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code)),
                 )
                 // OIDC RP routes
                 .route("/oauth2/login", web::get().to(oidc::rp::login))
                 .route("/oauth2/callback", web::get().to(oidc::rp::callback))
                 .route("/oauth2/logout", web::get().to(oidc::rp::logout))
-                .route("/oauth2/backchannel-logout", web::post().to(oidc::rp::backchannel_logout))
-                .route("/oauth2/lifecycle-event", web::post().to(oidc::rp::lifecycle_event));
+                .route(
+                    "/oauth2/backchannel-logout",
+                    web::post().to(oidc::rp::backchannel_logout),
+                )
+                .route(
+                    "/oauth2/lifecycle-event",
+                    web::post().to(oidc::rp::lifecycle_event),
+                );
 
             // Dev-only seed-session for local testing.
             #[cfg(debug_assertions)]
             {
                 app = app
-                    .route("/dev/seed-session", web::get().to(oidc::rp::dev_seed_session))
+                    .route(
+                        "/dev/seed-session",
+                        web::get().to(oidc::rp::dev_seed_session),
+                    )
                     .route("/dev/logout", web::get().to(oidc::rp::dev_logout));
             }
 

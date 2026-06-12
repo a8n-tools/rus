@@ -106,14 +106,11 @@ impl Config {
             .and_then(|v| v.parse().ok())
             .unwrap_or(30);
 
-        let host_url = env::var("HOST_URL")
-            .unwrap_or_else(|_| "http://localhost:4001".to_string());
+        let host_url = env::var("HOST_URL").unwrap_or_else(|_| "http://localhost:4001".to_string());
 
-        let db_path = env::var("DB_PATH")
-            .unwrap_or_else(|_| "./data/rus.db".to_string());
+        let db_path = env::var("DB_PATH").unwrap_or_else(|_| "./data/rus.db".to_string());
 
-        let host = env::var("APP_HOST")
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
+        let host = env::var("APP_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
 
         let port = env::var("APP_PORT")
             .ok()
@@ -220,8 +217,7 @@ fn build_oidc_config(host_url: &str) -> OidcConfig {
     let host_url_trim = host_url.trim_end_matches('/').to_string();
     let issuer = env::var("OIDC_ISSUER").unwrap_or_default();
 
-    let audience =
-        env::var("OIDC_AUDIENCE").unwrap_or_else(|_| format!("{host_url_trim}/api"));
+    let audience = env::var("OIDC_AUDIENCE").unwrap_or_else(|_| format!("{host_url_trim}/api"));
 
     let jwks_url = env::var("OIDC_JWKS_URL").unwrap_or_else(|_| {
         if issuer.is_empty() {
@@ -240,16 +236,15 @@ fn build_oidc_config(host_url: &str) -> OidcConfig {
 
     let client_secret = env::var("OIDC_CLIENT_SECRET")
         .or_else(|_| {
-            std::fs::read_to_string("/run/secrets/oidc_client_secret")
-                .map(|s| s.trim().to_string())
+            std::fs::read_to_string("/run/secrets/oidc_client_secret").map(|s| s.trim().to_string())
         })
         .unwrap_or_default();
 
     let redirect_uri = env::var("OIDC_REDIRECT_URI")
         .unwrap_or_else(|_| format!("{host_url_trim}/oauth2/callback"));
 
-    let post_logout_redirect_uri = env::var("OIDC_POST_LOGOUT_REDIRECT_URI")
-        .unwrap_or_else(|_| format!("{host_url_trim}/"));
+    let post_logout_redirect_uri =
+        env::var("OIDC_POST_LOGOUT_REDIRECT_URI").unwrap_or_else(|_| format!("{host_url_trim}/"));
 
     let leeway_seconds = env::var("OIDC_LEEWAY_SECONDS")
         .ok()
