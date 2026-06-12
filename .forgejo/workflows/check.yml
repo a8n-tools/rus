@@ -1,0 +1,33 @@
+---
+name: Check
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+jobs:
+  check:
+    name: fmt + clippy + build + tests
+    runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_LATEST }}
+    env:
+      JWT_SECRET: test-secret-at-least-32-chars-ok!
+      SAAS_JWT_SECRET: test-saas-secret-32-chars-padded!
+    steps:
+      - name: Clone the repository
+        uses: https://code.forgejo.org/actions/checkout@v5
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Clippy (standalone)
+        run: cargo clippy --all-targets --features standalone -- -D warnings
+      - name: Clippy (saas)
+        run: cargo clippy --all-targets --no-default-features --features saas -- -D warnings
+      - name: Build (standalone)
+        run: cargo build --all-targets --features standalone
+      - name: Build (saas)
+        run: cargo build --all-targets --no-default-features --features saas
+      - name: Unit tests (standalone)
+        run: cargo test --features standalone
+      - name: Unit tests (saas)
+        run: cargo test --no-default-features --features saas
