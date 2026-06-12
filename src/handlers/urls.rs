@@ -564,7 +564,7 @@ mod tests {
             let token = make_test_token("alice", uid, false);
             let app = setup_app!(state);
 
-            let shorten = |app: &_| {
+            let shorten = |_app: &_| {
                 test::TestRequest::post()
                     .uri("/api/shorten")
                     .insert_header(("Authorization", format!("Bearer {token}")))
