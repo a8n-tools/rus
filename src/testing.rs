@@ -13,6 +13,7 @@ pub const TEST_JWT_SECRET: &str = "test-secret-at-least-32-chars-ok!";
 pub const TEST_WEBHOOK_SECRET: &str = "test-webhook-secret-32-chars-pad!";
 
 /// Standard test password meeting all complexity requirements.
+#[cfg(feature = "standalone")]
 pub const TEST_PASSWORD: &str = "TestPass1!";
 
 /// Create a Config suitable for testing (in-memory SQLite).
