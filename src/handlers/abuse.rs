@@ -1,6 +1,6 @@
-use actix_web::{web, HttpResponse, Result};
 #[cfg(feature = "standalone")]
 use actix_web::HttpRequest;
+use actix_web::{web, HttpResponse, Result};
 #[cfg(feature = "standalone")]
 use chrono::Utc;
 use rusqlite::params;
@@ -9,9 +9,9 @@ use tracing::info;
 #[cfg(feature = "standalone")]
 use crate::auth::get_claims;
 use crate::db::AppState;
+use crate::models::SubmitReportRequest;
 #[cfg(feature = "standalone")]
 use crate::models::{AbuseReport, ResolveReportRequest};
-use crate::models::SubmitReportRequest;
 
 /// Public endpoint to submit an abuse report
 pub async fn submit_abuse_report(
@@ -181,7 +181,12 @@ pub async fn admin_resolve_report(
                 params![&now, claims.user_id, *report_id],
             );
 
-            info!(report_id = *report_id, action = "dismiss", admin_user_id = claims.user_id, "Abuse report resolved");
+            info!(
+                report_id = *report_id,
+                action = "dismiss",
+                admin_user_id = claims.user_id,
+                "Abuse report resolved"
+            );
             Ok(HttpResponse::Ok().json(serde_json::json!({
                 "message": "Report dismissed"
             })))
@@ -236,7 +241,13 @@ pub async fn admin_resolve_report(
                     params![&now, claims.user_id, *report_id],
                 );
 
-                info!(report_id = *report_id, action = "ban_user", admin_user_id = claims.user_id, banned_user_id = user_id, "Abuse report resolved");
+                info!(
+                    report_id = *report_id,
+                    action = "ban_user",
+                    admin_user_id = claims.user_id,
+                    banned_user_id = user_id,
+                    "Abuse report resolved"
+                );
                 Ok(HttpResponse::Ok().json(serde_json::json!({
                     "message": "User banned, all URLs deleted, and report resolved"
                 })))
@@ -259,10 +270,10 @@ mod tests {
 
     #[cfg(feature = "standalone")]
     use {
-        serde_json::Value,
-        actix_web_httpauth::middleware::HttpAuthentication,
         crate::auth::middleware::admin_validator,
         crate::testing::{insert_test_url, insert_test_user, make_test_state, make_test_token},
+        actix_web_httpauth::middleware::HttpAuthentication,
+        serde_json::Value,
     };
 
     #[cfg(feature = "saas")]
@@ -389,7 +400,11 @@ mod tests {
         #[cfg(feature = "saas")]
         {
             let db = state.db.lock().unwrap();
-            db.execute("INSERT INTO users (userID, username, password) VALUES (1, 'u', '')", []).unwrap();
+            db.execute(
+                "INSERT INTO users (userID, username, password) VALUES (1, 'u', '')",
+                [],
+            )
+            .unwrap();
             db.execute("INSERT INTO urls (user_id, original_url, short_code) VALUES (1, 'https://bad.com', 'desc01')", []).unwrap();
         }
         let app = setup_abuse_app!(state);
@@ -417,7 +432,11 @@ mod tests {
         #[cfg(feature = "saas")]
         {
             let db = state.db.lock().unwrap();
-            db.execute("INSERT INTO users (userID, username, password) VALUES (1, 'u', '')", []).unwrap();
+            db.execute(
+                "INSERT INTO users (userID, username, password) VALUES (1, 'u', '')",
+                [],
+            )
+            .unwrap();
             db.execute("INSERT INTO urls (user_id, original_url, short_code) VALUES (1, 'https://bad.com', 'noem01')", []).unwrap();
         }
         let app = setup_abuse_app!(state);

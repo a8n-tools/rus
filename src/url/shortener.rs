@@ -32,13 +32,7 @@ pub fn validate_url(url_str: &str, max_length: usize) -> Result<(), String> {
     }
 
     // Block dangerous patterns
-    let dangerous_patterns = [
-        "javascript:",
-        "data:",
-        "file:",
-        "vbscript:",
-        "about:",
-    ];
+    let dangerous_patterns = ["javascript:", "data:", "file:", "vbscript:", "about:"];
 
     let url_lower = url_str.to_lowercase();
     for pattern in &dangerous_patterns {

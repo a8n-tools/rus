@@ -35,7 +35,11 @@ pub async fn register(
     }
 
     // Validate username characters (alphanumeric, underscores, hyphens only)
-    if !req.username.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+    if !req
+        .username
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
         return Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Username can only contain letters, numbers, underscores, and hyphens"
         })));
@@ -159,9 +163,9 @@ pub async fn login(
     }
 
     // Get user from database
-    let mut stmt = match db.prepare(
-        "SELECT userID, username, password, is_admin FROM users WHERE username = ?1",
-    ) {
+    let mut stmt = match db
+        .prepare("SELECT userID, username, password, is_admin FROM users WHERE username = ?1")
+    {
         Ok(stmt) => stmt,
         Err(_) => {
             return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
@@ -170,10 +174,10 @@ pub async fn login(
         }
     };
 
-    let user_result: rusqlite::Result<(i64, String, String, i32)> = stmt.query_row(
-        params![&req.username],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-    );
+    let user_result: rusqlite::Result<(i64, String, String, i32)> = stmt
+        .query_row(params![&req.username], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        });
 
     match user_result {
         Ok((user_id, username, hashed_password, is_admin_int)) => {
@@ -203,8 +207,8 @@ pub async fn login(
                         Ok(token) => {
                             // Create refresh token
                             let refresh_token = generate_refresh_token();
-                            let expires_at = Utc::now()
-                                + Duration::days(data.config.refresh_token_expiry_days);
+                            let expires_at =
+                                Utc::now() + Duration::days(data.config.refresh_token_expiry_days);
                             let expires_at_str = expires_at.format("%Y-%m-%d %H:%M:%S").to_string();
 
                             let _ = db.execute(
@@ -221,11 +225,9 @@ pub async fn login(
                         }
                         Err(_) => {
                             error!(username = %username, "Failed to create JWT after login");
-                            Ok(HttpResponse::InternalServerError().json(
-                                serde_json::json!({
-                                    "error": "Failed to create token"
-                                }),
-                            ))
+                            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                                "error": "Failed to create token"
+                            })))
                         }
                     }
                 }
@@ -326,7 +328,9 @@ pub async fn refresh_token(
 fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
-    Ok(argon2.hash_password(password.as_bytes(), &salt)?.to_string())
+    Ok(argon2
+        .hash_password(password.as_bytes(), &salt)?
+        .to_string())
 }
 
 /// Check if a stored hash is a legacy bcrypt hash
@@ -339,8 +343,7 @@ fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
     if is_legacy_bcrypt_hash(hash) {
         bcrypt::verify(password, hash).map_err(|e| e.to_string())
     } else {
-        let parsed_hash =
-            PasswordHash::new(hash).map_err(|e| e.to_string())?;
+        let parsed_hash = PasswordHash::new(hash).map_err(|e| e.to_string())?;
         Ok(Argon2::default()
             .verify_password(password.as_bytes(), &parsed_hash)
             .is_ok())
@@ -368,10 +371,10 @@ pub async fn get_current_user(http_req: HttpRequest) -> Result<HttpResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{test, App};
-    use actix_web_httpauth::middleware::HttpAuthentication;
     use crate::auth::middleware::jwt_validator;
     use crate::testing::{make_test_state, TEST_PASSWORD};
+    use actix_web::{test, App};
+    use actix_web_httpauth::middleware::HttpAuthentication;
     use serde_json::Value;
 
     macro_rules! setup_app {

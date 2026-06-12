@@ -267,10 +267,7 @@ pub async fn callback(
     }
 
     // Token exchange.
-    let token_url = format!(
-        "{}/oauth2/token",
-        state.config.issuer.trim_end_matches('/')
-    );
+    let token_url = format!("{}/oauth2/token", state.config.issuer.trim_end_matches('/'));
     let resp = state
         .verifier
         .http
@@ -315,7 +312,11 @@ pub async fn callback(
     };
 
     // Validate ID token.
-    let id_claims = match state.verifier.verify_id_token(&tokens.id_token, &nonce).await {
+    let id_claims = match state
+        .verifier
+        .verify_id_token(&tokens.id_token, &nonce)
+        .await
+    {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(error = %e, "ID token validation failed");
@@ -470,7 +471,11 @@ pub async fn lifecycle_event(
         return r;
     }
 
-    let claims = match state.verifier.verify_lifecycle_token(&form.lifecycle_event).await {
+    let claims = match state
+        .verifier
+        .verify_lifecycle_token(&form.lifecycle_event)
+        .await
+    {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(error = %e, "lifecycle event token rejected");
@@ -591,10 +596,16 @@ pub async fn dev_seed_session(
              ON CONFLICT(username) DO UPDATE SET saas_user_id = excluded.saas_user_id, email = excluded.email, is_admin = 1",
             params![DEV_USERNAME, DEV_SAAS_UUID, DEV_EMAIL],
         )?;
-        let user_id: i64 =
-            db.query_row("SELECT userID FROM users WHERE username = ?1", params![DEV_USERNAME], |r| r.get(0))?;
-        let session_version: i32 =
-            db.query_row("SELECT session_version FROM users WHERE userID = ?1", params![user_id], |r| r.get(0))?;
+        let user_id: i64 = db.query_row(
+            "SELECT userID FROM users WHERE username = ?1",
+            params![DEV_USERNAME],
+            |r| r.get(0),
+        )?;
+        let session_version: i32 = db.query_row(
+            "SELECT session_version FROM users WHERE userID = ?1",
+            params![user_id],
+            |r| r.get(0),
+        )?;
         db.execute(
             "INSERT INTO user_sessions (id, session_token_hash, user_id, session_version, auth_via_oidc, created_at, expires_at)
              VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6)",
@@ -637,7 +648,11 @@ mod tests {
 
     fn rp_state(enabled: bool) -> web::Data<OidcRpState> {
         let mut cfg = OidcConfig {
-            issuer: if enabled { "https://idp.example.com".into() } else { String::new() },
+            issuer: if enabled {
+                "https://idp.example.com".into()
+            } else {
+                String::new()
+            },
             audience: "https://rus.example.com/api".into(),
             jwks_url: "https://idp.example.com/.well-known/jwks.json".into(),
             jwks_cache_ttl: 300,
@@ -683,12 +698,7 @@ mod tests {
         let req = test::TestRequest::get().uri("/oauth2/login").to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 303);
-        let loc = resp
-            .headers()
-            .get("Location")
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let loc = resp.headers().get("Location").unwrap().to_str().unwrap();
         assert!(loc.starts_with("https://idp.example.com/oauth2/authorize?"));
         assert!(loc.contains("client_id=test-client"));
         assert!(loc.contains("code_challenge_method=S256"));
@@ -772,12 +782,7 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 303);
-        let set_cookie = resp
-            .headers()
-            .get("set-cookie")
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let set_cookie = resp.headers().get("set-cookie").unwrap().to_str().unwrap();
         assert!(set_cookie.contains(&format!("{RUS_SESSION_COOKIE}=")));
         assert!(set_cookie.contains("Max-Age=0"));
         let loc = resp.headers().get("Location").unwrap().to_str().unwrap();

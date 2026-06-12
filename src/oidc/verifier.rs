@@ -186,10 +186,14 @@ impl OidcVerifier {
             .ok_or_else(|| OidcError::InvalidToken("ID token missing kid".into()))?
             .to_string();
 
-        let claims = self.try_validate_id_token(token, &kid, expected_nonce).await;
+        let claims = self
+            .try_validate_id_token(token, &kid, expected_nonce)
+            .await;
         if let Err(OidcError::Rejected) = &claims {
             self.refresh_jwks().await?;
-            return self.try_validate_id_token(token, &kid, expected_nonce).await;
+            return self
+                .try_validate_id_token(token, &kid, expected_nonce)
+                .await;
         }
         claims
     }
@@ -201,7 +205,9 @@ impl OidcVerifier {
             .map_err(|e| OidcError::InvalidToken(format!("header parse failed: {e}")))?;
 
         if header.typ.as_deref() != Some("at+jwt") {
-            return Err(OidcError::InvalidToken("access token typ must be at+jwt".into()));
+            return Err(OidcError::InvalidToken(
+                "access token typ must be at+jwt".into(),
+            ));
         }
 
         let kid = header
@@ -249,8 +255,7 @@ impl OidcVerifier {
 
         self.validate_event_iat(claims.iat)?;
 
-        const BACKCHANNEL_LOGOUT_EVENT: &str =
-            "http://schemas.openid.net/event/backchannel-logout";
+        const BACKCHANNEL_LOGOUT_EVENT: &str = "http://schemas.openid.net/event/backchannel-logout";
         if claims.events.get(BACKCHANNEL_LOGOUT_EVENT).is_none() {
             return Err(OidcError::InvalidToken(
                 "logout token missing backchannel-logout event".into(),
@@ -392,8 +397,7 @@ impl OidcVerifier {
             match guard.as_ref() {
                 None => true,
                 Some(c) => {
-                    (Utc::now() - c.refreshed_at).num_seconds()
-                        > self.config.jwks_cache_ttl as i64
+                    (Utc::now() - c.refreshed_at).num_seconds() > self.config.jwks_cache_ttl as i64
                 }
             }
         };
@@ -406,7 +410,9 @@ impl OidcVerifier {
     async fn refresh_jwks(&self) -> Result<(), OidcError> {
         let jwks_url = &self.config.jwks_url;
         if jwks_url.is_empty() {
-            return Err(OidcError::Configuration("OIDC_JWKS_URL not configured".into()));
+            return Err(OidcError::Configuration(
+                "OIDC_JWKS_URL not configured".into(),
+            ));
         }
 
         let resp: JwksResponse = self

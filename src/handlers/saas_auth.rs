@@ -92,17 +92,17 @@ pub async fn maintenance_guard(
         .unwrap_or_default();
 
     if path.starts_with("/api/") {
-        return Ok(req.into_response(
-            HttpResponse::ServiceUnavailable().json(serde_json::json!({
+        return Ok(
+            req.into_response(HttpResponse::ServiceUnavailable().json(serde_json::json!({
                 "error": "Service under maintenance",
                 "maintenance": true,
                 "message": message,
-            })),
-        ));
+            }))),
+        );
     }
 
-    let html = include_str!("../../static/maintenance.html")
-        .replace("{{MAINTENANCE_MESSAGE}}", &message);
+    let html =
+        include_str!("../../static/maintenance.html").replace("{{MAINTENANCE_MESSAGE}}", &message);
     Ok(req.into_response(
         HttpResponse::ServiceUnavailable()
             .content_type("text/html; charset=utf-8")
@@ -121,7 +121,17 @@ mod tests {
     const SUB_ADMIN: &str = "11111111-1111-1111-1111-111111111111";
     const SUB_USER: &str = "22222222-2222-2222-2222-222222222222";
 
-    fn build(state: actix_web::web::Data<crate::db::AppState>) -> App<impl actix_web::dev::ServiceFactory<actix_web::dev::ServiceRequest, Config = (), Response = actix_web::dev::ServiceResponse, Error = actix_web::Error, InitError = ()>> {
+    fn build(
+        state: actix_web::web::Data<crate::db::AppState>,
+    ) -> App<
+        impl actix_web::dev::ServiceFactory<
+            actix_web::dev::ServiceRequest,
+            Config = (),
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+            InitError = (),
+        >,
+    > {
         App::new()
             .app_data(state)
             .route("/api/ping", web::get().to(|| async { "pong" }))
@@ -137,11 +147,8 @@ mod tests {
     async fn passes_through_when_maintenance_off() {
         let state = make_test_state();
         let app = test::init_service(build(state)).await;
-        let resp = test::call_service(
-            &app,
-            test::TestRequest::get().uri("/api/ping").to_request(),
-        )
-        .await;
+        let resp =
+            test::call_service(&app, test::TestRequest::get().uri("/api/ping").to_request()).await;
         assert_eq!(resp.status(), 200);
     }
 
@@ -151,11 +158,8 @@ mod tests {
         state.maintenance_mode.store(true, Ordering::SeqCst);
         *state.maintenance_message.write().unwrap() = Some("upgrading".into());
         let app = test::init_service(build(state)).await;
-        let resp = test::call_service(
-            &app,
-            test::TestRequest::get().uri("/api/ping").to_request(),
-        )
-        .await;
+        let resp =
+            test::call_service(&app, test::TestRequest::get().uri("/api/ping").to_request()).await;
         assert_eq!(resp.status(), 503);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["maintenance"], true);
@@ -185,11 +189,8 @@ mod tests {
         state.maintenance_mode.store(true, Ordering::SeqCst);
         let app = test::init_service(build(state)).await;
         for path in &["/health", "/api/config"] {
-            let resp = test::call_service(
-                &app,
-                test::TestRequest::get().uri(path).to_request(),
-            )
-            .await;
+            let resp =
+                test::call_service(&app, test::TestRequest::get().uri(path).to_request()).await;
             assert_eq!(resp.status(), 200, "expected 200 for {path}");
         }
     }

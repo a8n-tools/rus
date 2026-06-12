@@ -1,6 +1,6 @@
-use actix_web::{web, HttpResponse, Result};
 #[cfg(feature = "saas")]
 use actix_web::HttpRequest;
+use actix_web::{web, HttpResponse, Result};
 
 use crate::db::AppState;
 #[cfg(feature = "standalone")]
@@ -130,7 +130,9 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
         #[cfg(feature = "saas")]
         oidc_enabled: data.config.oidc.enabled(),
         #[cfg(feature = "saas")]
-        maintenance_mode: data.maintenance_mode.load(std::sync::atomic::Ordering::SeqCst),
+        maintenance_mode: data
+            .maintenance_mode
+            .load(std::sync::atomic::Ordering::SeqCst),
         #[cfg(feature = "saas")]
         maintenance_message: data.maintenance_message.read().unwrap().clone(),
     }))
@@ -285,7 +287,11 @@ mod tests {
         let req = test::TestRequest::get().uri("/").to_request();
         let body = test::call_and_read_body(&app, req).await;
         let body_str = String::from_utf8(body.to_vec()).unwrap();
-        assert!(body_str.contains("<html") || body_str.contains("<!DOCTYPE") || body_str.contains("<!doctype"));
+        assert!(
+            body_str.contains("<html")
+                || body_str.contains("<!DOCTYPE")
+                || body_str.contains("<!doctype")
+        );
     }
 
     #[actix_web::test]
@@ -426,7 +432,9 @@ mod tests {
         #[actix_web::test]
         async fn check_setup_required_true_when_no_users() {
             let app = setup_standalone_app!();
-            let req = test::TestRequest::get().uri("/api/setup/required").to_request();
+            let req = test::TestRequest::get()
+                .uri("/api/setup/required")
+                .to_request();
             let body: Value = test::call_and_read_body_json(&app, req).await;
             assert_eq!(body["setup_required"], true);
         }
@@ -442,7 +450,9 @@ mod tests {
             )
             .await;
 
-            let req = test::TestRequest::get().uri("/api/setup/required").to_request();
+            let req = test::TestRequest::get()
+                .uri("/api/setup/required")
+                .to_request();
             let body: Value = test::call_and_read_body_json(&app, req).await;
             assert_eq!(body["setup_required"], false);
         }

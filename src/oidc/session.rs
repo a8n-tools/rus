@@ -114,25 +114,24 @@ pub async fn require_session(
         .expect("AppState not found")
         .clone();
 
-    let user = req
-        .request()
-        .cookie(RUS_SESSION_COOKIE)
-        .and_then(|c| {
-            let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-            lookup_session(&db, c.value()).ok().flatten()
-        });
+    let user = req.request().cookie(RUS_SESSION_COOKIE).and_then(|c| {
+        let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+        lookup_session(&db, c.value()).ok().flatten()
+    });
 
     match user {
         Some(u) => {
             req.extensions_mut().insert(u);
             Ok(next.call(req).await?.map_into_boxed_body())
         }
-        None => Ok(req.into_response(
-            actix_web::HttpResponse::Unauthorized().json(serde_json::json!({
-                "error": "Unauthorized",
-                "redirect": "/oauth2/login",
-            })),
-        )),
+        None => {
+            Ok(req.into_response(
+                actix_web::HttpResponse::Unauthorized().json(serde_json::json!({
+                    "error": "Unauthorized",
+                    "redirect": "/oauth2/login",
+                })),
+            ))
+        }
     }
 }
 

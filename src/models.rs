@@ -86,10 +86,10 @@ pub struct ClickStats {
 #[cfg(feature = "standalone")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String,      // username
-    pub user_id: i64,     // user ID
-    pub is_admin: bool,   // admin flag
-    pub exp: usize,       // expiration time
+    pub sub: String,    // username
+    pub user_id: i64,   // user ID
+    pub is_admin: bool, // admin flag
+    pub exp: usize,     // expiration time
 }
 
 /// Health check response

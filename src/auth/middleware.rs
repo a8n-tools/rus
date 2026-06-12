@@ -1,9 +1,9 @@
 use actix_web::{web, HttpMessage};
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 
+use crate::auth::jwt::decode_jwt;
 use crate::config::Config;
 use crate::db::AppState;
-use crate::auth::jwt::decode_jwt;
 
 /// JWT validator middleware for protected routes
 pub async fn jwt_validator(
@@ -23,10 +23,7 @@ pub async fn jwt_validator(
             req.extensions_mut().insert(claims);
             Ok(req)
         }
-        Err(_) => Err((
-            actix_web::error::ErrorUnauthorized("Invalid token"),
-            req,
-        )),
+        Err(_) => Err((actix_web::error::ErrorUnauthorized("Invalid token"), req)),
     }
 }
 
@@ -54,19 +51,16 @@ pub async fn admin_validator(
             req.extensions_mut().insert(claims);
             Ok(req)
         }
-        Err(_) => Err((
-            actix_web::error::ErrorUnauthorized("Invalid token"),
-            req,
-        )),
+        Err(_) => Err((actix_web::error::ErrorUnauthorized("Invalid token"), req)),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{insert_test_user, make_test_state, make_test_token};
     use actix_web::{test, web, App, HttpResponse};
     use actix_web_httpauth::middleware::HttpAuthentication;
-    use crate::testing::{make_test_state, make_test_token, insert_test_user};
 
     async fn dummy_handler() -> HttpResponse {
         HttpResponse::Ok().body("ok")
@@ -81,9 +75,11 @@ mod tests {
         let token = make_test_token("alice", uid, false);
         let auth = HttpAuthentication::bearer(jwt_validator);
         let app = test::init_service(
-            App::new()
-                .app_data(state)
-                .service(web::scope("/api").wrap(auth).route("/test", web::get().to(dummy_handler))),
+            App::new().app_data(state).service(
+                web::scope("/api")
+                    .wrap(auth)
+                    .route("/test", web::get().to(dummy_handler)),
+            ),
         )
         .await;
 
@@ -100,9 +96,11 @@ mod tests {
         let state = make_test_state();
         let auth = HttpAuthentication::bearer(jwt_validator);
         let app = test::init_service(
-            App::new()
-                .app_data(state)
-                .service(web::scope("/api").wrap(auth).route("/test", web::get().to(dummy_handler))),
+            App::new().app_data(state).service(
+                web::scope("/api")
+                    .wrap(auth)
+                    .route("/test", web::get().to(dummy_handler)),
+            ),
         )
         .await;
 
@@ -119,9 +117,11 @@ mod tests {
         let state = make_test_state();
         let auth = HttpAuthentication::bearer(jwt_validator);
         let app = test::init_service(
-            App::new()
-                .app_data(state)
-                .service(web::scope("/api").wrap(auth).route("/test", web::get().to(dummy_handler))),
+            App::new().app_data(state).service(
+                web::scope("/api")
+                    .wrap(auth)
+                    .route("/test", web::get().to(dummy_handler)),
+            ),
         )
         .await;
 
@@ -150,9 +150,11 @@ mod tests {
         }
 
         let app = test::init_service(
-            App::new()
-                .app_data(state)
-                .service(web::scope("/api").wrap(auth).route("/test", web::get().to(claims_handler))),
+            App::new().app_data(state).service(
+                web::scope("/api")
+                    .wrap(auth)
+                    .route("/test", web::get().to(claims_handler)),
+            ),
         )
         .await;
 
@@ -175,9 +177,11 @@ mod tests {
         let token = make_test_token("admin", uid, true);
         let auth = HttpAuthentication::bearer(admin_validator);
         let app = test::init_service(
-            App::new()
-                .app_data(state)
-                .service(web::scope("/admin").wrap(auth).route("/test", web::get().to(dummy_handler))),
+            App::new().app_data(state).service(
+                web::scope("/admin")
+                    .wrap(auth)
+                    .route("/test", web::get().to(dummy_handler)),
+            ),
         )
         .await;
 
@@ -196,9 +200,11 @@ mod tests {
         let token = make_test_token("alice", uid, false);
         let auth = HttpAuthentication::bearer(admin_validator);
         let app = test::init_service(
-            App::new()
-                .app_data(state)
-                .service(web::scope("/admin").wrap(auth).route("/test", web::get().to(dummy_handler))),
+            App::new().app_data(state).service(
+                web::scope("/admin")
+                    .wrap(auth)
+                    .route("/test", web::get().to(dummy_handler)),
+            ),
         )
         .await;
 
@@ -215,9 +221,11 @@ mod tests {
         let state = make_test_state();
         let auth = HttpAuthentication::bearer(admin_validator);
         let app = test::init_service(
-            App::new()
-                .app_data(state)
-                .service(web::scope("/admin").wrap(auth).route("/test", web::get().to(dummy_handler))),
+            App::new().app_data(state).service(
+                web::scope("/admin")
+                    .wrap(auth)
+                    .route("/test", web::get().to(dummy_handler)),
+            ),
         )
         .await;
 
@@ -247,9 +255,11 @@ mod tests {
         }
 
         let app = test::init_service(
-            App::new()
-                .app_data(state)
-                .service(web::scope("/admin").wrap(auth).route("/test", web::get().to(claims_handler))),
+            App::new().app_data(state).service(
+                web::scope("/admin")
+                    .wrap(auth)
+                    .route("/test", web::get().to(claims_handler)),
+            ),
         )
         .await;
 
@@ -263,8 +273,8 @@ mod tests {
 
     #[actix_web::test]
     async fn jwt_validator_rejects_expired_token() {
-        use jsonwebtoken::{encode, EncodingKey, Header};
         use crate::models::Claims;
+        use jsonwebtoken::{encode, EncodingKey, Header};
 
         let state = make_test_state();
         let exp = (chrono::Utc::now() - chrono::Duration::hours(1)).timestamp() as usize;
@@ -283,9 +293,11 @@ mod tests {
 
         let auth = HttpAuthentication::bearer(jwt_validator);
         let app = test::init_service(
-            App::new()
-                .app_data(state)
-                .service(web::scope("/api").wrap(auth).route("/test", web::get().to(dummy_handler))),
+            App::new().app_data(state).service(
+                web::scope("/api")
+                    .wrap(auth)
+                    .route("/test", web::get().to(dummy_handler)),
+            ),
         )
         .await;
 

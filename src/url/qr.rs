@@ -6,10 +6,7 @@ use qrcode::QrCode;
 pub fn generate_qr_code_png(url: &str) -> Result<Vec<u8>, String> {
     let code = QrCode::new(url).map_err(|e| e.to_string())?;
 
-    let image = code
-        .render::<Luma<u8>>()
-        .min_dimensions(400, 400)
-        .build();
+    let image = code.render::<Luma<u8>>().min_dimensions(400, 400).build();
 
     // Convert to PNG bytes
     let mut png_bytes: Vec<u8> = Vec::new();

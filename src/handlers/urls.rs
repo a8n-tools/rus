@@ -5,16 +5,15 @@ use tracing::{debug, error, info};
 
 #[cfg(feature = "standalone")]
 use crate::auth::get_claims;
-#[cfg(feature = "saas")]
-use actix_web::HttpMessage;
-#[cfg(feature = "saas")]
-use crate::oidc::session::{lookup_session, AuthenticatedUser};
 use crate::db::AppState;
 use crate::models::{
-    ClickHistoryEntry, ClickStats, ShortenRequest, ShortenResponse, UpdateUrlNameRequest,
-    UrlEntry,
+    ClickHistoryEntry, ClickStats, ShortenRequest, ShortenResponse, UpdateUrlNameRequest, UrlEntry,
 };
+#[cfg(feature = "saas")]
+use crate::oidc::session::{lookup_session, AuthenticatedUser};
 use crate::url::{generate_qr_code_png, generate_qr_code_svg, generate_short_code, validate_url};
+#[cfg(feature = "saas")]
+use actix_web::HttpMessage;
 
 /// Helper to get user_id from request based on mode
 #[cfg(feature = "standalone")]
@@ -79,10 +78,9 @@ pub async fn shorten_url(
             actix_web::error::ErrorInternalServerError("Database error")
         })?;
 
-    if let Ok(short_code) = stmt.query_row(
-        params![user_id, &req_payload.url],
-        |row| row.get::<_, String>(0),
-    ) {
+    if let Ok(short_code) = stmt.query_row(params![user_id, &req_payload.url], |row| {
+        row.get::<_, String>(0)
+    }) {
         return Ok(HttpResponse::Ok().json(ShortenResponse {
             short_code: short_code.clone(),
             short_url: format!("{}/{}", data.config.host_url, short_code),
@@ -320,11 +318,7 @@ pub async fn update_url_name(
     // Update the URL name only if it belongs to the current user
     match db.execute(
         "UPDATE urls SET name = ?1 WHERE short_code = ?2 AND user_id = ?3",
-        params![
-            req_payload.name.as_deref(),
-            code.as_str(),
-            user_id
-        ],
+        params![req_payload.name.as_deref(), code.as_str(), user_id],
     ) {
         Ok(rows_affected) => {
             if rows_affected > 0 {
@@ -498,11 +492,9 @@ mod tests {
     #[cfg(feature = "standalone")]
     mod standalone {
         use super::*;
-        use actix_web_httpauth::middleware::HttpAuthentication;
         use crate::auth::middleware::jwt_validator;
-        use crate::testing::{
-            insert_test_url, insert_test_user, make_test_state, make_test_token,
-        };
+        use crate::testing::{insert_test_url, insert_test_user, make_test_state, make_test_token};
+        use actix_web_httpauth::middleware::HttpAuthentication;
 
         macro_rules! setup_app {
             ($state:expr) => {{
@@ -664,11 +656,8 @@ mod tests {
 
             // Visit twice
             for _ in 0..2 {
-                test::call_service(
-                    &app,
-                    test::TestRequest::get().uri("/abc123").to_request(),
-                )
-                .await;
+                test::call_service(&app, test::TestRequest::get().uri("/abc123").to_request())
+                    .await;
             }
 
             let clicks: i64 = {
@@ -890,11 +879,8 @@ mod tests {
 
             // Two redirects
             for _ in 0..2 {
-                test::call_service(
-                    &app,
-                    test::TestRequest::get().uri("/abc123").to_request(),
-                )
-                .await;
+                test::call_service(&app, test::TestRequest::get().uri("/abc123").to_request())
+                    .await;
             }
 
             let req = test::TestRequest::get()
@@ -984,11 +970,7 @@ mod tests {
             let app = setup_app!(state);
 
             // Create a click via redirect
-            test::call_service(
-                &app,
-                test::TestRequest::get().uri("/clk001").to_request(),
-            )
-            .await;
+            test::call_service(&app, test::TestRequest::get().uri("/clk001").to_request()).await;
 
             // Delete the URL
             let req = test::TestRequest::delete()
@@ -1109,11 +1091,7 @@ mod tests {
             insert_test_url(&state, uid, "https://example.com", "hist01");
             let app = setup_app!(state);
 
-            test::call_service(
-                &app,
-                test::TestRequest::get().uri("/hist01").to_request(),
-            )
-            .await;
+            test::call_service(&app, test::TestRequest::get().uri("/hist01").to_request()).await;
 
             let history_count: i64 = {
                 let db = state.db.lock().unwrap();
@@ -1153,7 +1131,9 @@ mod tests {
         use super::*;
         use crate::oidc::require_session;
         use crate::oidc::session::RUS_SESSION_COOKIE;
-        use crate::testing::{insert_saas_url, insert_saas_user, make_saas_session, make_test_state};
+        use crate::testing::{
+            insert_saas_url, insert_saas_user, make_saas_session, make_test_state,
+        };
 
         macro_rules! setup_app {
             ($state:expr) => {{
@@ -1181,7 +1161,12 @@ mod tests {
         #[actix_web::test]
         async fn shorten_url_with_valid_session() {
             let state = make_test_state();
-            let uid = insert_saas_user(&state, "alice", "11111111-1111-1111-1111-111111111111", false);
+            let uid = insert_saas_user(
+                &state,
+                "alice",
+                "11111111-1111-1111-1111-111111111111",
+                false,
+            );
             let token = make_saas_session(&state, uid);
             let app = setup_app!(state);
 
@@ -1210,7 +1195,12 @@ mod tests {
         #[actix_web::test]
         async fn saas_delete_own_url() {
             let state = make_test_state();
-            let uid = insert_saas_user(&state, "alice", "22222222-2222-2222-2222-222222222222", false);
+            let uid = insert_saas_user(
+                &state,
+                "alice",
+                "22222222-2222-2222-2222-222222222222",
+                false,
+            );
             insert_saas_url(&state, uid, "https://alice.com", "del001");
             let token = make_saas_session(&state, uid);
             let app = setup_app!(state);
@@ -1237,7 +1227,12 @@ mod tests {
         #[actix_web::test]
         async fn saas_stats_for_own_url() {
             let state = make_test_state();
-            let uid = insert_saas_user(&state, "alice", "33333333-3333-3333-3333-333333333333", false);
+            let uid = insert_saas_user(
+                &state,
+                "alice",
+                "33333333-3333-3333-3333-333333333333",
+                false,
+            );
             insert_saas_url(&state, uid, "https://alice.com", "sta001");
             let token = make_saas_session(&state, uid);
             let app = setup_app!(state);
@@ -1255,24 +1250,32 @@ mod tests {
         #[actix_web::test]
         async fn saas_redirect_works() {
             let state = make_test_state();
-            let uid = insert_saas_user(&state, "alice", "44444444-4444-4444-4444-444444444444", false);
+            let uid = insert_saas_user(
+                &state,
+                "alice",
+                "44444444-4444-4444-4444-444444444444",
+                false,
+            );
             insert_saas_url(&state, uid, "https://alice.com", "red001");
             let app = setup_app!(state);
 
             let req = test::TestRequest::get().uri("/red001").to_request();
             let resp = test::call_service(&app, req).await;
             assert_eq!(resp.status(), 302);
-            assert_eq!(
-                resp.headers().get("Location").unwrap(),
-                "https://alice.com"
-            );
+            assert_eq!(resp.headers().get("Location").unwrap(), "https://alice.com");
         }
 
         #[actix_web::test]
         async fn saas_user_can_only_see_own_urls() {
             let state = make_test_state();
-            let alice = insert_saas_user(&state, "alice", "55555555-5555-5555-5555-555555555555", false);
-            let bob = insert_saas_user(&state, "bob", "66666666-6666-6666-6666-666666666666", false);
+            let alice = insert_saas_user(
+                &state,
+                "alice",
+                "55555555-5555-5555-5555-555555555555",
+                false,
+            );
+            let bob =
+                insert_saas_user(&state, "bob", "66666666-6666-6666-6666-666666666666", false);
             insert_saas_url(&state, alice, "https://alice.com", "aaa111");
             insert_saas_url(&state, bob, "https://bob.com", "bbb222");
             let token = make_saas_session(&state, alice);

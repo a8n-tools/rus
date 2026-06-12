@@ -46,8 +46,8 @@ pub async fn handle_maintenance_webhook(
     mac.update(&body);
 
     // Decode the hex signature and verify
-    let sig_bytes =
-        hex::decode(signature).map_err(|_| actix_web::error::ErrorUnauthorized("Invalid signature format"))?;
+    let sig_bytes = hex::decode(signature)
+        .map_err(|_| actix_web::error::ErrorUnauthorized("Invalid signature format"))?;
     mac.verify_slice(&sig_bytes)
         .map_err(|_| actix_web::error::ErrorUnauthorized("Invalid signature"))?;
 
@@ -76,7 +76,10 @@ pub async fn handle_maintenance_webhook(
         };
     }
 
-    tracing::info!(maintenance_mode = payload.maintenance_mode, "Maintenance mode updated via webhook");
+    tracing::info!(
+        maintenance_mode = payload.maintenance_mode,
+        "Maintenance mode updated via webhook"
+    );
 
     Ok(HttpResponse::Ok().json(serde_json::json!({ "status": "ok" })))
 }
@@ -84,11 +87,11 @@ pub async fn handle_maintenance_webhook(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix_web::{test, web, App};
     use crate::testing::{make_test_state, sign_webhook_payload, TEST_WEBHOOK_SECRET};
+    use actix_web::{test, web, App};
+    use serde_json::json;
     #[allow(unused_imports)]
     use std::sync::atomic::Ordering;
-    use serde_json::json;
 
     fn build_app(
         state: web::Data<AppState>,
@@ -99,14 +102,10 @@ mod tests {
             Error = actix_web::Error,
         >,
     > {
-        test::init_service(
-            App::new()
-                .app_data(state)
-                .route(
-                    "/webhooks/maintenance",
-                    web::post().to(handle_maintenance_webhook),
-                ),
-        )
+        test::init_service(App::new().app_data(state).route(
+            "/webhooks/maintenance",
+            web::post().to(handle_maintenance_webhook),
+        ))
     }
 
     #[actix_web::test]
