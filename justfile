@@ -43,29 +43,6 @@ logs:
 logs-local:
     docker compose logs --follow app
 
-# Remove Traefik-routed dev containers and volumes
-dev-clean:
-    {{ compose }}down --remove-orphans
-
-# Remove local dev containers and volumes
-dev-local-clean:
-    docker compose down --remove-orphans
-
-# Remove dev containers, volumes, networks, and all named Docker volumes
-dev-clean-all: dev-clean
-    #!/usr/bin/env nu
-    let suffix = $env.USER
-    let vols = [
-        $"rus-cargo-target-($suffix)"
-        $"rus-data-($suffix)"
-    ]
-    let existing = docker volume ls --quiet | lines
-    for vol in $vols {
-        if $vol in $existing {
-            docker volume rm $vol
-        }
-    }
-
 # Run in standalone mode (debug)
 run: ensure-env
     cargo run
@@ -127,6 +104,52 @@ check-docker-saas:
 # Build Docker image (mode: standalone or saas)
 build-docker mode="standalone":
     docker buildx build --build-arg BUILD_MODE={{ mode }} -t rus:local -f oci-build/Dockerfile .
+
+# ── Cleanup ──────────────────────────────────────────────────────────────────
+
+# Tear down this repo's dev footprint: stop both dev stacks (the Traefik-routed compose.dev.yml stack and the localhost compose.yml stack, dropping their default networks), remove this repo's named volumes (rus-cargo-target-$USER, rus-data-$USER), and delete local build/runtime artifacts (target/, data/). Scoped to this repo; safe on a shared host.
+[group: 'cleanup']
+dev-clean:
+    #!/usr/bin/env nu
+    {{ compose }}down --remove-orphans
+    docker compose down --remove-orphans
+    let suffix = $env.USER
+    let vols = [
+        $"rus-cargo-target-($suffix)"
+        $"rus-data-($suffix)"
+    ]
+    let existing = docker volume ls --quiet | lines
+    for vol in $vols {
+        if $vol in $existing {
+            docker volume rm $vol
+        }
+    }
+    let paths = [target data]
+    for p in $paths {
+        if ($p | path exists) {
+            rm --recursive $p
+            print $"removed ($p)"
+        }
+    }
+    print "dev-clean: done"
+
+# Everything dev-clean does, plus remove the Docker images this repo builds and prune its buildx cache. Run for a from-scratch rebuild.
+[group: 'cleanup']
+dev-clean-all: dev-clean
+    #!/usr/bin/env nu
+    let images = [
+        "rus:standalone-check"
+        "rus:saas-check"
+        "rus:local"
+    ]
+    for img in $images {
+        let present = (do { ^docker image inspect $img } | complete).exit_code == 0
+        if $present {
+            docker image rm $img
+        }
+    }
+    docker buildx prune --force
+    print "dev-clean-all: done"
 
 # ── Release ──────────────────────────────────────────────────────────────────
 
