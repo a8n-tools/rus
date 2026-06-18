@@ -7,6 +7,12 @@ default:
 # Use the per-developer Traefik-routed dev compose file
 compose := "docker compose -f compose.dev.yml "
 
+# Image used by the pre-commit hook. Matches the `builder` stage in
+# oci-build/Dockerfile so `just pre-commit` runs the same toolchain rus is
+# built against. The compose `app` service builds the production runtime
+# image (alpine + server ENTRYPOINT, no cargo), so pre-commit must not use it.
+dev_image := "ghcr.io/niceguyit/rust-builder-musl:v1.0.0-rust1.94-alpine"
+
 # Copy the appropriate .env file for the given mode
 [private]
 ensure-env mode="standalone":
@@ -251,23 +257,32 @@ install-hooks:
     ^chmod +x $hook
     print $"Wrote ($hook) -> just pre-commit"
 
-# Run the same checks as .forgejo/workflows/check.yml inside the dev compose `app` container.
+# Run the same checks as .forgejo/workflows/check.yml inside the rust-builder-musl
+# image so the toolchain matches CI. Runs cargo against the builder image, NOT the
+# production `app` runtime image (whose ENTRYPOINT boots the server), so a fresh
+# clone passes without booting any service. Test secrets are injected via --env;
+# no .env / ensure-env is required.
 [group: 'hooks']
-pre-commit: ensure-env
+pre-commit:
     #!/usr/bin/env nu
+    let img = "{{ dev_image }}"
+    let user_name = (^whoami | str trim)
+    let target_vol = $"dev-rus-target-($user_name)"
+    let reg_vol = "dev-rus-cargo-registry"
+    let vols = ["--volume" $"($env.PWD):/build" "--workdir" "/build" "--volume" $"($target_vol):/build/target" "--volume" $"($reg_vol):/usr/local/cargo/registry"]
     print "\n[pre-commit] cargo fmt --check"
-    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo fmt --check
+    ^docker run --rm ...$vols $img cargo fmt --check
     print "\n[pre-commit] cargo clippy --all-targets --features standalone -- -D warnings"
-    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo clippy --all-targets --features standalone -- -D warnings
+    ^docker run --rm ...$vols $img cargo clippy --all-targets --features standalone -- -D warnings
     print "\n[pre-commit] cargo clippy --all-targets --no-default-features --features saas -- -D warnings"
-    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo clippy --all-targets --no-default-features --features saas -- -D warnings
+    ^docker run --rm ...$vols $img cargo clippy --all-targets --no-default-features --features saas -- -D warnings
     print "\n[pre-commit] cargo build --all-targets --features standalone"
-    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo build --all-targets --features standalone
+    ^docker run --rm ...$vols $img cargo build --all-targets --features standalone
     print "\n[pre-commit] cargo build --all-targets --no-default-features --features saas"
-    ^docker compose -f compose.dev.yml run --rm --no-deps app cargo build --all-targets --no-default-features --features saas
-    print "\n[pre-commit] cargo test --features standalone"
-    ^docker compose -f compose.dev.yml run --rm --no-deps -e JWT_SECRET=test-secret-at-least-32-chars-ok! app cargo test --features standalone
-    print "\n[pre-commit] cargo test --no-default-features --features saas"
-    ^docker compose -f compose.dev.yml run --rm --no-deps -e SAAS_JWT_SECRET=test-saas-secret-32-chars-padded! app cargo test --no-default-features --features saas
+    ^docker run --rm ...$vols $img cargo build --all-targets --no-default-features --features saas
+    print "\n[pre-commit] cargo test --lib --features standalone"
+    ^docker run --rm ...$vols --env "JWT_SECRET=test-secret-at-least-32-chars-ok!" $img cargo test --lib --features standalone
+    print "\n[pre-commit] cargo test --lib --no-default-features --features saas"
+    ^docker run --rm ...$vols --env "SAAS_JWT_SECRET=test-saas-secret-32-chars-padded!" $img cargo test --lib --no-default-features --features saas
     print "\n[pre-commit] all checks passed"
 
