@@ -10,7 +10,9 @@ on:
 jobs:
   check:
     name: fmt + clippy + build + tests
-    runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_LATEST }}
+    # Dev label: this job compiles Rust natively, and build scripts need the
+    # C toolchain (cc/ld) plus glibc/OpenSSL headers the base image lacks.
+    runs-on: ${{ vars.RUNS_ON_OPENSUSE_DEV_LATEST }}
     env:
       JWT_SECRET: test-secret-at-least-32-chars-ok!
       SAAS_JWT_SECRET: test-saas-secret-32-chars-padded!
