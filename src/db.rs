@@ -211,6 +211,20 @@ impl AppState {
             )?;
         }
 
+        // RUS-7: best-effort migration for the login-location alert columns.
+        // Ungated: both the standalone and saas schemas own a users table.
+        for stmt in [
+            "ALTER TABLE users ADD COLUMN last_login_country TEXT",
+            "ALTER TABLE users ADD COLUMN notify_new_location INTEGER NOT NULL DEFAULT 1",
+        ] {
+            if let Err(e) = conn.execute(stmt, []) {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column name") {
+                    tracing::debug!(stmt = %stmt, error = %msg, "login-location column migration skipped");
+                }
+            }
+        }
+
         Ok(AppState {
             db: Mutex::new(conn),
             config,

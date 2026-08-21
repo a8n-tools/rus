@@ -20,6 +20,7 @@ use crate::security::{is_account_locked, record_login_attempt, validate_password
 pub async fn register(
     data: web::Data<AppState>,
     req: web::Json<RegisterRequest>,
+    http_req: HttpRequest,
 ) -> Result<HttpResponse> {
     // Validate input before acquiring the lock
     if req.username.is_empty() || req.password.is_empty() {
@@ -108,6 +109,9 @@ pub async fn register(
                     );
 
                     info!(username = %req.username, user_id, is_admin, "User registered");
+                    // RUS-7: records the baseline country so a later sign-in
+                    // from elsewhere alerts. A first login can never alert.
+                    crate::location_alert::spawn_new_location_check(&data, user_id, &http_req);
                     Ok(HttpResponse::Created().json(AuthResponse {
                         token,
                         refresh_token,
@@ -142,6 +146,7 @@ pub async fn register(
 pub async fn login(
     data: web::Data<AppState>,
     req: web::Json<LoginRequest>,
+    http_req: HttpRequest,
 ) -> Result<HttpResponse> {
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -196,6 +201,8 @@ pub async fn login(
                     }
                     // Record successful login attempt
                     record_login_attempt(&db, &req.username, true);
+                    // RUS-7: alert on a sign-in from a new country, off the hot path.
+                    crate::location_alert::spawn_new_location_check(&data, user_id, &http_req);
                     // Create JWT token
                     match create_jwt(
                         &username,

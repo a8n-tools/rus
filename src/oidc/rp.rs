@@ -205,6 +205,7 @@ pub async fn callback(
     state: web::Data<OidcRpState>,
     app_state: web::Data<AppState>,
     params: web::Query<CallbackQuery>,
+    http_req: HttpRequest,
 ) -> HttpResponse {
     if let Some(r) = enabled_or_404(&state) {
         return r;
@@ -369,6 +370,10 @@ pub async fn callback(
             return HttpResponse::InternalServerError().finish();
         }
     }
+
+    // RUS-7: the OP alerts on sign-ins to itself, not to this app, so a reused
+    // OP session from a new country would otherwise be silent here.
+    crate::location_alert::spawn_new_location_check(&app_state, provisioned.user_id, &http_req);
 
     let secure = state.config.redirect_uri.starts_with("https://");
     let cookie = build_session_cookie(&session_token, state.config.session_ttl_seconds, secure);

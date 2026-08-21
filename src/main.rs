@@ -10,6 +10,8 @@ mod auth;
 mod config;
 mod db;
 mod handlers;
+mod location_alert;
+mod mailer;
 mod models;
 #[cfg(feature = "saas")]
 mod oidc;
