@@ -5,14 +5,15 @@
 //! the alert is an operator notification naming which account signed in.
 //! Delivery is gated on `MailConfig::deliverable`, so an unconfigured
 //! deployment logs the message instead of sending it and a login never depends
-//! on mail working.
+//! on mail working. The connection is encrypted unless `SMTP_TLS_MODE=none`
+//! explicitly opts out (RUS-16).
 
 use chrono::Utc;
 use lettre::message::Mailbox;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
-use crate::config::MailConfig;
+use crate::config::{MailConfig, SmtpTlsMode};
 
 /// Plain-text body of the new-sign-in-location alert.
 const NEW_SIGNIN_LOCATION_BODY: &str = "\
@@ -31,12 +32,46 @@ If this was the account owner, no action is needed.
 If this sign-in is not recognised, someone else may have access to the account. Reset that account's password now and review its active sessions.
 ";
 
+/// Which lettre constructor a TLS mode selects. Split out so the mapping is
+/// unit-testable without reaching into the opaque transport type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TransportKind {
+    /// `relay`: implicit TLS, default port 465.
+    Relay,
+    /// `starttls_relay`: STARTTLS upgrade, default port 587.
+    StarttlsRelay,
+    /// `builder_dangerous`: no encryption, default port 25.
+    Dangerous,
+}
+
+fn transport_kind(mode: SmtpTlsMode) -> TransportKind {
+    match mode {
+        SmtpTlsMode::Tls => TransportKind::Relay,
+        SmtpTlsMode::Starttls => TransportKind::StarttlsRelay,
+        SmtpTlsMode::None => TransportKind::Dangerous,
+    }
+}
+
 fn smtp_transport(mail: &MailConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
     let host = mail
         .smtp_host
         .clone()
         .ok_or_else(|| "SMTP host is missing".to_string())?;
-    let mut builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host);
+    let mut builder = match transport_kind(mail.smtp_tls_mode) {
+        TransportKind::Relay => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)
+            .map_err(|error| format!("SMTP TLS transport setup failed: {error}"))?,
+        TransportKind::StarttlsRelay => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)
+            .map_err(|error| format!("SMTP STARTTLS transport setup failed: {error}"))?,
+        TransportKind::Dangerous => {
+            tracing::warn!(
+                smtp_host = %host,
+                "SMTP_TLS_MODE=none: mail is sent unencrypted, only safe for a trusted local relay"
+            );
+            AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&host)
+        }
+    };
+    // relay/starttls_relay already set the right default port for their mode,
+    // so an explicit SMTP_PORT stays an override.
     if let Some(port) = mail.smtp_port {
         builder = builder.port(port);
     }
@@ -220,5 +255,69 @@ mod tests {
         let body =
             new_signin_location_body("alice", "DE", "203.0.113.7", None, "2026-08-21T00:00:00Z");
         assert!(body.contains("Device: unknown"));
+    }
+
+    // Each configured mode picks its own lettre constructor.
+    #[test]
+    fn tls_mode_selects_its_transport() {
+        assert_eq!(
+            transport_kind(SmtpTlsMode::Tls),
+            TransportKind::Relay,
+            "tls means implicit TLS on 465"
+        );
+        assert_eq!(
+            transport_kind(SmtpTlsMode::Starttls),
+            TransportKind::StarttlsRelay,
+            "starttls means an upgrade on 587"
+        );
+        assert_eq!(
+            transport_kind(SmtpTlsMode::None),
+            TransportKind::Dangerous,
+            "none keeps the plaintext escape hatch"
+        );
+    }
+
+    // An unconfigured deployment gets an encrypted transport, not plaintext.
+    #[test]
+    fn default_config_selects_starttls_transport() {
+        assert_eq!(
+            transport_kind(MailConfig::default().smtp_tls_mode),
+            TransportKind::StarttlsRelay
+        );
+    }
+
+    // The parsed env value drives the constructor end to end.
+    #[test]
+    fn parsed_mode_string_selects_its_transport() {
+        for (value, expected) in [
+            ("TLS", TransportKind::Relay),
+            ("StartTLS", TransportKind::StarttlsRelay),
+            ("none", TransportKind::Dangerous),
+            ("bogus", TransportKind::StarttlsRelay),
+        ] {
+            assert_eq!(
+                transport_kind(SmtpTlsMode::parse(value)),
+                expected,
+                "SMTP_TLS_MODE={value}"
+            );
+        }
+    }
+
+    // Every mode builds a usable transport; TLS setup must not error offline.
+    #[test]
+    fn every_mode_builds_a_transport() {
+        for mode in [SmtpTlsMode::Starttls, SmtpTlsMode::Tls, SmtpTlsMode::None] {
+            let mail = MailConfig {
+                smtp_tls_mode: mode,
+                smtp_port: Some(2525),
+                smtp_username: Some("user".into()),
+                smtp_password: Some("secret".into()),
+                ..configured()
+            };
+            assert!(
+                smtp_transport(&mail).is_ok(),
+                "mode {mode:?} failed to build"
+            );
+        }
     }
 }

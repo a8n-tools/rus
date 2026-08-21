@@ -239,6 +239,24 @@ rus/
 | `CLICK_RETENTION_DAYS` | Days to retain click history | `30` |
 | `RUST_LOG` | Log level | `info` |
 
+### Security alerts (both modes)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SECURITY_ALERT_EMAIL` | Operator mailbox for alerts; unset means log-only | unset |
+| `LOGIN_LOCATION_ALERTS_ENABLED` | New-country sign-in alert kill switch (`false`/`0`/`no` disables) | `true` |
+| `SMTP_HOST` | SMTP relay hostname | unset |
+| `SMTP_FROM_EMAIL` | Sender address | unset |
+| `SMTP_FROM_NAME` | Sender display name | unset |
+| `SMTP_USERNAME` | SMTP auth username | unset |
+| `SMTP_PASSWORD` | SMTP auth password | unset |
+| `SMTP_TLS_MODE` | Connection encryption: `starttls`, `tls`, or `none` | `starttls` |
+| `SMTP_PORT` | Port override; each TLS mode has its own default | mode default |
+
+`SMTP_HOST`, `SMTP_FROM_EMAIL`, and `SECURITY_ALERT_EMAIL` must all be set before an alert is sent; otherwise it is logged instead.
+
+Mail is encrypted by default: `SMTP_TLS_MODE` defaults to `starttls`, so a deployment that sets nothing sends over an encrypted connection. `starttls` upgrades the connection on port 587, `tls` uses implicit TLS on port 465, and `none` is plaintext, kept only for a trusted loopback or sidecar relay and logging a warning naming the host whenever it is used. An unrecognised value warns and falls back to `starttls`. Each mode supplies its own default port, so `SMTP_PORT` is an override for a non-standard relay rather than a required setting. TLS is provided by rustls, so building needs no OpenSSL.
+
 ### Standalone only
 
 | Variable | Description | Default |
@@ -340,6 +358,7 @@ just fmt                     # Format
 - Protected API endpoints with user-scoped access
 - SQL injection prevention via parameterized queries
 - Foreign key enforcement enabled
+- Outbound alert mail encrypted by default (STARTTLS; plaintext only by explicit opt-in)
 
 ## Contributing
 

@@ -35,6 +35,37 @@ impl OidcConfig {
     }
 }
 
+/// How the SMTP connection is encrypted (RUS-16).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SmtpTlsMode {
+    /// Plaintext connect, upgraded with STARTTLS. Default (submission port 587).
+    #[default]
+    Starttls,
+    /// Implicit TLS from the first byte (submissions port 465).
+    Tls,
+    /// No encryption. Only for a trusted loopback or sidecar relay.
+    None,
+}
+
+impl SmtpTlsMode {
+    /// Parse `SMTP_TLS_MODE`. Unrecognised values warn and fall back to the
+    /// encrypted default rather than silently downgrading to plaintext.
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "starttls" => Self::Starttls,
+            "tls" => Self::Tls,
+            "none" => Self::None,
+            other => {
+                tracing::warn!(
+                    value = %other,
+                    "SMTP_TLS_MODE is not one of starttls, tls, or none, using starttls"
+                );
+                Self::Starttls
+            }
+        }
+    }
+}
+
 /// Outbound mail and login-location alerting (RUS-7).
 ///
 /// Users here have no address of their own, so alerts go to one operator
@@ -49,6 +80,8 @@ pub struct MailConfig {
     pub smtp_password: Option<String>,
     pub smtp_from_email: Option<String>,
     pub smtp_from_name: Option<String>,
+    /// How the SMTP connection is encrypted (RUS-16).
+    pub smtp_tls_mode: SmtpTlsMode,
     /// Operator mailbox that receives new-sign-in-location alerts.
     pub security_alert_email: Option<String>,
     /// Global kill switch for the login-location alert.
@@ -64,6 +97,9 @@ impl Default for MailConfig {
             smtp_password: None,
             smtp_from_email: None,
             smtp_from_name: None,
+            // Encrypted by default: a deployment that sets nothing must not
+            // send in plaintext.
+            smtp_tls_mode: SmtpTlsMode::Starttls,
             security_alert_email: None,
             // The feature is on by default; it degrades to log-only when mail
             // is unconfigured, so shipping it enabled is safe.
@@ -103,6 +139,9 @@ impl MailConfig {
             smtp_password: non_empty("SMTP_PASSWORD"),
             smtp_from_email: non_empty("SMTP_FROM_EMAIL"),
             smtp_from_name: non_empty("SMTP_FROM_NAME"),
+            smtp_tls_mode: non_empty("SMTP_TLS_MODE")
+                .map(|v| SmtpTlsMode::parse(&v))
+                .unwrap_or_default(),
             security_alert_email: non_empty("SECURITY_ALERT_EMAIL"),
             login_location_alerts_enabled: !matches!(
                 non_empty("LOGIN_LOCATION_ALERTS_ENABLED")
@@ -432,5 +471,35 @@ mod tests {
     fn get_jwt_secret_returns_default_when_unset() {
         let secret = Config::get_jwt_secret();
         assert!(!secret.is_empty());
+    }
+
+    // Each accepted spelling maps to its own mode.
+    #[test]
+    fn smtp_tls_mode_parses_every_accepted_value() {
+        assert_eq!(SmtpTlsMode::parse("starttls"), SmtpTlsMode::Starttls);
+        assert_eq!(SmtpTlsMode::parse("tls"), SmtpTlsMode::Tls);
+        assert_eq!(SmtpTlsMode::parse("none"), SmtpTlsMode::None);
+    }
+
+    // Case and surrounding whitespace must not change the mode.
+    #[test]
+    fn smtp_tls_mode_parses_case_insensitively() {
+        assert_eq!(SmtpTlsMode::parse("STARTTLS"), SmtpTlsMode::Starttls);
+        assert_eq!(SmtpTlsMode::parse("Tls"), SmtpTlsMode::Tls);
+        assert_eq!(SmtpTlsMode::parse("  NoNe  "), SmtpTlsMode::None);
+    }
+
+    // A typo must never downgrade the connection to plaintext.
+    #[test]
+    fn smtp_tls_mode_falls_back_to_starttls() {
+        assert_eq!(SmtpTlsMode::parse("plaintext"), SmtpTlsMode::Starttls);
+        assert_eq!(SmtpTlsMode::parse(""), SmtpTlsMode::Starttls);
+        assert_eq!(SmtpTlsMode::default(), SmtpTlsMode::Starttls);
+    }
+
+    // An unset SMTP_TLS_MODE leaves an existing deployment encrypted.
+    #[test]
+    fn mail_config_defaults_to_starttls() {
+        assert_eq!(MailConfig::default().smtp_tls_mode, SmtpTlsMode::Starttls);
     }
 }
