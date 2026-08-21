@@ -122,6 +122,8 @@ just dev-local-stop      # Stop local dev server
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/api/me` | Current account: username, admin flag, alert opt-out |
+| `PATCH` | `/api/me` | Update account settings (`notify_new_location`) |
 | `POST` | `/api/shorten` | Shorten a URL |
 | `GET` | `/api/urls` | List user's URLs |
 | `GET` | `/api/stats/{code}` | Get URL statistics |
@@ -266,6 +268,10 @@ The country comes from the `X-IPCountry` header injected by the reverse proxy's 
 
 Mail is encrypted by default: `SMTP_TLS_MODE` defaults to `starttls`, so a deployment that sets nothing sends over an encrypted connection. `starttls` upgrades the connection on port 587, `tls` uses implicit TLS on port 465, and `none` is plaintext, kept only for a trusted loopback or sidecar relay and logging a warning naming the host whenever it is used. An unrecognised value warns and falls back to `starttls`. Each mode supplies its own default port, so `SMTP_PORT` is an override for a non-standard relay rather than a required setting. TLS is provided by rustls, so building needs no OpenSSL.
 
+#### Opting out (both modes)
+
+Every account carries `notify_new_location`, an opt-out that is on by default and is checked before an alert is routed anywhere, so an account that has opted out is never alerted on. `GET /api/me` returns the current value and `PATCH /api/me` changes it: `{"notify_new_location": false}` turns the alerts off and `{"notify_new_location": true}` turns them back on. The account is always the one holding the session (the bearer token in standalone mode, the `rus_session` cookie in saas mode), so a user id in the request body is ignored and cannot flip another account's setting. Omitting the key means "not submitted" and leaves the stored value alone, while a non-boolean value is rejected with a 400 rather than coerced. The dashboard control that drives this from the browser is tracked in RUS-18.
+
 ### Standalone only
 
 | Variable | Description | Default |
@@ -292,7 +298,7 @@ Mail is encrypted by default: `SMTP_TLS_MODE` defaults to `starttls`, so a deplo
 - `is_admin` - Admin flag (0/1)
 - `created_at` - Account creation timestamp
 - `last_login_country` - Country of the most recent resolved sign-in, for new-location detection
-- `notify_new_location` - Whether sign-ins to this account raise a new-location alert (default 1)
+- `notify_new_location` - Whether sign-ins to this account raise a new-location alert (default 1); the account sets it via `PATCH /api/me`
 
 ### urls
 - `id` - Primary key

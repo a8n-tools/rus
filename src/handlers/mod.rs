@@ -9,7 +9,7 @@ pub mod saas_auth;
 #[cfg(feature = "saas")]
 pub mod webhook;
 #[cfg(feature = "saas")]
-pub use saas_auth::{maintenance_guard, saas_me};
+pub use saas_auth::{maintenance_guard, saas_me, saas_update_me};
 #[cfg(feature = "saas")]
 pub use webhook::handle_maintenance_webhook;
 pub mod urls;
@@ -21,7 +21,7 @@ pub use abuse::{admin_list_reports, admin_resolve_report};
 #[cfg(feature = "standalone")]
 pub use admin::{admin_delete_user, admin_get_stats, admin_list_users, admin_promote_user};
 #[cfg(feature = "standalone")]
-pub use auth::{get_current_user, login, refresh_token, register};
+pub use auth::{get_current_user, login, refresh_token, register, update_current_user};
 #[cfg(feature = "standalone")]
 pub use pages::{admin_page, check_setup_required, login_page, setup_page, signup_page};
 pub use pages::{

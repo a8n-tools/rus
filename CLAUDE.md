@@ -102,7 +102,7 @@ src/
 
 ### API Structure
 - **Public**: `/api/register`, `/api/login`, `/{short_code}` (redirect)
-- **Protected** (Bearer token): `/api/shorten`, `/api/urls`, `/api/stats/{code}`, `/api/urls/{code}` (DELETE), `/api/urls/{code}/name` (PATCH)
+- **Protected** (Bearer token): `/api/me` (GET, PATCH), `/api/shorten`, `/api/urls`, `/api/stats/{code}`, `/api/urls/{code}` (DELETE), `/api/urls/{code}/name` (PATCH)
 
 ### Key Implementation Details
 - Short codes: 6 chars (A-Za-z0-9), collision-checked
@@ -150,6 +150,10 @@ Accounts have no email address of their own, so the new-sign-in-location alert g
 
 **Empty means trust nothing, which breaks a proxied deployment if left unset.** rus runs behind Traefik on a private Docker network, so an unset list collapses every client to the proxy address and silently disables the sign-in-location alert (an untrusted peer never yields a country). `.env.standalone` and `.env.saas` ship with the private ranges (`10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fd00::/8`) set; a compose deployment that supplies its environment directly must set the same value. Startup logs a warning whenever the list is empty.
 
+### Account alert opt-out (both modes)
+
+`users.notify_new_location` is a per-account opt-out for the new-sign-in-location alert, on by default and checked before the alert is routed anywhere. It is not an environment variable: the account changes it itself with `PATCH /api/me` (`{"notify_new_location": false}` off, `true` on), and reads it back from `GET /api/me`. Both feature legs carry the pair (`update_current_user` / `get_current_user` in `src/handlers/auth.rs`, `saas_update_me` / `saas_me` in `src/handlers/saas_auth.rs`), and both derive the account from the session rather than the request body, so a user id in the payload is ignored. An absent key means "not submitted" and leaves the stored value alone; an explicit `false` persists; a non-boolean is a 400 rather than a coercion. The queries sit with the rest of the alert's SQL in `src/location_alert.rs` (`get_notify_new_location`, `set_notify_new_location`). The dashboard control is tracked in RUS-18.
+
 ### Standalone-only options
 ```
 JWT_EXPIRY=1                # JWT expiry in hours (default: 1)
@@ -184,7 +188,7 @@ The legacy `SAAS_JWT_SECRET`, `SAAS_LOGIN_URL`, `SAAS_LOGOUT_URL`, `SAAS_MEMBERS
 
 ## Database Schema
 
-**users**: userID, username (unique), password (hashed), created_at, last_login_country, notify_new_location
+**users**: userID, username (unique), password (hashed), created_at, last_login_country, notify_new_location (per-account alert opt-out, set via `PATCH /api/me`)
 **urls**: id, user_id (FK), original_url, short_code (unique indexed), name, clicks, created_at
 
 ## Testing API

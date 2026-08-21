@@ -31,6 +31,16 @@ pub struct RegisterRequest {
     pub password: String,
 }
 
+/// Account settings update (RUS-15). Shared by both feature legs; each leg's
+/// `PATCH /api/me` applies the fields it owns.
+#[derive(Serialize, Deserialize)]
+pub struct UpdateAccountRequest {
+    /// Absent means "not submitted", so the stored value stands; an explicit
+    /// `false` persists. A non-boolean is rejected rather than coerced.
+    #[serde(default)]
+    pub notify_new_location: Option<bool>,
+}
+
 /// User login request - standalone only
 #[cfg(feature = "standalone")]
 #[derive(Serialize, Deserialize)]
@@ -158,6 +168,8 @@ pub struct CurrentUserResponse {
     pub user_id: i64,
     pub username: String,
     pub is_admin: bool,
+    /// Whether sign-ins to this account raise a new-location alert (RUS-15).
+    pub notify_new_location: bool,
 }
 
 /// Admin statistics response - standalone only
