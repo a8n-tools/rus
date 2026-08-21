@@ -40,6 +40,16 @@ impl From<rusqlite::Error> for JitError {
     }
 }
 
+/// The OP's email claim, normalized for storage (RUS-11). Blank or malformed is
+/// `None`, so it stores NULL. Lowercasing also keeps the standalone-account link
+/// below matching, since that column is stored normalized.
+fn claim_email(id_claims: &IdTokenClaims) -> Option<String> {
+    id_claims
+        .email
+        .as_deref()
+        .and_then(|value| crate::mailer::normalize_account_email(value).ok().flatten())
+}
+
 /// Load an existing local user by their SaaS `sub`, or provision one on first login.
 ///
 /// Returns `Forbidden` if the user is suspended or lacks membership access.
@@ -84,10 +94,12 @@ pub fn load_or_provision(
             ));
         }
 
-        let email = id_claims.email.as_deref().unwrap_or("");
+        // RUS-11: the alert is addressed to this column, so an omitted or blank
+        // claim stores NULL (fall back to the operator mailbox), never "".
+        let email = claim_email(id_claims);
         db.execute(
             "UPDATE users SET email = ?1, is_admin = ?2 WHERE userID = ?3",
-            params![email, is_admin as i32, user_id],
+            params![email.as_deref(), is_admin as i32, user_id],
         )?;
 
         return Ok(ProvisionedUser {
@@ -112,9 +124,7 @@ pub fn load_or_provision(
         ));
     }
 
-    let email = id_claims
-        .email
-        .as_deref()
+    let email = claim_email(id_claims)
         .ok_or_else(|| JitError::Internal("ID token missing email claim".into()))?;
 
     // Try linking to an existing standalone account by email before inserting.
@@ -367,6 +377,52 @@ mod tests {
             Err(JitError::Internal(m)) => assert!(m.contains("email")),
             other => panic!("expected Internal, got {other:?}"),
         }
+    }
+
+    // RUS-11: the alert reads this column, so an OP that stops sending the claim
+    // must leave NULL (fall back to the operator mailbox), not an empty string.
+    #[test]
+    fn repeat_login_without_an_email_claim_stores_null() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some("u@example.com"), true, true, None),
+        )
+        .unwrap();
+
+        load_or_provision(&db, &id_claims(SUB_A, None, true, true, None)).unwrap();
+
+        let email: Option<String> = db
+            .query_row(
+                "SELECT email FROM users WHERE saas_user_id = ?1",
+                params![SUB_A],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(email, None);
+    }
+
+    // The claim is normalized on the way in, so it matches the standalone
+    // column, which is stored trimmed and lowercased.
+    #[test]
+    fn email_claim_is_normalized_before_storage() {
+        let state = make_test_state();
+        let db = state.db.lock().unwrap();
+        load_or_provision(
+            &db,
+            &id_claims(SUB_A, Some(" User@Example.COM "), true, true, None),
+        )
+        .unwrap();
+
+        let email: Option<String> = db
+            .query_row(
+                "SELECT email FROM users WHERE saas_user_id = ?1",
+                params![SUB_A],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(email, Some("user@example.com".to_string()));
     }
 
     #[test]

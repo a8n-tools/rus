@@ -29,6 +29,19 @@ pub struct UrlEntry {
 pub struct RegisterRequest {
     pub username: String,
     pub password: String,
+    /// Optional address for security notices (RUS-11). Absent or blank leaves
+    /// the account without one, so an existing signup flow keeps working.
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+/// Account settings update - standalone only (RUS-11).
+#[cfg(feature = "standalone")]
+#[derive(Serialize, Deserialize)]
+pub struct UpdateAccountRequest {
+    /// Blank clears the address back to NULL.
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 /// User login request - standalone only
@@ -158,6 +171,9 @@ pub struct CurrentUserResponse {
     pub user_id: i64,
     pub username: String,
     pub is_admin: bool,
+    /// Address security notices go to, or null when the account has none
+    /// (RUS-11).
+    pub email: Option<String>,
 }
 
 /// Admin statistics response - standalone only
