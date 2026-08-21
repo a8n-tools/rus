@@ -74,7 +74,7 @@ src/
 ├── db.rs             # Database connection and schema
 ├── models.rs         # Data models and request/response types
 ├── security.rs       # Password validation, account lockout (standalone only)
-├── location_alert.rs # New-sign-in-country detection (both modes)
+├── location_alert.rs # New-sign-in-country detection, trusted-proxy gate (both modes)
 ├── mailer.rs         # Security alert email via SMTP, TLS by default (both modes)
 ├── auth/             # JWT handling (standalone only)
 │   ├── mod.rs
@@ -125,6 +125,7 @@ APP_PORT=4001               # Server port
 HOST_URL=http://localhost:4001  # Public URL for shortened links
 MAX_URL_LENGTH=2048         # Maximum URL length
 CLICK_RETENTION_DAYS=30     # Days to retain click history
+TRUSTED_PROXY_CIDRS=        # Peers allowed to set the forwarded IP and country headers
 RUST_LOG=info,rus=debug     # Log level filter (default: info,rus=debug)
 ```
 
@@ -142,6 +143,12 @@ SMTP_PORT=                     # Override; starttls 587, tls 465, none 25
 ```
 
 Accounts have no email address of their own, so the new-sign-in-location alert goes to the single operator mailbox and names the account involved. The country comes from the `X-IPCountry` header injected by the reverse proxy's geoblock middleware, not an in-process geoip database, so with no such edge no country resolves and no alert fires.
+
+### Trusted proxies (both modes)
+
+`TRUSTED_PROXY_CIDRS` is a comma-separated list of CIDRs or bare IPs whose socket peers may set `X-Forwarded-For`, `X-Real-IP`, and `X-IPCountry`. The socket peer is the only input a client cannot forge, so it gates all three: an untrusted peer's forwarded headers are ignored and its peer address is used, and its `X-IPCountry` resolves to `None`, so a direct client can neither spoof its IP nor spoof or suppress the sign-in-location alert. A trusted peer's `X-Forwarded-For` is walked right to left for the rightmost entry that is not itself a trusted proxy, then `X-Real-IP`, then the peer. Entries that do not parse log a warning and are skipped. The resolvers live in `src/location_alert.rs` (`resolve_client_ip`, `resolve_client_country`); the parse and the `Config` field live in `src/config.rs`; `main.rs` installs the set once at startup via `init_trusted_proxies`.
+
+**Empty means trust nothing, which breaks a proxied deployment if left unset.** rus runs behind Traefik on a private Docker network, so an unset list collapses every client to the proxy address and silently disables the sign-in-location alert (an untrusted peer never yields a country). `.env.standalone` and `.env.saas` ship with the private ranges (`10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fd00::/8`) set; a compose deployment that supplies its environment directly must set the same value. Startup logs a warning whenever the list is empty.
 
 ### Standalone-only options
 ```

@@ -50,6 +50,8 @@ qrcode = "0.14"
 image = "0.25"
 base64 = "0.22"
 url = "2.5"
+# Trusted-proxy CIDR matching for the forwarded IP / country gate (RUS-12).
+ipnetwork = "0.20"
 hmac = { version = "0.12", optional = true }
 sha2 = { version = "0.10", optional = true }
 hex = { version = "0.4", optional = true }

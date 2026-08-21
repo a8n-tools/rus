@@ -184,6 +184,8 @@ rus/
 │   ├── db.rs                # Database connection and schema
 │   ├── models.rs            # Data models and request/response types
 │   ├── security.rs          # Password validation, account lockout
+│   ├── location_alert.rs    # New-sign-in-country detection, trusted-proxy gate
+│   ├── mailer.rs            # Security alert email via SMTP
 │   ├── auth/
 │   │   ├── mod.rs
 │   │   ├── jwt.rs           # JWT creation and validation
@@ -237,7 +239,12 @@ rus/
 | `HOST_URL` | Public URL for shortened links | `http://localhost:4001` |
 | `MAX_URL_LENGTH` | Maximum URL length | `2048` |
 | `CLICK_RETENTION_DAYS` | Days to retain click history | `30` |
+| `TRUSTED_PROXY_CIDRS` | Peers allowed to set the forwarded IP and country headers (comma-separated CIDRs or bare IPs) | unset (trust nothing) |
 | `RUST_LOG` | Log level | `info` |
+
+`TRUSTED_PROXY_CIDRS` gates `X-Forwarded-For`, `X-Real-IP`, and `X-IPCountry` on the socket peer, the one input a client cannot forge. When the peer is not in the list all three headers are ignored and the peer address is used, so a client that reaches the app directly can neither spoof its IP nor spoof or suppress the new-sign-in-location alert. When the peer is trusted, the rightmost `X-Forwarded-For` entry that is not itself a trusted proxy wins, falling back to `X-Real-IP` and then to the peer. Entries that do not parse log a warning and are skipped rather than failing startup.
+
+**Any deployment behind a reverse proxy must set this.** rus runs behind Traefik on a private Docker network, so an unset list makes every client look like the proxy and, because an untrusted peer never yields a country, silently disables the sign-in-location alert. The `.env.standalone` and `.env.saas` templates ship with the private ranges (`10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fd00::/8`) already set; a compose deployment that supplies its environment directly has to set the same value itself. Startup logs a warning whenever the list is empty.
 
 ### Security alerts (both modes)
 
@@ -254,6 +261,8 @@ rus/
 | `SMTP_PORT` | Port override; each TLS mode has its own default | mode default |
 
 `SMTP_HOST`, `SMTP_FROM_EMAIL`, and `SECURITY_ALERT_EMAIL` must all be set before an alert is sent; otherwise it is logged instead.
+
+The country comes from the `X-IPCountry` header injected by the reverse proxy's geoblock middleware, and is read only when the socket peer is listed in `TRUSTED_PROXY_CIDRS`. With no trusted proxy configured, or with a client connecting directly, no country resolves and no alert fires.
 
 Mail is encrypted by default: `SMTP_TLS_MODE` defaults to `starttls`, so a deployment that sets nothing sends over an encrypted connection. `starttls` upgrades the connection on port 587, `tls` uses implicit TLS on port 465, and `none` is plaintext, kept only for a trusted loopback or sidecar relay and logging a warning naming the host whenever it is used. An unrecognised value warns and falls back to `starttls`. Each mode supplies its own default port, so `SMTP_PORT` is an override for a non-standard relay rather than a required setting. TLS is provided by rustls, so building needs no OpenSSL.
 

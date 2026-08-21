@@ -49,6 +49,9 @@ async fn main() -> std::io::Result<()> {
     // Print startup banner with configuration
     config.print_banner();
 
+    // RUS-12: install the trusted-proxy set before any request is served.
+    location_alert::init_trusted_proxies(config.trusted_proxy_cidrs.clone());
+
     let bind_host = config.host.clone();
     let bind_port = config.port;
 
