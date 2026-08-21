@@ -326,6 +326,20 @@ mod tests {
         assert!(!body.is_empty());
     }
 
+    // The account section (RUS-17) is the app's first email input inside a
+    // styled form, so the shared field rule has to cover the type.
+    #[actix_web::test]
+    async fn serve_css_styles_email_inputs() {
+        let app = setup_app!();
+        let req = test::TestRequest::get().uri("/styles.css").to_request();
+        let body = test::call_and_read_body(&app, req).await;
+        let body_str = String::from_utf8(body.to_vec()).unwrap();
+        assert!(
+            body_str.contains("input[type=\"email\"]"),
+            "email inputs must get the shared field styling"
+        );
+    }
+
     #[actix_web::test]
     async fn serve_auth_js_returns_200_with_js_content_type() {
         let app = setup_app!();
@@ -402,6 +416,21 @@ mod tests {
             assert_eq!(
                 resp.headers().get("content-type").unwrap(),
                 "text/html; charset=utf-8"
+            );
+        }
+
+        // Both account controls have to reach the browser: the address field
+        // (RUS-17) and the alert opt-out (RUS-18).
+        #[actix_web::test]
+        async fn dashboard_page_carries_the_account_controls() {
+            let app = setup_standalone_app!();
+            let req = test::TestRequest::get().uri("/dashboard.html").to_request();
+            let body = test::call_and_read_body(&app, req).await;
+            let body_str = String::from_utf8(body.to_vec()).unwrap();
+            assert!(body_str.contains("id=\"accountEmail\""), "address field");
+            assert!(
+                body_str.contains("id=\"notifyNewLocation\""),
+                "alert opt-out"
             );
         }
 
@@ -506,6 +535,42 @@ mod tests {
                 .to_request();
             let resp = test::call_service(&app, req).await;
             assert_eq!(resp.status(), 200);
+        }
+
+        // The saas leg serves the same dashboard, so the alert opt-out (RUS-18)
+        // has to reach it too. The address field is standalone-only and the page
+        // hides it here, since saas takes the address from the OIDC identity.
+        #[actix_web::test]
+        async fn dashboard_carries_the_alert_opt_out() {
+            let state = crate::testing::make_test_state();
+            let uid = insert_saas_user(
+                &state,
+                "alice",
+                "77777777-7777-7777-7777-777777777777",
+                false,
+            );
+            let token = make_saas_session(&state, uid);
+            let app = test::init_service(
+                App::new()
+                    .app_data(state)
+                    .route("/dashboard.html", web::get().to(dashboard_page)),
+            )
+            .await;
+
+            let req = test::TestRequest::get()
+                .uri("/dashboard.html")
+                .insert_header(("Cookie", format!("{RUS_SESSION_COOKIE}={token}")))
+                .to_request();
+            let body = test::call_and_read_body(&app, req).await;
+            let body_str = String::from_utf8(body.to_vec()).unwrap();
+            assert!(
+                body_str.contains("id=\"notifyNewLocation\""),
+                "alert opt-out"
+            );
+            assert!(
+                body_str.contains("id=\"accountEmailManaged\""),
+                "the saas explanation for the missing address field"
+            );
         }
     }
 }

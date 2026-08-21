@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign Up - Rust URL Shortener</title>
-    <link rel="stylesheet" href="styles.css?v=2">
+    <link rel="stylesheet" href="styles.css?v=4">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <script src="theme.js"></script>
 </head>
@@ -58,6 +58,17 @@
                 </div>
 
                 <div class="input-group">
+                    <label for="email">Security Alert Email (optional)</label>
+                    <input
+                        type="email"
+                        id="email"
+                        placeholder="you@example.com"
+                        autocomplete="email"
+                    />
+                    <small class="input-hint">Unverified, and used only for security notices about this account. Leave blank to skip it; you can set it later from your dashboard.</small>
+                </div>
+
+                <div class="input-group">
                     <label for="confirmPassword">Confirm Password</label>
                     <input
                         type="password"
@@ -86,6 +97,7 @@
         const usernameInput = document.getElementById('username');
         const passwordInput = document.getElementById('password');
         const confirmPasswordInput = document.getElementById('confirmPassword');
+        const emailInput = document.getElementById('email');
         const signupBtn = document.getElementById('signupBtn');
         const errorDiv = document.getElementById('error');
 
@@ -154,6 +166,7 @@
             const username = usernameInput.value.trim();
             const password = passwordInput.value;
             const confirmPassword = confirmPasswordInput.value;
+            const email = emailInput.value.trim();
 
             // Validation
             if (username.length < 3) {
@@ -175,13 +188,20 @@
             signupBtn.disabled = true;
             signupBtn.textContent = 'Creating account...';
 
+            // The address is optional, so a blank input sends no email key at all
+            // and the account is created without one.
+            const payload = { username, password };
+            if (email) {
+                payload.email = email;
+            }
+
             try {
                 const response = await fetch('/api/register', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ username, password }),
+                    body: JSON.stringify(payload),
                 });
 
                 const data = await response.json();

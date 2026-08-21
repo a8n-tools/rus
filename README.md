@@ -15,6 +15,7 @@
 - **Admin Panel** - User management and abuse report review
 - **Abuse Reporting** - Public abuse reporting for malicious URLs
 - **Account Security** - Login attempt tracking with configurable lockout
+- **Account Settings** - Dashboard controls for the security alert address and the new-location alert opt-out
 - **Rate Limiting** - Built-in request rate limiting via actix-governor
 - **Refresh Tokens** - Seamless token refresh without re-login
 - **Dual Build Modes** - Standalone or SaaS deployment
@@ -208,7 +209,7 @@ rus/
 │   ├── index.html           # Landing page
 │   ├── login.html           # Login page
 │   ├── signup.html          # Registration page
-│   ├── dashboard.html       # URL management dashboard
+│   ├── dashboard.html       # URL management and account settings
 │   ├── admin.html           # Admin panel
 │   ├── report.html          # Abuse report form
 │   ├── setup.html           # Initial setup page
@@ -270,7 +271,7 @@ A new-sign-in-location alert is addressed to the account owner, in this order:
 
 `SMTP_HOST` and `SMTP_FROM_EMAIL` must be set before anything can be sent at all. `SECURITY_ALERT_EMAIL` is only the fallback: an account with its own address is notified without one configured.
 
-In saas mode the address comes from the OP identity and is refreshed on every login, so there is nothing to set by hand. In standalone mode an account sets its own: optionally at registration (`POST /api/register` accepts an `email` field), and at any time afterwards with `PATCH /api/me` (`{"email": "you@example.com"}`). A blank value clears it back to unset. `GET /api/me` returns the current value. The address is stored trimmed and lowercased and is not verified, so it receives security mail as soon as it is set. The browser field that drives these endpoints from the dashboard is tracked in RUS-17.
+In saas mode the address comes from the OP identity and is refreshed on every login, so there is nothing to set by hand. In standalone mode an account sets its own: optionally at registration (`POST /api/register` accepts an `email` field, and the signup form carries an optional input that sends it only when filled in), and at any time afterwards with `PATCH /api/me` (`{"email": "you@example.com"}`). A blank value clears it back to unset. `GET /api/me` returns the current value. The address is stored trimmed and lowercased and is not verified, so it receives security mail as soon as it is set. The browser surface is the Account section of the dashboard, which loads the stored address from `GET /api/me` and saves it with `PATCH /api/me`. That field is shown in standalone mode only: in saas mode the section explains instead that the address comes from the identity provider, since `PATCH /api/me` there ignores it.
 
 The per-account `notify_new_location` opt-out is checked before any of this, so an account that has opted out is never alerted whichever way the message would have been routed.
 
@@ -280,7 +281,7 @@ Mail is encrypted by default: `SMTP_TLS_MODE` defaults to `starttls`, so a deplo
 
 #### Opting out (both modes)
 
-Every account carries `notify_new_location`, an opt-out that is on by default and is checked before an alert is routed anywhere, so an account that has opted out is never alerted on. `GET /api/me` returns the current value and `PATCH /api/me` changes it: `{"notify_new_location": false}` turns the alerts off and `{"notify_new_location": true}` turns them back on. The account is always the one holding the session (the bearer token in standalone mode, the `rus_session` cookie in saas mode), so a user id in the request body is ignored and cannot flip another account's setting. Omitting the key means "not submitted" and leaves the stored value alone, while a non-boolean value is rejected with a 400 rather than coerced. The dashboard control that drives this from the browser is tracked in RUS-18.
+Every account carries `notify_new_location`, an opt-out that is on by default and is checked before an alert is routed anywhere, so an account that has opted out is never alerted on. `GET /api/me` returns the current value and `PATCH /api/me` changes it: `{"notify_new_location": false}` turns the alerts off and `{"notify_new_location": true}` turns them back on. The account is always the one holding the session (the bearer token in standalone mode, the `rus_session` cookie in saas mode), so a user id in the request body is ignored and cannot flip another account's setting. Omitting the key means "not submitted" and leaves the stored value alone, while a non-boolean value is rejected with a 400 rather than coerced. The browser control is a checkbox in the Account section of the dashboard, in both modes. It is painted from `GET /api/me` on load rather than from an assumed default, it submits only the fields the user actually changed (so saving the toggle never sends `email` and cannot disturb the address, and vice versa), and it repaints from the response body rather than from what was sent, so a rejected write leaves the checkbox on the value the server still holds and shows the API error inline.
 
 ### Standalone only
 

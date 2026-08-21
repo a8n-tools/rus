@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Dashboard - Rust URL Shortener</title>
-    <link rel="stylesheet" href="styles.css?v=3" />
+    <link rel="stylesheet" href="styles.css?v=4" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <script src="theme.js"></script>
   </head>
@@ -63,6 +63,46 @@
           </div>
 
           <div id="urlsList" class="urls-list"></div>
+        </div>
+      </div>
+
+      <div class="account-section accent-card">
+        <div class="accent-card-body">
+          <h2>Account</h2>
+
+          <div id="accountLoading" class="loading">Loading your account settings...</div>
+
+          <form id="accountForm" novalidate style="display: none">
+            <div class="input-group" id="accountEmailGroup">
+              <label for="accountEmail">Security alert email</label>
+              <input type="email" id="accountEmail" placeholder="you@example.com" autocomplete="email" />
+              <small class="input-hint">
+                Unverified, and used only for security notices about this account. Leave it blank to send them to the
+                operator mailbox instead.
+              </small>
+            </div>
+
+            <p id="accountEmailManaged" class="input-hint" style="display: none">
+              Security notices go to the address from your identity provider, which is refreshed on every sign in, so
+              there is nothing to set here.
+            </p>
+
+            <div class="input-group">
+              <label class="checkbox-label" for="notifyNewLocation">
+                <input type="checkbox" id="notifyNewLocation" />
+                <span>Email me about new sign-in locations</span>
+              </label>
+              <small class="input-hint">
+                Alerts you when this account is signed in to from a country it has not been seen from before. Turning
+                this off stops those alerts for your account.
+              </small>
+            </div>
+
+            <button type="submit" id="accountSaveBtn">Save Account Settings</button>
+          </form>
+
+          <div class="error" id="accountError"></div>
+          <div class="success" id="accountSuccess"></div>
         </div>
       </div>
     </div>
@@ -139,6 +179,7 @@
         }
 
         loadUrls();
+        loadAccount();
       }
 
       // Check if user is admin and show admin link
@@ -201,6 +242,15 @@
       const emptyState = document.getElementById("emptyState");
       const logoutBtn = document.getElementById("logoutBtn");
       const refreshBtn = document.getElementById("refreshBtn");
+      const accountForm = document.getElementById("accountForm");
+      const accountLoading = document.getElementById("accountLoading");
+      const accountEmailGroup = document.getElementById("accountEmailGroup");
+      const accountEmailManaged = document.getElementById("accountEmailManaged");
+      const accountEmailInput = document.getElementById("accountEmail");
+      const notifyNewLocationInput = document.getElementById("notifyNewLocation");
+      const accountSaveBtn = document.getElementById("accountSaveBtn");
+      const accountErrorDiv = document.getElementById("accountError");
+      const accountSuccessDiv = document.getElementById("accountSuccess");
 
       // Logout handler
       logoutBtn.addEventListener("click", () => {
@@ -610,6 +660,132 @@
           showError("Failed to update URL name: " + error.message);
         }
       };
+
+      // --- Account settings: security alert address (RUS-17) and new-location alert opt-out (RUS-18) ---
+
+      // The last state the server confirmed. Submissions are diffed against it,
+      // so an untouched field is never resent.
+      let storedAccount = { email: null, notify_new_location: true };
+
+      // Only standalone accounts own an address; in saas it comes from the OIDC
+      // identity and PATCH /api/me ignores the field.
+      function accountEmailEditable() {
+        return authMode === "standalone";
+      }
+
+      // Paint the controls from a server payload. A key the response omits
+      // (saas never returns `email`) leaves that control untouched.
+      function applyAccount(data) {
+        if ("email" in data) {
+          storedAccount.email = data.email || null;
+          accountEmailInput.value = storedAccount.email || "";
+        }
+        if ("notify_new_location" in data) {
+          storedAccount.notify_new_location = data.notify_new_location === true;
+          notifyNewLocationInput.checked = storedAccount.notify_new_location;
+        }
+      }
+
+      // Load the stored values, so the controls never show a guessed default.
+      async function loadAccount() {
+        const editable = accountEmailEditable();
+        accountEmailGroup.style.display = editable ? "block" : "none";
+        accountEmailManaged.style.display = editable ? "none" : "block";
+
+        try {
+          const response = await apiFetch("/api/me");
+          if (!response) return;
+
+          if (!response.ok) {
+            throw new Error("Failed to load account settings");
+          }
+
+          applyAccount(await response.json());
+          accountLoading.style.display = "none";
+          accountForm.style.display = "block";
+        } catch (error) {
+          accountLoading.textContent = "Could not load your account settings.";
+          showAccountError(error.message);
+        }
+      }
+
+      // Send only the fields the user changed. An absent key means "not
+      // submitted" server-side, which is what keeps a toggle-only save from
+      // touching the address and an address-only save from touching the toggle.
+      function accountChanges() {
+        const changes = {};
+        if (accountEmailEditable()) {
+          const typed = accountEmailInput.value.trim().toLowerCase();
+          if (typed !== (storedAccount.email || "")) {
+            changes.email = typed;
+          }
+        }
+        if (notifyNewLocationInput.checked !== storedAccount.notify_new_location) {
+          changes.notify_new_location = notifyNewLocationInput.checked;
+        }
+        return changes;
+      }
+
+      // novalidate: the API owns address validation, so its 400 message is what
+      // reaches the user inline instead of a browser bubble.
+      accountForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+
+        accountErrorDiv.classList.remove("show");
+        accountSuccessDiv.classList.remove("show");
+
+        const changes = accountChanges();
+        if (Object.keys(changes).length === 0) {
+          showAccountSuccess("No account changes to save.");
+          return;
+        }
+
+        accountSaveBtn.disabled = true;
+        accountSaveBtn.textContent = "Saving...";
+
+        try {
+          const response = await apiFetch("/api/me", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(changes),
+          });
+          if (!response) return;
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to save account settings");
+          }
+
+          // Repaint from the response, never from what was submitted.
+          applyAccount(data);
+          showAccountSuccess("Account settings saved.");
+        } catch (error) {
+          // The checkbox claims a stored state, so a failed write puts it back
+          // on the one the server still holds. The address input is an edit
+          // buffer, so what was typed stays there to be corrected.
+          notifyNewLocationInput.checked = storedAccount.notify_new_location;
+          showAccountError(error.message);
+        } finally {
+          accountSaveBtn.disabled = false;
+          accountSaveBtn.textContent = "Save Account Settings";
+        }
+      });
+
+      function showAccountError(message) {
+        accountSuccessDiv.classList.remove("show");
+        accountErrorDiv.textContent = message;
+        accountErrorDiv.classList.add("show");
+      }
+
+      function showAccountSuccess(message) {
+        accountErrorDiv.classList.remove("show");
+        accountSuccessDiv.textContent = message;
+        accountSuccessDiv.classList.add("show");
+        setTimeout(() => {
+          accountSuccessDiv.classList.remove("show");
+        }, 3000);
+      }
 
       // Refresh button
       refreshBtn.addEventListener("click", loadUrls);
