@@ -10,6 +10,7 @@ pub mod config;
 pub mod db;
 pub mod handlers;
 pub mod location_alert;
+pub mod login_approval;
 pub mod mailer;
 pub mod models;
 #[cfg(feature = "saas")]

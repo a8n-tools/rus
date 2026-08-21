@@ -106,6 +106,10 @@ pub struct MailConfig {
     pub security_alert_email: Option<String>,
     /// Global kill switch for the login-location alert.
     pub login_location_alerts_enabled: bool,
+    /// Global kill switch for the RUS-19 new-country approval gate. Opt-in,
+    /// unlike the alert above, because this one can hold a real user out of
+    /// their account.
+    pub login_approval_enabled: bool,
 }
 
 impl Default for MailConfig {
@@ -124,6 +128,9 @@ impl Default for MailConfig {
             // The feature is on by default; it degrades to log-only when mail
             // is unconfigured, so shipping it enabled is safe.
             login_location_alerts_enabled: true,
+            // Off unless a deployment asks for it: an alert that misfires is
+            // noise, a gate that misfires is a lockout.
+            login_approval_enabled: false,
         }
     }
 }
@@ -169,6 +176,11 @@ impl MailConfig {
                     .as_deref(),
                 Some("0") | Some("false") | Some("no")
             ),
+            // Exact match on "true", not the alert switch's family of falsy
+            // spellings: every other value, including a typo, leaves the gate
+            // off, which is the side that cannot lock anyone out.
+            login_approval_enabled: non_empty("LOGIN_APPROVAL_ENABLED")
+                .is_some_and(|v| v.eq_ignore_ascii_case("true")),
         }
     }
 }
@@ -349,6 +361,7 @@ impl Config {
             click_retention_days = self.click_retention_days,
             allow_registration = self.allow_registration,
             trusted_proxy_cidrs = self.trusted_proxy_cidrs.len(),
+            login_approval_enabled = self.mail.login_approval_enabled,
             "RUS configuration loaded"
         );
 
@@ -364,6 +377,7 @@ impl Config {
             trusted_proxy_cidrs = self.trusted_proxy_cidrs.len(),
             oidc_enabled = self.oidc.enabled(),
             oidc_issuer = %self.oidc.issuer,
+            login_approval_enabled = self.mail.login_approval_enabled,
             "RUS configuration loaded"
         );
     }

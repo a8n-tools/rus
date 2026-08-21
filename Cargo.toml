@@ -24,7 +24,6 @@ default = ["standalone"]
 standalone = ["dep:bcrypt", "dep:argon2", "dep:actix-web-httpauth"]
 saas = [
     "dep:hmac",
-    "dep:sha2",
     "dep:hex",
     "dep:uuid",
     "dep:reqwest",
@@ -53,7 +52,8 @@ url = "2.5"
 # Trusted-proxy CIDR matching for the forwarded IP / country gate (RUS-12).
 ipnetwork = "0.20"
 hmac = { version = "0.12", optional = true }
-sha2 = { version = "0.10", optional = true }
+# Approval-token hashing (RUS-19) runs in both legs, so this is not optional.
+sha2 = "0.10"
 hex = { version = "0.4", optional = true }
 uuid = { version = "1", features = ["v4", "serde"], optional = true }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }

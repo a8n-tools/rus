@@ -11,6 +11,7 @@ mod config;
 mod db;
 mod handlers;
 mod location_alert;
+mod login_approval;
 mod mailer;
 mod models;
 #[cfg(feature = "saas")]
@@ -126,6 +127,12 @@ async fn main() -> std::io::Result<()> {
             .route("/api/config", web::get().to(get_config))
             .route("/api/version", web::get().to(get_version))
             .route("/api/setup/required", web::get().to(check_setup_required))
+            // RUS-19: the approval page and its API, mounted here on purpose.
+            // Whoever follows the emailed link has no session yet, so these
+            // must sit above the guarded /api scope and above the short-code
+            // catch-all. AB-67 shipped this feature with the equivalent routes
+            // behind its auth middleware and the gate became a lockout.
+            .configure(login_approval::configure_routes)
             .service(
                 web::resource("/api/report-abuse")
                     .wrap(Governor::new(&moderate_rate_limit))
@@ -191,6 +198,9 @@ async fn main() -> std::io::Result<()> {
                         .wrap(Governor::new(&moderate_rate_limit))
                         .route(web::post().to(submit_abuse_report)),
                 )
+                // RUS-19: public by construction, above the session-guarded
+                // scope and the short-code catch-all. See the standalone leg.
+                .configure(login_approval::configure_routes)
                 // Protected /api routes (BFF session cookie)
                 .service(
                     web::scope("/api")

@@ -3,15 +3,19 @@
 
 use actix_web::{
     body::MessageBody,
+    cookie::{time::Duration as CookieDuration, Cookie, SameSite},
     dev::{Payload, ServiceRequest, ServiceResponse},
     error::ErrorUnauthorized,
     middleware::Next,
     web, FromRequest, HttpMessage, HttpRequest,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::Utc;
+use rand::RngCore;
 use rusqlite::{params, Connection, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::future::{ready, Ready};
+use uuid::Uuid;
 
 use crate::db::AppState;
 
@@ -29,6 +33,61 @@ pub struct AuthenticatedUser {
 
 pub fn hash_session_token(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
+}
+
+/// Insert a session row for `user_id` and return the raw cookie value.
+///
+/// The single place a saas session is established (RUS-19): the OIDC callback,
+/// the approval route and the dev seed all come through here, so the approval
+/// gate cannot be bypassed by a path that mints its own row. `session_version`
+/// is read from the account rather than passed in, so a session can never be
+/// created already stale.
+pub fn establish_session(
+    db: &Connection,
+    user_id: i64,
+    ttl_seconds: u64,
+    auth_via_oidc: bool,
+) -> rusqlite::Result<String> {
+    let mut buf = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut buf);
+    let session_token = URL_SAFE_NO_PAD.encode(buf);
+
+    let session_version: i32 = db.query_row(
+        "SELECT session_version FROM users WHERE userID = ?1",
+        params![user_id],
+        |row| row.get(0),
+    )?;
+
+    let now = Utc::now();
+    let expires_at = now + chrono::Duration::seconds(ttl_seconds as i64);
+    db.execute(
+        "INSERT INTO user_sessions (id, session_token_hash, user_id, session_version, auth_via_oidc, created_at, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            Uuid::new_v4().to_string(),
+            hash_session_token(&session_token),
+            user_id,
+            session_version,
+            auth_via_oidc as i32,
+            now.to_rfc3339(),
+            expires_at.to_rfc3339(),
+        ],
+    )?;
+
+    Ok(session_token)
+}
+
+/// The `rus_session` cookie carrying a raw session token. HttpOnly and
+/// SameSite=Lax so a cross-site request cannot ride it; `secure` follows the
+/// deployment scheme so a plain-http dev origin still receives it.
+pub fn build_session_cookie(token: &str, ttl_seconds: u64, secure: bool) -> Cookie<'static> {
+    Cookie::build(RUS_SESSION_COOKIE, token.to_string())
+        .path("/")
+        .http_only(true)
+        .secure(secure)
+        .same_site(SameSite::Lax)
+        .max_age(CookieDuration::seconds(ttl_seconds as i64))
+        .finish()
 }
 
 /// Resolve a raw session cookie value to `AuthenticatedUser`, applying expiry,

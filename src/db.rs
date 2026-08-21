@@ -186,6 +186,29 @@ impl AppState {
             ",
         )?;
 
+        // RUS-19: sign-ins held for approval. Ungated, beside the two per-leg
+        // `users` statements rather than inside either: both legs gate a
+        // sign-in, so both need the table and neither owns it.
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS pending_login_approvals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash BLOB NOT NULL UNIQUE,
+                country TEXT NOT NULL,
+                ip TEXT,
+                user_agent TEXT,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                consumed_at TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(userID) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_pending_login_approvals_expires
+                ON pending_login_approvals(expires_at);
+            ",
+        )?;
+
         // SaaS mode: best-effort migration to add SSO columns to a pre-existing
         // users table (silently ignore "duplicate column name" errors).
         #[cfg(feature = "saas")]
@@ -287,6 +310,64 @@ mod tests {
         assert!(tables.contains(&"urls".to_string()));
         assert!(tables.contains(&"click_history".to_string()));
         assert!(tables.contains(&"abuse_reports".to_string()));
+    }
+
+    // RUS-19: the approval gate holds sign-ins in both legs, so the table has
+    // to exist in whichever one is compiled.
+    #[test]
+    fn pending_login_approvals_table_exists_in_both_legs() {
+        let state = AppState::new(crate::testing::test_config()).unwrap();
+        let db = state.db.lock().unwrap();
+
+        let columns: Vec<String> = {
+            let mut stmt = db
+                .prepare("PRAGMA table_info(pending_login_approvals)")
+                .unwrap();
+            stmt.query_map([], |row| row.get(1))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        for expected in [
+            "user_id",
+            "token_hash",
+            "country",
+            "ip",
+            "user_agent",
+            "created_at",
+            "expires_at",
+            "consumed_at",
+        ] {
+            assert!(
+                columns.contains(&expected.to_string()),
+                "missing {expected}, got {columns:?}"
+            );
+        }
+    }
+
+    // The single-use claim leans on the unique index, so a duplicate hash must
+    // be rejected by the schema and not only by the guarded update.
+    #[test]
+    fn pending_login_approvals_token_hash_is_unique() {
+        let state = AppState::new(crate::testing::test_config()).unwrap();
+        let db = state.db.lock().unwrap();
+        db.execute(
+            "INSERT INTO users (username, password) VALUES ('gated', 'pass')",
+            [],
+        )
+        .unwrap();
+        let user_id = db.last_insert_rowid();
+
+        let insert = "INSERT INTO pending_login_approvals
+             (user_id, token_hash, country, ip, user_agent, created_at, expires_at)
+             VALUES (?1, ?2, 'DE', '203.0.113.9', NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:15:00Z')";
+        db.execute(insert, params![user_id, vec![7u8; 32]]).unwrap();
+        let err = db
+            .execute(insert, params![user_id, vec![7u8; 32]])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("UNIQUE constraint failed"), "got {err}");
     }
 
     #[cfg(feature = "standalone")]
