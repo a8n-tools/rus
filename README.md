@@ -252,7 +252,7 @@ rus/
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SECURITY_ALERT_EMAIL` | Operator mailbox for alerts; unset means log-only | unset |
+| `SECURITY_ALERT_EMAIL` | Fallback mailbox for an account with no address of its own; unset means log-only for those accounts | unset |
 | `LOGIN_LOCATION_ALERTS_ENABLED` | New-country sign-in alert kill switch (`false`/`0`/`no` disables) | `true` |
 | `SMTP_HOST` | SMTP relay hostname | unset |
 | `SMTP_FROM_EMAIL` | Sender address | unset |
@@ -262,7 +262,17 @@ rus/
 | `SMTP_TLS_MODE` | Connection encryption: `starttls`, `tls`, or `none` | `starttls` |
 | `SMTP_PORT` | Port override; each TLS mode has its own default | mode default |
 
-`SMTP_HOST`, `SMTP_FROM_EMAIL`, and `SECURITY_ALERT_EMAIL` must all be set before an alert is sent; otherwise it is logged instead.
+A new-sign-in-location alert is addressed to the account owner, in this order:
+
+1. The account's own address (`users.email`) when it has one. The message is a personal security notice.
+2. Otherwise `SECURITY_ALERT_EMAIL`, the shared operator mailbox. That message names which account signed in, since its reader is not the owner.
+3. Otherwise, or whenever SMTP is unconfigured, the would-be alert is written to the log and nothing is sent. A login is never failed or slowed by mail configuration.
+
+`SMTP_HOST` and `SMTP_FROM_EMAIL` must be set before anything can be sent at all. `SECURITY_ALERT_EMAIL` is only the fallback: an account with its own address is notified without one configured.
+
+In saas mode the address comes from the OP identity and is refreshed on every login, so there is nothing to set by hand. In standalone mode an account sets its own: optionally at registration (`POST /api/register` accepts an `email` field), and at any time afterwards with `PATCH /api/me` (`{"email": "you@example.com"}`). A blank value clears it back to unset. `GET /api/me` returns the current value. The address is stored trimmed and lowercased and is not verified, so it receives security mail as soon as it is set. The browser field that drives these endpoints from the dashboard is tracked in RUS-17.
+
+The per-account `notify_new_location` opt-out is checked before any of this, so an account that has opted out is never alerted whichever way the message would have been routed.
 
 The country comes from the `X-IPCountry` header injected by the reverse proxy's geoblock middleware, and is read only when the socket peer is listed in `TRUSTED_PROXY_CIDRS`. With no trusted proxy configured, or with a client connecting directly, no country resolves and no alert fires.
 

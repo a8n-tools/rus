@@ -86,10 +86,11 @@ fn parse_trusted_proxy_cidrs(raw: &str) -> Vec<IpNetwork> {
 
 /// Outbound mail and login-location alerting (RUS-7).
 ///
-/// Users here have no address of their own, so alerts go to one operator
-/// mailbox, `SECURITY_ALERT_EMAIL`. Delivery is gated on `deliverable()`: with
-/// no SMTP host, sender, or operator address the alert is logged instead of
-/// sent, so a login never depends on mail being configured.
+/// RUS-11: an alert is addressed to the account's own `users.email` when it has
+/// one, and falls back to the operator mailbox `SECURITY_ALERT_EMAIL` when it
+/// does not. Sending is gated on `smtp_ready()`: with no SMTP host or sender,
+/// or with no recipient resolvable at all, the alert is logged instead of sent,
+/// so a login never depends on mail being configured.
 #[derive(Clone, Debug)]
 pub struct MailConfig {
     pub smtp_host: Option<String>,
@@ -100,7 +101,8 @@ pub struct MailConfig {
     pub smtp_from_name: Option<String>,
     /// How the SMTP connection is encrypted (RUS-16).
     pub smtp_tls_mode: SmtpTlsMode,
-    /// Operator mailbox that receives new-sign-in-location alerts.
+    /// Operator mailbox that receives a new-sign-in-location alert for an
+    /// account with no address of its own (RUS-11 fallback).
     pub security_alert_email: Option<String>,
     /// Global kill switch for the login-location alert.
     pub login_location_alerts_enabled: bool,
@@ -127,11 +129,11 @@ impl Default for MailConfig {
 }
 
 impl MailConfig {
-    /// Whether an alert can actually be delivered. False means log-only mode.
-    pub fn deliverable(&self) -> bool {
-        self.smtp_host.is_some()
-            && self.smtp_from_email.is_some()
-            && self.security_alert_email.is_some()
+    /// Whether a message can be put on the wire at all. False means log-only
+    /// mode. The recipient is resolved separately (RUS-11), because an account
+    /// with its own address needs no operator mailbox configured.
+    pub fn smtp_ready(&self) -> bool {
+        self.smtp_host.is_some() && self.smtp_from_email.is_some()
     }
 
     pub fn from_env() -> Self {

@@ -29,14 +29,23 @@ pub struct UrlEntry {
 pub struct RegisterRequest {
     pub username: String,
     pub password: String,
+    /// Optional address for security notices (RUS-11). Absent or blank leaves
+    /// the account without one, so an existing signup flow keeps working.
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
-/// Account settings update (RUS-15). Shared by both feature legs; each leg's
-/// `PATCH /api/me` applies the fields it owns.
+/// Account settings update. Shared by both feature legs; each leg's
+/// `PATCH /api/me` applies the fields it owns, so saas ignores `email`
+/// (its address comes from the OIDC identity).
 #[derive(Serialize, Deserialize)]
 pub struct UpdateAccountRequest {
-    /// Absent means "not submitted", so the stored value stands; an explicit
-    /// `false` persists. A non-boolean is rejected rather than coerced.
+    /// Address security notices go to (RUS-11); blank clears it back to NULL.
+    #[serde(default)]
+    pub email: Option<String>,
+    /// Whether new-location alerts stay on (RUS-15). Absent means "not
+    /// submitted", so the stored value stands; an explicit `false` persists.
+    /// A non-boolean is rejected rather than coerced.
     #[serde(default)]
     pub notify_new_location: Option<bool>,
 }
@@ -168,6 +177,9 @@ pub struct CurrentUserResponse {
     pub user_id: i64,
     pub username: String,
     pub is_admin: bool,
+    /// Address security notices go to, or null when the account has none
+    /// (RUS-11).
+    pub email: Option<String>,
     /// Whether sign-ins to this account raise a new-location alert (RUS-15).
     pub notify_new_location: bool,
 }

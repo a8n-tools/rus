@@ -131,18 +131,22 @@ RUST_LOG=info,rus=debug     # Log level filter (default: info,rus=debug)
 
 ### Security alerts (both modes)
 ```
-SECURITY_ALERT_EMAIL=          # Operator mailbox for alerts; unset means log-only
+SECURITY_ALERT_EMAIL=          # Fallback mailbox for an account with no address
 LOGIN_LOCATION_ALERTS_ENABLED=true  # Kill switch (default: true; false/0/no disables)
-SMTP_HOST=                     # All three of SMTP_HOST, SMTP_FROM_EMAIL, and
-SMTP_FROM_EMAIL=               # SECURITY_ALERT_EMAIL are required before an alert
-SMTP_USERNAME=                 # is sent; otherwise it is logged instead
+SMTP_HOST=                     # SMTP_HOST and SMTP_FROM_EMAIL are required before
+SMTP_FROM_EMAIL=               # anything can be sent; otherwise it is logged instead
+SMTP_USERNAME=
 SMTP_PASSWORD=
 SMTP_FROM_NAME=
 SMTP_TLS_MODE=starttls         # starttls (default, encrypted) | tls | none
 SMTP_PORT=                     # Override; starttls 587, tls 465, none 25
 ```
 
-Accounts have no email address of their own, so the new-sign-in-location alert goes to the single operator mailbox and names the account involved. The country comes from the `X-IPCountry` header injected by the reverse proxy's geoblock middleware, not an in-process geoip database, so with no such edge no country resolves and no alert fires.
+The new-sign-in-location alert is routed to the account owner (RUS-11), in this precedence: the account's own `users.email` when set (a personal security notice), else `SECURITY_ALERT_EMAIL` (which still names which account signed in, since its reader is not the owner), else the would-be alert is logged and nothing is sent. An unconfigured SMTP transport also falls to the log-only case, so a login is never failed by mail configuration. The per-account `notify_new_location` opt-out is evaluated first and suppresses the alert on every route. The resolution lives in `mailer::resolve_recipient`, and the decision (opt-out, then recipient) in `location_alert::alert_route`.
+
+`users.email` is nullable in both schemas: saas ships it and populates it from the OP identity on every login (`src/oidc/jit.rs`), standalone gets it from an idempotent `ALTER TABLE` in `src/db.rs` and the account sets its own via `POST /api/register` (optional `email` field) or `PATCH /api/me`. Blank stores NULL rather than an empty string, and a stored value is re-validated on read, because SSO writes `""` when the OP omits the claim.
+
+The country comes from the `X-IPCountry` header injected by the reverse proxy's geoblock middleware, not an in-process geoip database, so with no such edge no country resolves and no alert fires.
 
 ### Trusted proxies (both modes)
 

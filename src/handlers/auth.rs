@@ -10,6 +10,7 @@ use tracing::{debug, error, info, warn};
 use crate::auth::get_claims;
 use crate::auth::jwt::{create_jwt, generate_refresh_token};
 use crate::db::AppState;
+use crate::mailer::normalize_account_email;
 use crate::models::{
     AuthResponse, CurrentUserResponse, LoginRequest, RefreshRequest, RefreshResponse,
     RegisterRequest, UpdateAccountRequest,
@@ -53,6 +54,16 @@ pub async fn register(
         })));
     }
 
+    // RUS-11: optional address for security notices; blank stores NULL.
+    let email = match normalize_account_email(req.email.as_deref().unwrap_or_default()) {
+        Ok(value) => value,
+        Err(error_message) => {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": error_message
+            })));
+        }
+    };
+
     // Hash password before acquiring the lock (expensive operation)
     let hashed_password = match hash_password(&req.password) {
         Ok(h) => h,
@@ -81,8 +92,13 @@ pub async fn register(
     let is_admin = user_count == 0;
 
     match db.execute(
-        "INSERT INTO users (username, password, is_admin) VALUES (?1, ?2, ?3)",
-        params![&req.username, &hashed_password, is_admin as i32],
+        "INSERT INTO users (username, password, is_admin, email) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            &req.username,
+            &hashed_password,
+            is_admin as i32,
+            email.as_deref()
+        ],
     ) {
         Ok(_) => {
             // Get the user ID
@@ -371,25 +387,37 @@ pub async fn get_current_user(
         }
     };
 
-    // RUS-15: the account needs to see whether its new-location alerts are on.
-    let notify_new_location = {
+    // The account needs to see the address its security notices go to (RUS-11)
+    // and whether its new-location alerts are on (RUS-15). One lock, both reads.
+    let (email, notify_new_location) = {
         let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
-        crate::location_alert::get_notify_new_location(&db, claims.user_id)
+        let email: Option<String> = db
+            .query_row(
+                "SELECT email FROM users WHERE userID = ?1",
+                params![claims.user_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(None);
+        let notify = crate::location_alert::get_notify_new_location(&db, claims.user_id)
             .ok()
             .flatten()
-            .unwrap_or(true)
+            .unwrap_or(true);
+        (email, notify)
     };
 
     Ok(HttpResponse::Ok().json(CurrentUserResponse {
         user_id: claims.user_id,
         username: claims.sub,
         is_admin: claims.is_admin,
+        email,
         notify_new_location,
     }))
 }
 
-/// Account settings endpoint: turn this account's new-location sign-in alerts
-/// on or off (RUS-15). The account is the session's, never an id from the body.
+/// Account settings endpoint: set or clear the address security notices go to
+/// (RUS-11, blank clears it back to NULL), and turn this account's
+/// new-location sign-in alerts on or off (RUS-15). The account is always the
+/// session's, never an id taken from the body.
 pub async fn update_current_user(
     data: web::Data<AppState>,
     req: web::Json<UpdateAccountRequest>,
@@ -404,10 +432,49 @@ pub async fn update_current_user(
         }
     };
 
+    // Both fields are optional and independent: an absent key means "not
+    // submitted" and leaves the stored value alone, so a request that only
+    // toggles the alert flag can never clear the account's address.
+    let email_update = match req.email.as_deref() {
+        Some(raw) => match normalize_account_email(raw) {
+            Ok(value) => Some(value),
+            Err(error_message) => {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": error_message
+                })));
+            }
+        },
+        None => None,
+    };
+
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
-    // An absent key is "not submitted", so the stored value stands; an explicit
-    // false is a real opt-out and persists.
+    if let Some(email) = &email_update {
+        match db.execute(
+            "UPDATE users SET email = ?1 WHERE userID = ?2",
+            params![email.as_deref(), claims.user_id],
+        ) {
+            Ok(rows_affected) if rows_affected > 0 => {
+                info!(
+                    user_id = claims.user_id,
+                    has_email = email.is_some(),
+                    "Account email updated"
+                );
+            }
+            Ok(_) => {
+                return Ok(HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "User not found"
+                })));
+            }
+            Err(e) => {
+                error!(user_id = claims.user_id, error = %e, "Failed to update account email");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to update account"
+                })));
+            }
+        }
+    }
+
     if let Some(enabled) = req.notify_new_location {
         if let Err(e) = crate::location_alert::set_notify_new_location(&db, claims.user_id, enabled)
         {
@@ -423,9 +490,18 @@ pub async fn update_current_user(
         );
     }
 
+    let stored_email: Option<String> = db
+        .query_row(
+            "SELECT email FROM users WHERE userID = ?1",
+            params![claims.user_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(None);
+
     match crate::location_alert::get_notify_new_location(&db, claims.user_id) {
         Ok(Some(notify_new_location)) => Ok(HttpResponse::Ok().json(serde_json::json!({
             "message": "Account updated successfully",
+            "email": stored_email,
             "notify_new_location": notify_new_location,
         }))),
         Ok(None) => Ok(HttpResponse::NotFound().json(serde_json::json!({
@@ -781,6 +857,165 @@ mod tests {
         assert_eq!(me["username"], "alice");
     }
 
+    // --- account email (RUS-11) ---
+
+    /// The account's stored address, straight from the column the alert reads.
+    fn stored_email(state: &actix_web::web::Data<AppState>, username: &str) -> Option<String> {
+        let db = state.db.lock().unwrap();
+        db.query_row(
+            "SELECT email FROM users WHERE username = ?1",
+            params![username],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    /// PATCH /api/me with the given JSON body.
+    async fn patch_me(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        token: &str,
+        body: Value,
+    ) -> actix_web::dev::ServiceResponse {
+        let req = test::TestRequest::patch()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .set_json(body)
+            .to_request();
+        test::call_service(app, req).await
+    }
+
+    // An existing signup flow that sends no email still works, and leaves the
+    // account with no address.
+    #[actix_web::test]
+    async fn register_without_email_stores_null() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+        assert_eq!(stored_email(&state, "alice"), None);
+    }
+
+    // An address given at registration is normalized on the way in.
+    #[actix_web::test]
+    async fn register_with_email_stores_it_normalized() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({
+                "username": "alice",
+                "password": TEST_PASSWORD,
+                "email": "  Alice@Example.COM "
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 201);
+        assert_eq!(
+            stored_email(&state, "alice"),
+            Some("alice@example.com".to_string())
+        );
+    }
+
+    #[actix_web::test]
+    async fn register_with_malformed_email_returns_400() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({
+                "username": "alice",
+                "password": TEST_PASSWORD,
+                "email": "not-an-address"
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    // The account can set its address after the fact, and read it back.
+    #[actix_web::test]
+    async fn patch_me_sets_the_account_email() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+
+        let resp = patch_me(
+            &app,
+            token,
+            serde_json::json!({"email": "Alice@Example.com"}),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(
+            stored_email(&state, "alice"),
+            Some("alice@example.com".to_string())
+        );
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let me: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(me["email"], "alice@example.com");
+    }
+
+    // Clearing it stores NULL, not an empty string, so the alert falls back to
+    // the operator mailbox rather than trying to mail "".
+    #[actix_web::test]
+    async fn patch_me_with_blank_email_stores_null() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+
+        patch_me(
+            &app,
+            token,
+            serde_json::json!({"email": "alice@example.com"}),
+        )
+        .await;
+        let resp = patch_me(&app, token, serde_json::json!({"email": "   "})).await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(stored_email(&state, "alice"), None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let me: Value = test::call_and_read_body_json(&app, req).await;
+        assert!(me["email"].is_null());
+    }
+
+    #[actix_web::test]
+    async fn patch_me_with_malformed_email_returns_400() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+
+        for bad in ["alice", "@example.com", "alice@"] {
+            let resp = patch_me(&app, token, serde_json::json!({"email": bad})).await;
+            assert_eq!(resp.status(), 400, "expected {bad:?} to be rejected");
+        }
+        assert_eq!(stored_email(&state, "alice"), None, "nothing was stored");
+    }
+
+    #[actix_web::test]
+    async fn patch_me_without_token_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::patch()
+            .uri("/api/me")
+            .set_json(serde_json::json!({"email": "alice@example.com"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
+    }
+
     #[actix_web::test]
     async fn get_me_without_token_returns_401() {
         let state = make_test_state();
@@ -888,23 +1123,6 @@ mod tests {
     }
 
     /// PATCH /api/me with the given JSON body.
-    async fn patch_me(
-        app: &impl actix_web::dev::Service<
-            actix_http::Request,
-            Response = actix_web::dev::ServiceResponse,
-            Error = actix_web::Error,
-        >,
-        token: &str,
-        body: Value,
-    ) -> actix_web::dev::ServiceResponse {
-        let req = test::TestRequest::patch()
-            .uri("/api/me")
-            .insert_header(("Authorization", format!("Bearer {token}")))
-            .set_json(body)
-            .to_request();
-        test::call_service(app, req).await
-    }
-
     #[actix_web::test]
     async fn get_me_reports_the_stored_preference() {
         let state = make_test_state();
@@ -1049,17 +1267,5 @@ mod tests {
         assert_eq!(resp.status(), 200);
         assert!(!stored_notify(&state, "alice"), "alice opted out");
         assert!(stored_notify(&state, "bob"), "bob is untouched");
-    }
-
-    #[actix_web::test]
-    async fn patch_me_without_token_returns_401() {
-        let state = make_test_state();
-        let app = setup_app!(state);
-        let req = test::TestRequest::patch()
-            .uri("/api/me")
-            .set_json(serde_json::json!({"notify_new_location": false}))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-        assert_eq!(resp.status(), 401);
     }
 }

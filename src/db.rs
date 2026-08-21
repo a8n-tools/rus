@@ -211,6 +211,20 @@ impl AppState {
             )?;
         }
 
+        // RUS-11: best-effort migration for the account's own email address.
+        // Standalone only: the saas schema already carries `email`, populated
+        // from the OP identity, and must reuse that column rather than add one.
+        #[cfg(feature = "standalone")]
+        {
+            let stmt = "ALTER TABLE users ADD COLUMN email TEXT";
+            if let Err(e) = conn.execute(stmt, []) {
+                let msg = e.to_string();
+                if !msg.contains("duplicate column name") {
+                    tracing::debug!(stmt = %stmt, error = %msg, "account email column migration skipped");
+                }
+            }
+        }
+
         // RUS-7: best-effort migration for the login-location alert columns.
         // Ungated: both the standalone and saas schemas own a users table.
         for stmt in [
@@ -294,6 +308,38 @@ mod tests {
 
         assert!(tables.contains(&"refresh_tokens".to_string()));
         assert!(tables.contains(&"login_attempts".to_string()));
+    }
+
+    // RUS-11: the alert recipient is read from users.email in both schemas, so
+    // the column has to exist in whichever leg is compiled.
+    #[test]
+    fn users_table_has_an_email_column() {
+        let state = AppState::new(crate::testing::test_config()).unwrap();
+        let db = state.db.lock().unwrap();
+
+        let columns: Vec<String> = {
+            let mut stmt = db.prepare("PRAGMA table_info(users)").unwrap();
+            stmt.query_map([], |row| row.get(1))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        assert!(columns.contains(&"email".to_string()), "got {columns:?}");
+    }
+
+    // The migration re-runs on every boot, so a second open must not fail on
+    // the duplicate column.
+    #[test]
+    fn email_column_migration_is_idempotent() {
+        let state = AppState::new(crate::testing::test_config()).unwrap();
+        let db = state.db.lock().unwrap();
+        // Re-running the ALTER is exactly what a second boot does.
+        let err = db
+            .execute("ALTER TABLE users ADD COLUMN email TEXT", [])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("duplicate column name"), "got {err}");
     }
 
     #[test]
