@@ -13,8 +13,13 @@
 //! unset header) the country is `None` and no alert ever fires, so a forged
 //! header can neither raise a false alarm nor suppress a real one.
 //!
-//! Accounts here have no email address of their own, so the alert goes to one
-//! operator mailbox (`SECURITY_ALERT_EMAIL`) and names the account involved.
+//! RUS-11 routes the notice to the account owner: it goes to the account's own
+//! `users.email` when set (populated from the OP identity in saas mode, from
+//! the account itself in standalone), falls back to the shared operator mailbox
+//! `SECURITY_ALERT_EMAIL` when the account has no address, and is logged rather
+//! than sent when neither exists or SMTP is unconfigured. The per-account
+//! `notify_new_location` opt-out is evaluated before any of that, so it
+//! suppresses the alert on every route.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -26,7 +31,9 @@ use actix_web::{web, HttpRequest};
 use ipnetwork::IpNetwork;
 use rusqlite::{params, Connection};
 
+use crate::config::MailConfig;
 use crate::db::AppState;
+use crate::mailer::AlertRecipient;
 
 /// Best-effort cap of one alert per account per country per day. The durable
 /// dedup is `last_login_country`; this only blunts a burst within one process.
@@ -176,20 +183,36 @@ fn allow_alert(user_id: i64, country: &str) -> bool {
     true
 }
 
-/// Read the account name, last-known country, and opt-out flag for a user.
+/// The per-account inputs the alert decision needs.
+#[derive(Clone, Debug)]
+struct AccountAlertInfo {
+    username: String,
+    /// The account's own address, or `None` when it has never set one.
+    email: Option<String>,
+    last_country: Option<String>,
+    notify_new_location: bool,
+}
+
+/// Read the account name, its own address, last-known country, and opt-out flag.
+///
+/// The `email` column exists in both schemas (saas ships it; RUS-11 migrates it
+/// into standalone), so this one query serves both feature legs.
 fn get_login_location(
     conn: &Connection,
     user_id: i64,
-) -> rusqlite::Result<Option<(String, Option<String>, bool)>> {
+) -> rusqlite::Result<Option<AccountAlertInfo>> {
     let row = conn
         .query_row(
-            "SELECT username, last_login_country, notify_new_location FROM users WHERE userID = ?1",
+            "SELECT username, email, last_login_country, notify_new_location
+             FROM users WHERE userID = ?1",
             params![user_id],
             |row| {
-                let username: String = row.get(0)?;
-                let country: Option<String> = row.get(1)?;
-                let notify: i64 = row.get(2)?;
-                Ok((username, country, notify != 0))
+                Ok(AccountAlertInfo {
+                    username: row.get(0)?,
+                    email: row.get(1)?,
+                    last_country: row.get(2)?,
+                    notify_new_location: row.get::<_, i64>(3)? != 0,
+                })
             },
         )
         .map(Some);
@@ -198,6 +221,35 @@ fn get_login_location(
         Ok(found) => Ok(found),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e),
+    }
+}
+
+/// What one login's alert evaluation decided.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AlertRoute {
+    /// No alert at all: no country change, or the account opted out.
+    Silent,
+    /// Alert, addressed to this recipient.
+    Notify(AlertRecipient),
+    /// Alert-worthy, but there is nothing to deliver it with: log only.
+    LogOnly,
+}
+
+/// Decide whether this login alerts and, if so, who hears about it.
+///
+/// The opt-out is checked first, so it suppresses the alert whichever way it
+/// would otherwise have been routed.
+fn alert_route(mail: &MailConfig, info: &AccountAlertInfo, current: Option<&str>) -> AlertRoute {
+    if !should_alert(
+        info.notify_new_location,
+        info.last_country.as_deref(),
+        current,
+    ) {
+        return AlertRoute::Silent;
+    }
+    match crate::mailer::resolve_recipient(mail, info.email.as_deref()) {
+        Some(recipient) if mail.smtp_ready() => AlertRoute::Notify(recipient),
+        _ => AlertRoute::LogOnly,
     }
 }
 
@@ -264,27 +316,41 @@ async fn maybe_notify_new_location(
         get_login_location(&db, user_id).map_err(|e| e.to_string())?
     };
 
-    let Some((username, previous, notify_new_location)) = found else {
+    let Some(info) = found else {
         return Ok(());
     };
 
-    if should_alert(notify_new_location, previous.as_deref(), Some(country))
-        && allow_alert(user_id, country)
-    {
+    let route = alert_route(&state.config.mail, &info, Some(country));
+    // The dedup cap is consumed only once an alert is warranted, so an opted-out
+    // or unchanged login never burns the account's daily slot.
+    if route != AlertRoute::Silent && allow_alert(user_id, country) {
         tracing::warn!(
             user_id,
-            username = %username,
+            username = %info.username,
             country = %country,
             "RUS-7: new sign-in from a previously unseen country"
         );
-        crate::mailer::send_new_signin_location_alert(
-            &state.config.mail,
-            &username,
-            country,
-            ip,
-            device,
-        )
-        .await?;
+        match route {
+            AlertRoute::Notify(recipient) => {
+                crate::mailer::send_new_signin_location_alert(
+                    &state.config.mail,
+                    &recipient,
+                    &info.username,
+                    country,
+                    ip,
+                    device,
+                )
+                .await?;
+            }
+            // No recipient or no SMTP: the notice still has to leave a trace.
+            // Silent is excluded by the guard above; logging it beats panicking
+            // in a task whose whole point is never to break a login.
+            _ => {
+                let (subject, body) =
+                    crate::mailer::undeliverable_alert_text(&info.username, country, ip, device);
+                crate::mailer::log_undelivered_alert(&info.username, &subject, &body);
+            }
+        }
     }
 
     {
@@ -574,14 +640,18 @@ mod tests {
         let db = state.db.lock().unwrap();
         let user_id = insert_user(&db, "alice");
 
-        let (username, previous, notify) = get_login_location(&db, user_id).unwrap().unwrap();
-        assert_eq!(username, "alice");
-        assert_eq!(previous, None, "a new account has no prior country");
-        assert!(notify, "alerts default to on");
+        let info = get_login_location(&db, user_id).unwrap().unwrap();
+        assert_eq!(info.username, "alice");
+        assert_eq!(
+            info.last_country, None,
+            "a new account has no prior country"
+        );
+        assert_eq!(info.email, None, "a new account has no address");
+        assert!(info.notify_new_location, "alerts default to on");
 
         update_last_login_country(&db, user_id, "DE").unwrap();
-        let (_, previous, _) = get_login_location(&db, user_id).unwrap().unwrap();
-        assert_eq!(previous, Some("DE".to_string()));
+        let info = get_login_location(&db, user_id).unwrap().unwrap();
+        assert_eq!(info.last_country, Some("DE".to_string()));
     }
 
     // A missing account resolves to None rather than erroring the task.
@@ -590,5 +660,200 @@ mod tests {
         let state = crate::testing::make_test_state();
         let db = state.db.lock().unwrap();
         assert!(get_login_location(&db, 987_654).unwrap().is_none());
+    }
+
+    // RUS-11: the account's address is read from the users table in both
+    // schemas, so the alert can be addressed to its owner.
+    #[test]
+    fn account_email_is_read_from_the_database() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+        let user_id = insert_user(&db, "alice");
+        db.execute(
+            "UPDATE users SET email = 'alice@example.com' WHERE userID = ?1",
+            params![user_id],
+        )
+        .unwrap();
+
+        let info = get_login_location(&db, user_id).unwrap().unwrap();
+        assert_eq!(info.email, Some("alice@example.com".to_string()));
+    }
+
+    fn mail_with(operator: Option<&str>, smtp: bool) -> MailConfig {
+        MailConfig {
+            smtp_host: smtp.then(|| "smtp.example.com".to_string()),
+            smtp_from_email: smtp.then(|| "alerts@example.com".to_string()),
+            security_alert_email: operator.map(String::from),
+            ..MailConfig::default()
+        }
+    }
+
+    fn account(email: Option<&str>, notify: bool) -> AccountAlertInfo {
+        AccountAlertInfo {
+            username: "alice".to_string(),
+            email: email.map(String::from),
+            last_country: Some("US".to_string()),
+            notify_new_location: notify,
+        }
+    }
+
+    // RUS-11 precedence, first rule: an account with an address hears about its
+    // own sign-in, even when an operator mailbox is also configured.
+    #[test]
+    fn route_prefers_the_account_owner() {
+        assert_eq!(
+            alert_route(
+                &mail_with(Some("operator@example.com"), true),
+                &account(Some("alice@example.com"), true),
+                Some("DE"),
+            ),
+            AlertRoute::Notify(AlertRecipient::Owner("alice@example.com".into()))
+        );
+    }
+
+    // Second rule: no address on the account falls back to the operator mailbox.
+    #[test]
+    fn route_falls_back_to_the_operator_mailbox() {
+        for stored in [None, Some(""), Some("   ")] {
+            assert_eq!(
+                alert_route(
+                    &mail_with(Some("operator@example.com"), true),
+                    &account(stored, true),
+                    Some("DE"),
+                ),
+                AlertRoute::Notify(AlertRecipient::Operator("operator@example.com".into())),
+                "expected {stored:?} to fall back"
+            );
+        }
+    }
+
+    // Third rule: neither address configured, or no SMTP to send with, logs the
+    // would-be alert instead of sending or erroring.
+    #[test]
+    fn route_logs_when_there_is_no_way_to_deliver() {
+        assert_eq!(
+            alert_route(&mail_with(None, true), &account(None, true), Some("DE")),
+            AlertRoute::LogOnly,
+            "no recipient anywhere"
+        );
+        assert_eq!(
+            alert_route(
+                &mail_with(Some("operator@example.com"), false),
+                &account(Some("alice@example.com"), true),
+                Some("DE"),
+            ),
+            AlertRoute::LogOnly,
+            "an address but no SMTP transport"
+        );
+    }
+
+    // The opt-out wins over every routing case, including the ones that would
+    // otherwise have reached the account owner.
+    #[test]
+    fn opt_out_suppresses_every_route() {
+        let cases = [
+            (
+                mail_with(Some("operator@example.com"), true),
+                Some("alice@example.com"),
+            ),
+            (mail_with(Some("operator@example.com"), true), None),
+            (mail_with(None, true), None),
+            (mail_with(None, false), Some("alice@example.com")),
+        ];
+        for (mail, email) in cases {
+            assert_eq!(
+                alert_route(&mail, &account(email, false), Some("DE")),
+                AlertRoute::Silent,
+                "opt-out must suppress with operator={:?} account={email:?}",
+                mail.security_alert_email
+            );
+        }
+    }
+
+    // A login that is not a country change stays silent whatever is configured.
+    #[test]
+    fn route_is_silent_without_a_country_change() {
+        let mail = mail_with(Some("operator@example.com"), true);
+        assert_eq!(
+            alert_route(&mail, &account(Some("alice@example.com"), true), Some("US")),
+            AlertRoute::Silent,
+            "same country"
+        );
+        assert_eq!(
+            alert_route(&mail, &account(Some("alice@example.com"), true), None),
+            AlertRoute::Silent,
+            "unresolved country"
+        );
+    }
+
+    // End to end through the database: a completely unconfigured deployment
+    // must not error a login, whichever route the alert would have taken.
+    #[actix_web::test]
+    async fn unconfigured_alert_never_errors_a_login() {
+        let state = crate::testing::make_test_state();
+        let user_id = {
+            let db = state.db.lock().unwrap();
+            let user_id = insert_user(&db, "route_e2e_user");
+            db.execute(
+                "UPDATE users SET last_login_country = 'US' WHERE userID = ?1",
+                params![user_id],
+            )
+            .unwrap();
+            user_id
+        };
+
+        let result =
+            maybe_notify_new_location(&state, user_id, "DE", "203.0.113.7", Some("Firefox")).await;
+        assert!(
+            result.is_ok(),
+            "a missing mail config must not fail a login"
+        );
+
+        let db = state.db.lock().unwrap();
+        let info = get_login_location(&db, user_id).unwrap().unwrap();
+        assert_eq!(
+            info.last_country,
+            Some("DE".to_string()),
+            "the new country is recorded even when the alert is only logged"
+        );
+    }
+
+    // RUS-11: in saas mode the address the OP put on the account is the one the
+    // alert is addressed to, with no separate column and nothing to set by hand.
+    #[cfg(feature = "saas")]
+    #[actix_web::test]
+    async fn saas_alert_uses_the_oidc_populated_address() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+
+        let claims = crate::testing::id_claims(
+            "33333333-3333-3333-3333-333333333333",
+            Some("sso-user@example.com"),
+            true,
+            true,
+            None,
+        );
+        let provisioned = crate::oidc::jit::load_or_provision(&db, &claims).unwrap();
+
+        let info = get_login_location(&db, provisioned.user_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            info.email,
+            Some("sso-user@example.com".to_string()),
+            "the JIT provision stores the OP's address"
+        );
+        assert_eq!(
+            alert_route(
+                &mail_with(Some("operator@example.com"), true),
+                &AccountAlertInfo {
+                    last_country: Some("US".to_string()),
+                    ..info
+                },
+                Some("DE"),
+            ),
+            AlertRoute::Notify(AlertRecipient::Owner("sso-user@example.com".into())),
+            "the OIDC address wins over the operator mailbox"
+        );
     }
 }

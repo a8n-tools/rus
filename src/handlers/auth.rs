@@ -10,9 +10,10 @@ use tracing::{debug, error, info, warn};
 use crate::auth::get_claims;
 use crate::auth::jwt::{create_jwt, generate_refresh_token};
 use crate::db::AppState;
+use crate::mailer::normalize_account_email;
 use crate::models::{
     AuthResponse, CurrentUserResponse, LoginRequest, RefreshRequest, RefreshResponse,
-    RegisterRequest,
+    RegisterRequest, UpdateAccountRequest,
 };
 use crate::security::{is_account_locked, record_login_attempt, validate_password};
 
@@ -53,6 +54,16 @@ pub async fn register(
         })));
     }
 
+    // RUS-11: optional address for security notices; blank stores NULL.
+    let email = match normalize_account_email(req.email.as_deref().unwrap_or_default()) {
+        Ok(value) => value,
+        Err(error_message) => {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": error_message
+            })));
+        }
+    };
+
     // Hash password before acquiring the lock (expensive operation)
     let hashed_password = match hash_password(&req.password) {
         Ok(h) => h,
@@ -81,8 +92,13 @@ pub async fn register(
     let is_admin = user_count == 0;
 
     match db.execute(
-        "INSERT INTO users (username, password, is_admin) VALUES (?1, ?2, ?3)",
-        params![&req.username, &hashed_password, is_admin as i32],
+        "INSERT INTO users (username, password, is_admin, email) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            &req.username,
+            &hashed_password,
+            is_admin as i32,
+            email.as_deref()
+        ],
     ) {
         Ok(_) => {
             // Get the user ID
@@ -358,7 +374,10 @@ fn verify_password(password: &str, hash: &str) -> Result<bool, String> {
 }
 
 /// Get current user info
-pub async fn get_current_user(http_req: HttpRequest) -> Result<HttpResponse> {
+pub async fn get_current_user(
+    data: web::Data<AppState>,
+    http_req: HttpRequest,
+) -> Result<HttpResponse> {
     let claims = match get_claims(&http_req) {
         Some(c) => c,
         None => {
@@ -368,11 +387,76 @@ pub async fn get_current_user(http_req: HttpRequest) -> Result<HttpResponse> {
         }
     };
 
+    // RUS-11: the account needs to see the address its security notices go to.
+    let email: Option<String> = {
+        let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
+        db.query_row(
+            "SELECT email FROM users WHERE userID = ?1",
+            params![claims.user_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(None)
+    };
+
     Ok(HttpResponse::Ok().json(CurrentUserResponse {
         user_id: claims.user_id,
         username: claims.sub,
         is_admin: claims.is_admin,
+        email,
     }))
+}
+
+/// Account settings endpoint: set or clear the address security notices go to
+/// (RUS-11). Sending a blank value clears it back to NULL.
+pub async fn update_current_user(
+    data: web::Data<AppState>,
+    req: web::Json<UpdateAccountRequest>,
+    http_req: HttpRequest,
+) -> Result<HttpResponse> {
+    let claims = match get_claims(&http_req) {
+        Some(c) => c,
+        None => {
+            return Ok(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Unauthorized"
+            })));
+        }
+    };
+
+    let email = match normalize_account_email(req.email.as_deref().unwrap_or_default()) {
+        Ok(value) => value,
+        Err(error_message) => {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "error": error_message
+            })));
+        }
+    };
+
+    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
+    match db.execute(
+        "UPDATE users SET email = ?1 WHERE userID = ?2",
+        params![email.as_deref(), claims.user_id],
+    ) {
+        Ok(rows_affected) if rows_affected > 0 => {
+            info!(
+                user_id = claims.user_id,
+                has_email = email.is_some(),
+                "Account email updated"
+            );
+            Ok(HttpResponse::Ok().json(serde_json::json!({
+                "message": "Account updated successfully",
+                "email": email,
+            })))
+        }
+        Ok(_) => Ok(HttpResponse::NotFound().json(serde_json::json!({
+            "error": "User not found"
+        }))),
+        Err(e) => {
+            error!(user_id = claims.user_id, error = %e, "Failed to update account email");
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to update account"
+            })))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -396,7 +480,8 @@ mod tests {
                     .service(
                         web::scope("/api")
                             .wrap(jwt)
-                            .route("/me", web::get().to(get_current_user)),
+                            .route("/me", web::get().to(get_current_user))
+                            .route("/me", web::patch().to(update_current_user)),
                     ),
             )
             .await
@@ -713,6 +798,165 @@ mod tests {
             .to_request();
         let me: Value = test::call_and_read_body_json(&app, req).await;
         assert_eq!(me["username"], "alice");
+    }
+
+    // --- account email (RUS-11) ---
+
+    /// The account's stored address, straight from the column the alert reads.
+    fn stored_email(state: &actix_web::web::Data<AppState>, username: &str) -> Option<String> {
+        let db = state.db.lock().unwrap();
+        db.query_row(
+            "SELECT email FROM users WHERE username = ?1",
+            params![username],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    /// PATCH /api/me with the given JSON body.
+    async fn patch_me(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        token: &str,
+        body: Value,
+    ) -> actix_web::dev::ServiceResponse {
+        let req = test::TestRequest::patch()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .set_json(body)
+            .to_request();
+        test::call_service(app, req).await
+    }
+
+    // An existing signup flow that sends no email still works, and leaves the
+    // account with no address.
+    #[actix_web::test]
+    async fn register_without_email_stores_null() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+        assert_eq!(stored_email(&state, "alice"), None);
+    }
+
+    // An address given at registration is normalized on the way in.
+    #[actix_web::test]
+    async fn register_with_email_stores_it_normalized() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({
+                "username": "alice",
+                "password": TEST_PASSWORD,
+                "email": "  Alice@Example.COM "
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 201);
+        assert_eq!(
+            stored_email(&state, "alice"),
+            Some("alice@example.com".to_string())
+        );
+    }
+
+    #[actix_web::test]
+    async fn register_with_malformed_email_returns_400() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({
+                "username": "alice",
+                "password": TEST_PASSWORD,
+                "email": "not-an-address"
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 400);
+    }
+
+    // The account can set its address after the fact, and read it back.
+    #[actix_web::test]
+    async fn patch_me_sets_the_account_email() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+
+        let resp = patch_me(
+            &app,
+            token,
+            serde_json::json!({"email": "Alice@Example.com"}),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(
+            stored_email(&state, "alice"),
+            Some("alice@example.com".to_string())
+        );
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let me: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(me["email"], "alice@example.com");
+    }
+
+    // Clearing it stores NULL, not an empty string, so the alert falls back to
+    // the operator mailbox rather than trying to mail "".
+    #[actix_web::test]
+    async fn patch_me_with_blank_email_stores_null() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+
+        patch_me(
+            &app,
+            token,
+            serde_json::json!({"email": "alice@example.com"}),
+        )
+        .await;
+        let resp = patch_me(&app, token, serde_json::json!({"email": "   "})).await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(stored_email(&state, "alice"), None);
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let me: Value = test::call_and_read_body_json(&app, req).await;
+        assert!(me["email"].is_null());
+    }
+
+    #[actix_web::test]
+    async fn patch_me_with_malformed_email_returns_400() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+
+        for bad in ["alice", "@example.com", "alice@"] {
+            let resp = patch_me(&app, token, serde_json::json!({"email": bad})).await;
+            assert_eq!(resp.status(), 400, "expected {bad:?} to be rejected");
+        }
+        assert_eq!(stored_email(&state, "alice"), None, "nothing was stored");
+    }
+
+    #[actix_web::test]
+    async fn patch_me_without_token_returns_401() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let req = test::TestRequest::patch()
+            .uri("/api/me")
+            .set_json(serde_json::json!({"email": "alice@example.com"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 401);
     }
 
     #[actix_web::test]

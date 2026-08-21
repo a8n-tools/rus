@@ -150,6 +150,7 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/api")
                     .wrap(auth)
                     .route("/me", web::get().to(get_current_user))
+                    .route("/me", web::patch().to(update_current_user))
                     .route("/shorten", web::post().to(shorten_url))
                     .route("/stats/{code}", web::get().to(get_stats))
                     .route("/urls", web::get().to(get_user_urls))
