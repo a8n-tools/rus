@@ -25,6 +25,7 @@ pub fn test_config() -> Config {
         db_path: ":memory:".to_string(),
         host: "127.0.0.1".to_string(),
         port: 4001,
+        mail: crate::config::MailConfig::default(),
         #[cfg(feature = "standalone")]
         jwt_secret: TEST_JWT_SECRET.to_string(),
         #[cfg(feature = "standalone")]

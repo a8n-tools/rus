@@ -9,6 +9,8 @@ pub mod auth;
 pub mod config;
 pub mod db;
 pub mod handlers;
+pub mod location_alert;
+pub mod mailer;
 pub mod models;
 #[cfg(feature = "saas")]
 pub mod oidc;

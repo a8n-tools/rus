@@ -25,6 +25,7 @@ fn test_config() -> Config {
         db_path: ":memory:".to_string(),
         host: "127.0.0.1".to_string(),
         port: 4001,
+        mail: rus::config::MailConfig::default(),
         jwt_secret: "test-secret-at-least-32-chars-ok!".to_string(),
         jwt_expiry_hours: 1,
         refresh_token_expiry_days: 7,

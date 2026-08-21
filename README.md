@@ -264,6 +264,8 @@ rus/
 - `password` - Argon2id hashed password (legacy bcrypt hashes migrated on login)
 - `is_admin` - Admin flag (0/1)
 - `created_at` - Account creation timestamp
+- `last_login_country` - Country of the most recent resolved sign-in, for new-location detection
+- `notify_new_location` - Whether sign-ins to this account raise a new-location alert (default 1)
 
 ### urls
 - `id` - Primary key

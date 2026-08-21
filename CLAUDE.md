@@ -74,6 +74,8 @@ src/
 ├── db.rs             # Database connection and schema
 ├── models.rs         # Data models and request/response types
 ├── security.rs       # Password validation, account lockout (standalone only)
+├── location_alert.rs # New-sign-in-country detection (both modes)
+├── mailer.rs         # Security alert email via SMTP (both modes)
 ├── auth/             # JWT handling (standalone only)
 │   ├── mod.rs
 │   ├── jwt.rs
@@ -126,6 +128,20 @@ CLICK_RETENTION_DAYS=30     # Days to retain click history
 RUST_LOG=info,rus=debug     # Log level filter (default: info,rus=debug)
 ```
 
+### Security alerts (both modes)
+```
+SECURITY_ALERT_EMAIL=          # Operator mailbox for alerts; unset means log-only
+LOGIN_LOCATION_ALERTS_ENABLED=true  # Kill switch (default: true; false/0/no disables)
+SMTP_HOST=                     # All three of SMTP_HOST, SMTP_FROM_EMAIL, and
+SMTP_FROM_EMAIL=               # SECURITY_ALERT_EMAIL are required before an alert
+SMTP_PORT=                     # is sent; otherwise it is logged instead
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_FROM_NAME=
+```
+
+Accounts have no email address of their own, so the new-sign-in-location alert goes to the single operator mailbox and names the account involved. The country comes from the `X-IPCountry` header injected by the reverse proxy's geoblock middleware, not an in-process geoip database, so with no such edge no country resolves and no alert fires.
+
 ### Standalone-only options
 ```
 JWT_EXPIRY=1                # JWT expiry in hours (default: 1)
@@ -160,7 +176,7 @@ The legacy `SAAS_JWT_SECRET`, `SAAS_LOGIN_URL`, `SAAS_LOGOUT_URL`, `SAAS_MEMBERS
 
 ## Database Schema
 
-**users**: userID, username (unique), password (hashed), created_at
+**users**: userID, username (unique), password (hashed), created_at, last_login_country, notify_new_location
 **urls**: id, user_id (FK), original_url, short_code (unique indexed), name, clicks, created_at
 
 ## Testing API
