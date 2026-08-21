@@ -5,20 +5,25 @@
 //! `X-IPCountry` header rather than an in-process geoip database, so there is
 //! nothing to provision or license. Granularity is country-level.
 //!
-//! The header carries the same trust level as the forwarded IP, which this app
-//! believes as-is. Behind the geoblock edge it is authoritative; with no edge
-//! (a private IP, a direct client, an unset header) the country is `None` and
-//! no alert ever fires, so the feature degrades cleanly rather than raising a
-//! false alarm.
+//! The header carries the same trust level as the forwarded IP, so RUS-12 gates
+//! both on the socket peer: `X-Forwarded-For`, `X-Real-IP`, and `X-IPCountry`
+//! are read only when the peer is a configured trusted proxy (see
+//! `TRUSTED_PROXY_CIDRS`), and are ignored otherwise. Behind the geoblock edge
+//! they are authoritative; off it (a direct client, no configured proxy, an
+//! unset header) the country is `None` and no alert ever fires, so a forged
+//! header can neither raise a false alarm nor suppress a real one.
 //!
 //! Accounts here have no email address of their own, so the alert goes to one
 //! operator mailbox (`SECURITY_ALERT_EMAIL`) and names the account involved.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use actix_web::http::header::HeaderMap;
 use actix_web::{web, HttpRequest};
+use ipnetwork::IpNetwork;
 use rusqlite::{params, Connection};
 
 use crate::db::AppState;
@@ -29,36 +34,102 @@ static ALERT_DEDUP: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
 
 const ALERT_DEDUP_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// The client IP, preferring the forwarding headers, then the socket peer.
+/// RUS-12: CIDRs whose socket peers may set `X-Forwarded-For`, `X-Real-IP`, and
+/// `X-IPCountry`. Installed once at startup by [`init_trusted_proxies`]; unset
+/// means empty, so forwarded headers are never trusted unless an operator
+/// opts in.
+static TRUSTED_PROXIES: OnceLock<Vec<IpNetwork>> = OnceLock::new();
+
+/// Install the trusted-proxy CIDRs (from `Config::trusted_proxy_cidrs`). Call
+/// once during startup, before the server accepts requests; a later call is
+/// ignored so a request can never swap the trust set mid-flight.
+pub fn init_trusted_proxies(cidrs: Vec<IpNetwork>) {
+    let _ = TRUSTED_PROXIES.set(cidrs);
+}
+
+fn trusted_proxies() -> &'static [IpNetwork] {
+    TRUSTED_PROXIES.get().map_or(&[], Vec::as_slice)
+}
+
+fn is_trusted(ip: IpAddr, trusted: &[IpNetwork]) -> bool {
+    trusted.iter().any(|net| net.contains(ip))
+}
+
+/// The socket peer address, the one input a client cannot forge.
+fn peer_ip(req: &HttpRequest) -> Option<IpAddr> {
+    req.peer_addr().map(|addr| addr.ip())
+}
+
+/// The client IP, honoring the forwarding headers only from a trusted proxy.
 pub fn client_ip(req: &HttpRequest) -> Option<String> {
-    let headers = req.headers();
+    resolve_client_ip(peer_ip(req), req.headers(), trusted_proxies()).map(|ip| ip.to_string())
+}
+
+/// Resolve the client IP from the socket peer plus the forwarded headers.
+///
+/// The peer is the only non-forgeable input, so it gates everything: a
+/// forwarded header is read only when the peer itself sits in `trusted`. With
+/// no trusted proxies configured a forged `X-Forwarded-For` / `X-Real-IP` is
+/// ignored entirely. Inside a proxy chain the rightmost entry not belonging to
+/// a trusted proxy is the client, since anything further left was supplied by
+/// the client and can be forged.
+pub fn resolve_client_ip(
+    peer: Option<IpAddr>,
+    headers: &HeaderMap,
+    trusted: &[IpNetwork],
+) -> Option<IpAddr> {
+    let peer = peer?;
+
+    if !is_trusted(peer, trusted) {
+        return Some(peer);
+    }
+
     if let Some(forwarded) = headers.get("X-Forwarded-For").and_then(|v| v.to_str().ok()) {
-        if let Some(ip) = forwarded.split(',').next().map(str::trim) {
-            if !ip.is_empty() {
-                return Some(ip.to_string());
-            }
+        let client = forwarded
+            .split(',')
+            .filter_map(|entry| entry.trim().parse::<IpAddr>().ok())
+            .rev()
+            .find(|ip| !is_trusted(*ip, trusted));
+        if let Some(ip) = client {
+            return Some(ip);
         }
     }
 
     if let Some(ip) = headers
         .get("X-Real-IP")
         .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|ip| !ip.is_empty())
+        .and_then(|value| value.trim().parse().ok())
     {
-        return Some(ip.to_string());
+        return Some(ip);
     }
 
-    req.peer_addr().map(|addr| addr.ip().to_string())
+    Some(peer)
 }
 
 /// The country the edge resolved this request to.
 ///
-/// Accepted only as an ISO-3166-1 alpha-2 code; anything else (absent, empty,
-/// a sentinel, a three-letter code) resolves to `None` and never raises an
-/// alert.
+/// Accepted only from a trusted-proxy peer (RUS-12) and only as an ISO-3166-1
+/// alpha-2 code; anything else (an untrusted peer, absent, empty, a sentinel, a
+/// three-letter code) resolves to `None` and never raises an alert.
 pub fn client_country(req: &HttpRequest) -> Option<String> {
-    req.headers()
+    resolve_client_country(peer_ip(req), req.headers(), trusted_proxies())
+}
+
+/// Resolve the edge country, gated on the same trusted peer as the client IP.
+///
+/// An untrusted peer sets this header itself, so believing it would let a
+/// direct client either fake a foreign sign-in or pin every login to one
+/// country and silence the alert.
+pub fn resolve_client_country(
+    peer: Option<IpAddr>,
+    headers: &HeaderMap,
+    trusted: &[IpNetwork],
+) -> Option<String> {
+    if !peer.is_some_and(|ip| is_trusted(ip, trusted)) {
+        return None;
+    }
+
+    headers
         .get("X-IPCountry")
         .and_then(|value| value.to_str().ok())
         .map(|value| value.trim().to_ascii_uppercase())
@@ -228,6 +299,32 @@ mod tests {
     use super::*;
     use actix_web::test::TestRequest;
 
+    /// Build a bare HeaderMap for the peer-gated resolvers.
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut req = TestRequest::default();
+        for (name, value) in pairs {
+            req = req.insert_header((*name, *value));
+        }
+        req.to_http_request().headers().clone()
+    }
+
+    /// Build a request with a socket peer, as actix sees it off the wire.
+    fn request_from(peer: &str, pairs: &[(&str, &str)]) -> HttpRequest {
+        let mut req = TestRequest::default().peer_addr(peer.parse().unwrap());
+        for (name, value) in pairs {
+            req = req.insert_header((*name, *value));
+        }
+        req.to_http_request()
+    }
+
+    fn ip(value: &str) -> IpAddr {
+        value.parse().unwrap()
+    }
+
+    fn cidrs(list: &[&str]) -> Vec<IpNetwork> {
+        list.iter().map(|entry| entry.parse().unwrap()).collect()
+    }
+
     // A repeat login from the same country is not a change (case-insensitive:
     // the edge may vary casing between logins).
     #[test]
@@ -261,56 +358,179 @@ mod tests {
         assert!(!should_alert(false, Some("US"), Some("DE")));
     }
 
-    // The edge header is normalized to an uppercase alpha-2 code.
+    // A trusted proxy's edge header is normalized to an uppercase alpha-2 code.
     #[test]
     fn client_country_reads_and_normalizes_the_edge_header() {
-        let req = TestRequest::default()
-            .insert_header(("X-IPCountry", "us"))
-            .to_http_request();
-        assert_eq!(client_country(&req), Some("US".to_string()));
+        assert_eq!(
+            resolve_client_country(
+                Some(ip("10.1.2.3")),
+                &headers(&[("X-IPCountry", "us")]),
+                &cidrs(&["10.0.0.0/8"]),
+            ),
+            Some("US".to_string())
+        );
     }
 
     // No edge header (a direct client, no geoblock) means no country, so the
     // feature degrades to no alert.
     #[test]
     fn client_country_is_none_when_header_absent() {
-        let req = TestRequest::default().to_http_request();
-        assert_eq!(client_country(&req), None);
+        assert_eq!(
+            resolve_client_country(Some(ip("10.1.2.3")), &headers(&[]), &cidrs(&["10.0.0.0/8"])),
+            None
+        );
     }
 
     // Empty, sentinel, or wrong-shaped values are rejected rather than treated
-    // as a country.
+    // as a country, even from a trusted proxy.
     #[test]
     fn client_country_rejects_malformed_values() {
         for bad in ["", "nil", "U", "USA", "1A", "  "] {
-            let req = TestRequest::default()
-                .insert_header(("X-IPCountry", bad))
-                .to_http_request();
             assert_eq!(
-                client_country(&req),
+                resolve_client_country(
+                    Some(ip("10.1.2.3")),
+                    &headers(&[("X-IPCountry", bad)]),
+                    &cidrs(&["10.0.0.0/8"]),
+                ),
                 None,
                 "expected {bad:?} to be rejected"
             );
         }
     }
 
-    // The forwarded header wins over the socket peer, and the leftmost entry is
-    // the client.
+    // RUS-12: an untrusted peer sets the country itself, so it must resolve to
+    // None and never raise or suppress an alert.
     #[test]
-    fn client_ip_prefers_the_forwarded_header() {
-        let req = TestRequest::default()
-            .insert_header(("X-Forwarded-For", "203.0.113.7, 10.0.0.1"))
-            .to_http_request();
-        assert_eq!(client_ip(&req), Some("203.0.113.7".to_string()));
+    fn client_country_is_none_from_an_untrusted_peer() {
+        assert_eq!(
+            resolve_client_country(
+                Some(ip("203.0.113.5")),
+                &headers(&[("X-IPCountry", "DE")]),
+                &cidrs(&["10.0.0.0/8"]),
+            ),
+            None
+        );
+        // Nothing configured trusts nothing, which is the shipped default.
+        assert_eq!(
+            resolve_client_country(
+                Some(ip("10.1.2.3")),
+                &headers(&[("X-IPCountry", "DE")]),
+                &[]
+            ),
+            None
+        );
+    }
+
+    // No peer at all (no socket address) trusts nothing.
+    #[test]
+    fn client_country_is_none_without_a_peer() {
+        assert_eq!(
+            resolve_client_country(
+                None,
+                &headers(&[("X-IPCountry", "DE")]),
+                &cidrs(&["10.0.0.0/8"]),
+            ),
+            None
+        );
+    }
+
+    // RUS-12: with no trusted proxies, forged forwarded headers must not move
+    // the resolved IP off the socket peer.
+    #[test]
+    fn resolve_client_ip_ignores_forwarded_headers_without_trusted_proxies() {
+        let h = headers(&[
+            ("X-Forwarded-For", "9.9.9.9, 8.8.8.8"),
+            ("X-Real-IP", "7.7.7.7"),
+        ]);
+        assert_eq!(
+            resolve_client_ip(Some(ip("203.0.113.5")), &h, &[]),
+            Some(ip("203.0.113.5"))
+        );
+    }
+
+    // A peer outside the trusted set is ignored just the same.
+    #[test]
+    fn resolve_client_ip_ignores_forwarded_headers_from_untrusted_peer() {
+        let h = headers(&[("X-Forwarded-For", "9.9.9.9")]);
+        assert_eq!(
+            resolve_client_ip(Some(ip("203.0.113.5")), &h, &cidrs(&["10.0.0.0/8"])),
+            Some(ip("203.0.113.5"))
+        );
+    }
+
+    // A trusted proxy's X-Forwarded-For is believed.
+    #[test]
+    fn resolve_client_ip_honors_forwarded_for_from_trusted_proxy() {
+        let h = headers(&[("X-Forwarded-For", "203.0.113.5")]);
+        assert_eq!(
+            resolve_client_ip(Some(ip("10.1.2.3")), &h, &cidrs(&["10.0.0.0/8"])),
+            Some(ip("203.0.113.5"))
+        );
+    }
+
+    // A client that prepends its own entries cannot hide behind them: the
+    // rightmost untrusted entry is the one the trusted proxy observed.
+    #[test]
+    fn resolve_client_ip_takes_rightmost_untrusted_entry() {
+        let h = headers(&[("X-Forwarded-For", "1.2.3.4, 203.0.113.5, 10.9.9.9")]);
+        assert_eq!(
+            resolve_client_ip(Some(ip("10.1.2.3")), &h, &cidrs(&["10.0.0.0/8"])),
+            Some(ip("203.0.113.5"))
+        );
     }
 
     // X-Real-IP is the fallback when there is no X-Forwarded-For.
     #[test]
-    fn client_ip_falls_back_to_real_ip() {
-        let req = TestRequest::default()
-            .insert_header(("X-Real-IP", "203.0.113.9"))
-            .to_http_request();
-        assert_eq!(client_ip(&req), Some("203.0.113.9".to_string()));
+    fn resolve_client_ip_falls_back_to_real_ip() {
+        let h = headers(&[("X-Real-IP", "203.0.113.9")]);
+        assert_eq!(
+            resolve_client_ip(Some(ip("10.1.2.3")), &h, &cidrs(&["10.0.0.0/8"])),
+            Some(ip("203.0.113.9"))
+        );
+    }
+
+    // Every entry trusted and no X-Real-IP: nothing untrusted was observed, so
+    // fall back to the peer rather than inventing a client.
+    #[test]
+    fn resolve_client_ip_falls_back_to_peer_when_all_entries_trusted() {
+        let h = headers(&[("X-Forwarded-For", "10.9.9.9, 10.8.8.8")]);
+        assert_eq!(
+            resolve_client_ip(Some(ip("10.1.2.3")), &h, &cidrs(&["10.0.0.0/8"])),
+            Some(ip("10.1.2.3"))
+        );
+    }
+
+    // No peer means no IP; there is nothing non-forgeable left to trust.
+    #[test]
+    fn resolve_client_ip_is_none_without_a_peer() {
+        let h = headers(&[("X-Forwarded-For", "203.0.113.5")]);
+        assert_eq!(resolve_client_ip(None, &h, &cidrs(&["10.0.0.0/8"])), None);
+    }
+
+    // IPv6 proxies (the fd00::/8 ingress case) work the same way.
+    #[test]
+    fn resolve_client_ip_supports_ipv6_proxies() {
+        let h = headers(&[("X-Forwarded-For", "203.0.113.5")]);
+        assert_eq!(
+            resolve_client_ip(Some(ip("fd00::5")), &h, &cidrs(&["fd00::/8"])),
+            Some(ip("203.0.113.5"))
+        );
+    }
+
+    // End to end through HttpRequest: with the process-wide trust set unset (no
+    // TRUSTED_PROXY_CIDRS), a direct client's forged headers buy it nothing.
+    #[test]
+    fn request_readers_ignore_forged_headers_by_default() {
+        let req = request_from(
+            "203.0.113.5:44321",
+            &[
+                ("X-Forwarded-For", "9.9.9.9"),
+                ("X-Real-IP", "7.7.7.7"),
+                ("X-IPCountry", "DE"),
+            ],
+        );
+        assert_eq!(client_ip(&req), Some("203.0.113.5".to_string()));
+        assert_eq!(client_country(&req), None);
     }
 
     // The User-Agent becomes the device string, and its absence is None.

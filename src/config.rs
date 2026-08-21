@@ -1,5 +1,7 @@
 use std::env;
 
+use ipnetwork::IpNetwork;
+
 /// OIDC Relying Party + Resource Server configuration (saas mode).
 #[cfg(feature = "saas")]
 #[derive(Clone, Debug)]
@@ -64,6 +66,22 @@ impl SmtpTlsMode {
             }
         }
     }
+}
+
+/// RUS-12: parse `TRUSTED_PROXY_CIDRS` (comma-separated CIDRs or bare IPs).
+/// Unparseable entries warn and are dropped rather than failing boot.
+fn parse_trusted_proxy_cidrs(raw: &str) -> Vec<IpNetwork> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .filter_map(|entry| match entry.parse::<IpNetwork>() {
+            Ok(net) => Some(net),
+            Err(error) => {
+                tracing::warn!(entry = %entry, error = %error, "ignoring invalid TRUSTED_PROXY_CIDRS entry");
+                None
+            }
+        })
+        .collect()
 }
 
 /// Outbound mail and login-location alerting (RUS-7).
@@ -174,6 +192,9 @@ pub struct Config {
     pub port: u16,
     /// Outbound mail and the login-location alert (RUS-7).
     pub mail: MailConfig,
+    /// RUS-12: CIDRs whose socket peers may set the forwarded IP and country
+    /// headers. Empty means no peer is trusted and the headers are ignored.
+    pub trusted_proxy_cidrs: Vec<IpNetwork>,
     #[cfg(feature = "standalone")]
     pub allow_registration: bool,
     /// HMAC secret for the maintenance webhook (saas mode).
@@ -251,6 +272,16 @@ impl Config {
             String::new()
         });
 
+        let trusted_proxy_cidrs =
+            parse_trusted_proxy_cidrs(&env::var("TRUSTED_PROXY_CIDRS").unwrap_or_default());
+        if trusted_proxy_cidrs.is_empty() {
+            // Behind a reverse proxy this also disables the RUS-7 alert, since
+            // an untrusted peer never yields a country.
+            tracing::warn!(
+                "TRUSTED_PROXY_CIDRS is empty: forwarded IP and country headers are ignored and the socket peer is used. A proxied deployment must set its ingress CIDRs."
+            );
+        }
+
         #[cfg(feature = "saas")]
         let oidc = build_oidc_config(&host_url);
 
@@ -272,6 +303,7 @@ impl Config {
             host,
             port,
             mail: MailConfig::from_env(),
+            trusted_proxy_cidrs,
             #[cfg(feature = "standalone")]
             allow_registration,
             #[cfg(feature = "saas")]
@@ -314,6 +346,7 @@ impl Config {
             account_lockout_duration_minutes = self.account_lockout_duration_minutes,
             click_retention_days = self.click_retention_days,
             allow_registration = self.allow_registration,
+            trusted_proxy_cidrs = self.trusted_proxy_cidrs.len(),
             "RUS configuration loaded"
         );
 
@@ -326,6 +359,7 @@ impl Config {
             db_path = %self.db_path,
             max_url_length = self.max_url_length,
             click_retention_days = self.click_retention_days,
+            trusted_proxy_cidrs = self.trusted_proxy_cidrs.len(),
             oidc_enabled = self.oidc.enabled(),
             oidc_issuer = %self.oidc.issuer,
             "RUS configuration loaded"
@@ -501,5 +535,42 @@ mod tests {
     #[test]
     fn mail_config_defaults_to_starttls() {
         assert_eq!(MailConfig::default().smtp_tls_mode, SmtpTlsMode::Starttls);
+    }
+
+    // Unset or blank means trust nothing, so forwarded headers are ignored.
+    #[test]
+    fn trusted_proxy_cidrs_default_to_empty() {
+        assert!(parse_trusted_proxy_cidrs("").is_empty());
+        assert!(parse_trusted_proxy_cidrs("  ,  , ").is_empty());
+        assert!(crate::testing::test_config().trusted_proxy_cidrs.is_empty());
+    }
+
+    // CIDRs, bare IPs, and IPv6 all parse, with surrounding whitespace trimmed.
+    #[test]
+    fn trusted_proxy_cidrs_parse_cidrs_bare_ips_and_ipv6() {
+        let parsed = parse_trusted_proxy_cidrs(" 10.0.0.0/8 , 192.0.2.7 ,fd00::/8 ");
+        assert_eq!(parsed.len(), 3);
+        assert!(parsed
+            .iter()
+            .any(|net| net.contains("10.1.2.3".parse().unwrap())));
+        assert!(parsed
+            .iter()
+            .any(|net| net.contains("192.0.2.7".parse().unwrap())));
+        assert!(parsed
+            .iter()
+            .any(|net| net.contains("fd00::5".parse().unwrap())));
+    }
+
+    // A typo drops that entry with a warning; the valid neighbours survive.
+    #[test]
+    fn trusted_proxy_cidrs_skip_invalid_entries() {
+        let parsed = parse_trusted_proxy_cidrs("10.0.0.0/8,not-an-ip,10.0.0.0/99,192.0.2.7");
+        assert_eq!(parsed.len(), 2);
+        assert!(parsed
+            .iter()
+            .any(|net| net.contains("10.1.2.3".parse().unwrap())));
+        assert!(parsed
+            .iter()
+            .any(|net| net.contains("192.0.2.7".parse().unwrap())));
     }
 }
