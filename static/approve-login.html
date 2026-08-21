@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Approve Sign-In - Rust URL Shortener</title>
+    <link rel="stylesheet" href="styles.css?v=4">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+    <script src="theme.js"></script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-content">
+            <a href="/" class="nav-brand">🦀 Rust URL Shortener</a>
+            <div class="nav-links" id="navLinks">
+                <button id="contrastToggle" class="contrast-toggle-btn" onclick="__toggleContrast()" aria-label="Toggle contrast">
+                    <i class="fa-solid fa-circle-half-stroke"></i>
+                </button>
+                <button id="themeToggle" class="theme-toggle-btn" onclick="__toggleTheme()" aria-label="Toggle theme">
+                    <i class="fa-solid fa-moon"></i>
+                </button>
+                <a href="/">Home</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="auth-card">
+            <h1 id="heading">Approve Sign-In</h1>
+            <p class="subtitle" id="subtitle">Checking this approval link...</p>
+
+            <div id="details" style="display: none;">
+                <p><strong>Country:</strong> <span id="detailCountry"></span></p>
+                <p><strong>IP address:</strong> <span id="detailIp"></span></p>
+                <p><strong>Device:</strong> <span id="detailDevice"></span></p>
+                <p><strong>Requested:</strong> <span id="detailRequested"></span></p>
+                <p><strong>Link expires:</strong> <span id="detailExpires"></span></p>
+            </div>
+
+            <div class="error" id="error"></div>
+            <div class="success" id="success"></div>
+
+            <button type="button" id="approveBtn" style="display: none;">Approve this sign-in</button>
+
+            <p class="auth-switch" id="footer">
+                Not you? Close this page and change your password.
+            </p>
+        </div>
+    </div>
+
+    <script src="k9f3x2m7.js"></script>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+        const headingEl = document.getElementById('heading');
+        const subtitleEl = document.getElementById('subtitle');
+        const detailsEl = document.getElementById('details');
+        const errorDiv = document.getElementById('error');
+        const successDiv = document.getElementById('success');
+        const approveBtn = document.getElementById('approveBtn');
+        const footerEl = document.getElementById('footer');
+
+        function showError(message) {
+            subtitleEl.textContent = '';
+            errorDiv.textContent = message;
+            errorDiv.classList.add('show');
+            successDiv.classList.remove('show');
+            approveBtn.style.display = 'none';
+            detailsEl.style.display = 'none';
+        }
+
+        function showSuccess(message) {
+            errorDiv.classList.remove('show');
+            successDiv.textContent = message;
+            successDiv.classList.add('show');
+        }
+
+        function formatTime(value) {
+            const parsed = new Date(value);
+            return isNaN(parsed) ? value : parsed.toLocaleString();
+        }
+
+        // Reached straight from a held sign-in, with no token: the browser that
+        // tried to sign in is told to go and read its mail.
+        if (params.get('pending') === '1') {
+            headingEl.textContent = 'Check your email';
+            subtitleEl.textContent = 'This sign-in is from a country you have not used before, so it is being held. Open the approval link we just emailed you to finish signing in. The link expires in 15 minutes.';
+            footerEl.textContent = 'Did not expect this? Do nothing. The attempt expires on its own.';
+        } else if (params.get('error') === 'mail') {
+            headingEl.textContent = 'Could not send the approval email';
+            showError('This sign-in is from a new country and needs approval, but the approval email could not be sent. Try signing in again, or contact the administrator.');
+        } else if (!token) {
+            showError('No approval token provided.');
+        } else {
+            loadApproval();
+        }
+
+        // GET only validates. The token is spent by the POST below, so a mail
+        // scanner that fetches this link cannot burn it.
+        async function loadApproval() {
+            try {
+                const response = await fetch(`/api/login-approval?token=${encodeURIComponent(token)}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    showError(data.error || 'This approval link is not valid.');
+                    return;
+                }
+
+                const approval = data.approval || {};
+                document.getElementById('detailCountry').textContent = approval.country || 'unknown';
+                document.getElementById('detailIp').textContent = approval.ip || 'unknown';
+                document.getElementById('detailDevice').textContent = approval.user_agent || 'unknown';
+                document.getElementById('detailRequested').textContent = formatTime(approval.requested_at);
+                document.getElementById('detailExpires').textContent = formatTime(approval.expires_at);
+
+                subtitleEl.textContent = 'A sign-in to your account is being held. Approve it only if you recognise it.';
+                detailsEl.style.display = 'block';
+                approveBtn.style.display = 'block';
+            } catch (error) {
+                showError('Failed to read the approval.');
+            }
+        }
+
+        approveBtn.addEventListener('click', async () => {
+            errorDiv.classList.remove('show');
+            approveBtn.disabled = true;
+            approveBtn.textContent = 'Approving...';
+
+            try {
+                const response = await fetch('/api/login-approval', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ token }),
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    showError(data.error || 'Failed to approve the sign-in.');
+                    return;
+                }
+
+                showSuccess('Sign-in approved. Taking you to your dashboard...');
+                detailsEl.style.display = 'none';
+                approveBtn.style.display = 'none';
+
+                // Standalone answers with tokens for localStorage; saas answers
+                // with a session cookie already set and a destination.
+                if (data.token) {
+                    saveAuth(data.token, data.username, data.refresh_token);
+                }
+                window.location.href = data.redirect || 'dashboard.html';
+            } catch (error) {
+                showError('Failed to approve the sign-in.');
+                approveBtn.disabled = false;
+                approveBtn.textContent = 'Approve this sign-in';
+            }
+        });
+    </script>
+</body>
+</html>

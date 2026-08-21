@@ -153,6 +153,16 @@ pub fn device_info(req: &HttpRequest) -> Option<String> {
         .map(|value| value.chars().take(256).collect())
 }
 
+/// Whether `current` is a country this account has not signed in from before.
+///
+/// The one suspicion signal in the crate: the RUS-7 alert and the RUS-19
+/// approval gate both call it, so they can never disagree about what is
+/// suspicious. False whenever either side is unknown, which is what makes a
+/// first-ever sign-in (no `previous`) and an unresolved `current` safe.
+pub fn is_new_country(previous: Option<&str>, current: Option<&str>) -> bool {
+    matches!((previous, current), (Some(prev), Some(curr)) if !prev.eq_ignore_ascii_case(curr))
+}
+
 /// Whether a login warrants a new-location alert.
 ///
 /// A change is significant only when a prior country is known and the new one
@@ -164,8 +174,7 @@ pub fn should_alert(
     previous: Option<&str>,
     current: Option<&str>,
 ) -> bool {
-    notify_new_location
-        && matches!((previous, current), (Some(prev), Some(curr)) if !prev.eq_ignore_ascii_case(curr))
+    notify_new_location && is_new_country(previous, current)
 }
 
 /// True the first time this account is alerted about this country within a day.
@@ -183,21 +192,22 @@ fn allow_alert(user_id: i64, country: &str) -> bool {
     true
 }
 
-/// The per-account inputs the alert decision needs.
+/// The per-account inputs the alert decision needs. RUS-19's gate reads the
+/// same row, so the two controls share one query and one shape.
 #[derive(Clone, Debug)]
-struct AccountAlertInfo {
-    username: String,
+pub(crate) struct AccountAlertInfo {
+    pub(crate) username: String,
     /// The account's own address, or `None` when it has never set one.
-    email: Option<String>,
-    last_country: Option<String>,
-    notify_new_location: bool,
+    pub(crate) email: Option<String>,
+    pub(crate) last_country: Option<String>,
+    pub(crate) notify_new_location: bool,
 }
 
 /// Read the account name, its own address, last-known country, and opt-out flag.
 ///
 /// The `email` column exists in both schemas (saas ships it; RUS-11 migrates it
 /// into standalone), so this one query serves both feature legs.
-fn get_login_location(
+pub(crate) fn get_login_location(
     conn: &Connection,
     user_id: i64,
 ) -> rusqlite::Result<Option<AccountAlertInfo>> {
@@ -253,8 +263,10 @@ fn alert_route(mail: &MailConfig, info: &AccountAlertInfo, current: Option<&str>
     }
 }
 
-/// Record the country this account most recently signed in from.
-fn update_last_login_country(
+/// Record the country this account most recently signed in from. Only ever
+/// called once a sign-in has actually completed, so a held or abandoned
+/// attempt cannot make its country look familiar next time.
+pub(crate) fn update_last_login_country(
     conn: &Connection,
     user_id: i64,
     country: &str,

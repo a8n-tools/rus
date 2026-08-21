@@ -115,6 +115,8 @@ just dev-local-stop      # Stop local dev server
 | `POST` | `/api/register` | Register a new user (standalone only) |
 | `POST` | `/api/login` | Login, returns JWT + refresh token (standalone only) |
 | `POST` | `/api/token/refresh` | Refresh an expired JWT (standalone only) |
+| `GET` | `/api/login-approval?token=` | Describe a sign-in held by the new-country gate, without claiming the link |
+| `POST` | `/api/login-approval` | Claim the link and complete the held sign-in |
 | `GET` | `/{short_code}` | Redirect to original URL |
 | `POST` | `/api/report` | Report an abusive URL |
 
@@ -187,6 +189,7 @@ rus/
 │   ├── models.rs            # Data models and request/response types
 │   ├── security.rs          # Password validation, account lockout
 │   ├── location_alert.rs    # New-sign-in-country detection, trusted-proxy gate
+│   ├── login_approval.rs    # New-country sign-in gate, approval page and API
 │   ├── mailer.rs            # Security alert email via SMTP
 │   ├── auth/
 │   │   ├── mod.rs
@@ -212,7 +215,10 @@ rus/
 │   ├── admin.html           # Admin panel
 │   ├── report.html          # Abuse report form
 │   ├── setup.html           # Initial setup page
+│   ├── approve-login.html   # Approve a held new-country sign-in
+│   ├── maintenance.html     # Maintenance-mode page (saas)
 │   ├── 404.html             # Custom 404 error page
+│   ├── theme.js             # Theme and contrast toggles
 │   ├── styles.css           # Global styles
 │   └── auth.js              # Authentication utilities
 ├── oci-build/
@@ -254,6 +260,7 @@ rus/
 |----------|-------------|---------|
 | `SECURITY_ALERT_EMAIL` | Fallback mailbox for an account with no address of its own; unset means log-only for those accounts | unset |
 | `LOGIN_LOCATION_ALERTS_ENABLED` | New-country sign-in alert kill switch (`false`/`0`/`no` disables) | `true` |
+| `LOGIN_APPROVAL_ENABLED` | Hold a new-country sign-in until it is approved by email. Only the exact value `true` enables it | `false` (off) |
 | `SMTP_HOST` | SMTP relay hostname | unset |
 | `SMTP_FROM_EMAIL` | Sender address | unset |
 | `SMTP_FROM_NAME` | Sender display name | unset |
@@ -277,6 +284,38 @@ The per-account `notify_new_location` opt-out is checked before any of this, so 
 The country comes from the `X-IPCountry` header injected by the reverse proxy's geoblock middleware, and is read only when the socket peer is listed in `TRUSTED_PROXY_CIDRS`. With no trusted proxy configured, or with a client connecting directly, no country resolves and no alert fires.
 
 Mail is encrypted by default: `SMTP_TLS_MODE` defaults to `starttls`, so a deployment that sets nothing sends over an encrypted connection. `starttls` upgrades the connection on port 587, `tls` uses implicit TLS on port 465, and `none` is plaintext, kept only for a trusted loopback or sidecar relay and logging a warning naming the host whenever it is used. An unrecognised value warns and falls back to `starttls`. Each mode supplies its own default port, so `SMTP_PORT` is an override for a non-standard relay rather than a required setting. TLS is provided by rustls, so building needs no OpenSSL.
+
+#### Requiring approval for a new-country sign-in (both modes)
+
+The alert above is after the fact: it tells you a sign-in already happened. Someone who has taken over the mailbox reads that notice and deletes it, so on its own it does not stop them. Setting `LOGIN_APPROVAL_ENABLED=true` turns the same signal into a gate: a sign-in from a country the account has not used before is **held**, no session is created, and an emailed single-use link releases it.
+
+**The switch is off by default and only the exact value `true` turns it on.** Every other value, including a typo, leaves it off, because this control can hold a real user out of their own account. It is the one variable in this file whose falsy spelling is deliberately not forgiving.
+
+What is never held, in either mode:
+
+- A first-ever sign-in, because the account has no prior country to differ from. Without this the first account ever created could never sign in.
+- A sign-in whose country does not resolve, which is every sign-in when there is no geoblock edge in front of rus or `TRUSTED_PROXY_CIDRS` is unset. Without this those deployments would brick themselves.
+- A sign-in from the same country as last time, compared case-insensitively.
+- Anything at all while the switch is off.
+
+The country used is the same one the alert uses (`X-IPCountry` from a trusted-proxy peer), and the comparison is the same predicate, so the alert and the gate can never disagree about what is suspicious.
+
+When a sign-in is held: a row is written first, then the mail goes out, so a link that arrives always has a row behind it. The link carries a 256-bit token, is stored only as a SHA-256 hash, works exactly once, and expires 15 minutes after it is issued. Opening the link only *shows* what is being held. A separate confirmation claims it, so a mail gateway that fetches URLs out of messages cannot burn the link before its owner sees it. Approving signs the **approving** browser in; the browser that triggered the hold is never handed anything. `last_login_country` is written only once a sign-in actually completes, so an attempt that is never approved cannot make its country look familiar next time.
+
+Who gets the link follows the same precedence as the alert: the account's own address when it has one, otherwise the `SECURITY_ALERT_EMAIL` operator mailbox, which then approves on the owner's behalf and is told so in the message.
+
+**If no link could be delivered, the sign-in is allowed rather than held.** That covers an account with no address and no operator mailbox configured, and any deployment with no `SMTP_HOST` / `SMTP_FROM_EMAIL` at all. A gate whose approval can never arrive is a permanent lockout, so it degrades to the alert it was built on and logs a warning naming what to configure. This is deliberately different from a delivery that is configured and merely *fails*: that answers the sign-in with a 500 and issues nothing, because retrying is the fix.
+
+The per-account `notify_new_location` opt-out does **not** disable the gate. That preference is written from an authenticated session, so honouring it here would let anyone holding a session switch off the control that defends the account against them, and would leave an opted-out account held with no mail to release it.
+
+#### Recovering when the approval mail cannot arrive
+
+Both of these work without any mail at all. Use them if a real user is held and the link is not reaching them.
+
+1. **Turn the gate off globally.** Set `LOGIN_APPROVAL_ENABLED=false` (or remove it) and restart the container. Sign-ins complete as they did before RUS-19; the new-location alert keeps running.
+2. **Clear one account's prior country.** `sqlite3 /data/rus.db "UPDATE users SET last_login_country = NULL WHERE username = 'alice';"` Their next sign-in is a first-ever one, which is never held, and it records a fresh baseline. This leaves the gate on for everyone else.
+
+Option 2 is the per-account lever and needs no restart. Neither depends on SMTP, on the operator mailbox, or on the held row itself. Pending rows expire on their own after 15 minutes and are swept whenever a new one is written, so there is nothing to clean up by hand.
 
 #### Opting out (both modes)
 
@@ -323,6 +362,17 @@ Every account carries `notify_new_location`, an opt-out that is on by default an
 - `id` - Primary key
 - `url_id` - Foreign key to urls
 - `clicked_at` - Click timestamp
+
+### pending_login_approvals (both modes)
+- `id` - Primary key
+- `user_id` - Foreign key to users, cascading on delete
+- `token_hash` - SHA-256 of the approval token, unique. The raw token is never stored
+- `country` - Country the held sign-in came from
+- `ip` - Client IP of the held sign-in
+- `user_agent` - Device string of the held sign-in
+- `created_at` - When the hold was placed (RFC 3339)
+- `expires_at` - 15 minutes after that; a row past it is never claimable
+- `consumed_at` - Set by the guarded update that claims the token, so a second click finds nothing to claim
 
 ### refresh_tokens (standalone only)
 - `id` - Primary key

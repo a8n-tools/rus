@@ -28,7 +28,7 @@ use crate::config::OidcConfig;
 use crate::db::AppState;
 
 use super::jit::{self, JitError};
-use super::session::{hash_session_token, RUS_SESSION_COOKIE};
+use super::session::{self, build_session_cookie, hash_session_token, RUS_SESSION_COOKIE};
 use super::verifier::OidcVerifier;
 
 #[derive(Clone)]
@@ -63,16 +63,6 @@ fn random_b64url(n: usize) -> String {
 
 fn pkce_challenge(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
-}
-
-fn build_session_cookie(token: &str, ttl_seconds: u64, secure: bool) -> Cookie<'static> {
-    Cookie::build(RUS_SESSION_COOKIE, token.to_string())
-        .http_only(true)
-        .secure(secure)
-        .same_site(SameSite::Lax)
-        .path("/")
-        .max_age(CookieDuration::seconds(ttl_seconds as i64))
-        .finish()
 }
 
 fn clear_session_cookie(secure: bool) -> Cookie<'static> {
@@ -346,30 +336,73 @@ pub async fn callback(
         }
     };
 
-    // Issue session.
-    let session_token = random_b64url(32);
-    let token_hash = hash_session_token(&session_token);
-    let now = Utc::now();
-    let expires_at = now + chrono::Duration::seconds(state.config.session_ttl_seconds as i64);
-
-    {
+    // RUS-19: the OP authenticated the user, but this is where THIS app first
+    // mints its own credential, and an OP session is portable: a stolen one
+    // replays into rus from anywhere with no second prompt. So the same
+    // new-country signal that alerts below holds the sign-in here.
+    let gate = {
         let db = app_state.db.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(e) = db.execute(
-            "INSERT INTO user_sessions (id, session_token_hash, user_id, session_version, auth_via_oidc, created_at, expires_at)
-             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6)",
-            params![
-                Uuid::new_v4().to_string(),
-                token_hash,
-                provisioned.user_id,
-                provisioned.session_version,
-                rfc3339(now),
-                rfc3339(expires_at),
-            ],
-        ) {
-            tracing::error!(error = %e, "failed to insert user_session");
-            return HttpResponse::InternalServerError().finish();
+        crate::login_approval::gate_login(
+            &db,
+            &app_state.config.mail,
+            provisioned.user_id,
+            &http_req,
+        )
+    };
+    if let Some(context) = &gate {
+        match &context.decision {
+            crate::login_approval::GateDecision::Hold(recipient) => {
+                let recipient = recipient.clone();
+                return match crate::login_approval::request_login_approval(
+                    &app_state,
+                    provisioned.user_id,
+                    context,
+                    &recipient,
+                    &http_req,
+                )
+                .await
+                {
+                    Ok(()) => redirect(&format!(
+                        "{}?pending=1",
+                        crate::login_approval::APPROVAL_PAGE_PATH
+                    )),
+                    Err(e) => {
+                        tracing::error!(error = %e, "RUS-19: approval mail failed, sign-in refused");
+                        redirect(&format!(
+                            "{}?error=mail",
+                            crate::login_approval::APPROVAL_PAGE_PATH
+                        ))
+                    }
+                };
+            }
+            // Nothing could deliver the link, and a hold with no way to release
+            // it is a lockout, so the sign-in completes and RUS-7 alerts.
+            crate::login_approval::GateDecision::AllowUndeliverable => {
+                tracing::warn!(
+                    user_id = provisioned.user_id,
+                    "RUS-19: new-country sign-in allowed because no approval link could be delivered"
+                );
+            }
+            crate::login_approval::GateDecision::Allow => {}
         }
     }
+
+    // Issue session.
+    let session_token = {
+        let db = app_state.db.lock().unwrap_or_else(|e| e.into_inner());
+        match session::establish_session(
+            &db,
+            provisioned.user_id,
+            state.config.session_ttl_seconds,
+            true,
+        ) {
+            Ok(token) => token,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to insert user_session");
+                return HttpResponse::InternalServerError().finish();
+            }
+        }
+    };
 
     // RUS-7: the OP alerts on sign-ins to itself, not to this app, so a reused
     // OP session from a new country would otherwise be silent here.
@@ -587,12 +620,7 @@ pub async fn dev_seed_session(
     const DEV_EMAIL: &str = "dev@dev.local";
     const DEV_SAAS_UUID: &str = "00000000-0000-0000-0000-000000000001";
 
-    let now = Utc::now();
-    let expires_at = now + chrono::Duration::days(30);
-    let session_token = random_b64url(32);
-    let token_hash = hash_session_token(&session_token);
-
-    let user_id_result: rusqlite::Result<i64> = (|| {
+    let seeded: rusqlite::Result<String> = (|| {
         let db = app_state.db.lock().unwrap_or_else(|e| e.into_inner());
         // Upsert dev user.
         db.execute(
@@ -606,30 +634,18 @@ pub async fn dev_seed_session(
             params![DEV_USERNAME],
             |r| r.get(0),
         )?;
-        let session_version: i32 = db.query_row(
-            "SELECT session_version FROM users WHERE userID = ?1",
-            params![user_id],
-            |r| r.get(0),
-        )?;
-        db.execute(
-            "INSERT INTO user_sessions (id, session_token_hash, user_id, session_version, auth_via_oidc, created_at, expires_at)
-             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6)",
-            params![
-                Uuid::new_v4().to_string(),
-                token_hash,
-                user_id,
-                session_version,
-                rfc3339(now),
-                rfc3339(expires_at),
-            ],
-        )?;
-        Ok(user_id)
+        // Same helper as the callback, so the dev fixture cannot drift from the
+        // real mint site. Not gated: it is a local fixture, not a sign-in.
+        session::establish_session(&db, user_id, state.config.session_ttl_seconds, false)
     })();
 
-    if let Err(e) = user_id_result {
-        tracing::error!(error = %e, "dev_seed_session failed");
-        return HttpResponse::InternalServerError().body(format!("dev seed failed: {e}"));
-    }
+    let session_token = match seeded {
+        Ok(token) => token,
+        Err(e) => {
+            tracing::error!(error = %e, "dev_seed_session failed");
+            return HttpResponse::InternalServerError().body(format!("dev seed failed: {e}"));
+        }
+    };
 
     let secure = state.config.redirect_uri.starts_with("https://");
     HttpResponse::SeeOther()

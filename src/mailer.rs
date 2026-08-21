@@ -55,6 +55,51 @@ If this was the account owner, no action is needed.
 If this sign-in is not recognised, someone else may have access to the account. Reset that account's password now and review its active sessions.
 ";
 
+/// Plain-text body asking the account owner to release a held sign-in.
+const LOGIN_APPROVAL_OWNER_BODY: &str = "\
+Approve the sign-in to your RUS account from {country}
+
+A sign-in to your RUS account \"{username}\" was attempted from a country you have not signed in from before. It is being held and no session was created.
+
+Country: {country}
+When: {timestamp}
+IP address: {ip_address}
+Device: {device}
+
+If this was you, open this link within {expiry_minutes} minutes to finish signing in:
+
+{approval_url}
+
+The link works once and then stops working.
+
+If this was not you, do nothing. The attempt expires on its own and no session is created. Change your password, because whoever tried it already had your credentials.
+";
+
+/// Plain-text body sent to the operator mailbox when the held account has no
+/// address of its own. Whoever reads it is approving on the owner's behalf, so
+/// it names the account and says so.
+const LOGIN_APPROVAL_OPERATOR_BODY: &str = "\
+Approve the sign-in to RUS account {username} from {country}
+
+A sign-in to the RUS account \"{username}\" was attempted from a country that account has not signed in from before. It is being held and no session was created.
+
+This account has no email address of its own, so this request went to the operator mailbox instead of its owner.
+
+Account: {username}
+Country: {country}
+When: {timestamp}
+IP address: {ip_address}
+Device: {device}
+
+Open this link within {expiry_minutes} minutes to release the sign-in, but only after confirming with the account owner that it was them:
+
+{approval_url}
+
+The link works once and then stops working. Opening it signs that browser in as {username}.
+
+If the sign-in is not recognised, do nothing. It expires on its own.
+";
+
 /// Who a new-location alert is addressed to. The variant also picks the
 /// wording: the owner gets a personal notice, the operator gets one naming
 /// which account signed in.
@@ -283,6 +328,114 @@ pub async fn send_new_signin_location_alert(
             Err(format!(
                 "New sign-in location alert delivery failed: {error}"
             ))
+        }
+    }
+}
+
+/// Everything the approval request needs to render and address itself. A struct
+/// rather than a parameter list because the two are always filled in together.
+pub struct LoginApprovalMail<'a> {
+    pub recipient: &'a AlertRecipient,
+    pub username: &'a str,
+    pub country: &'a str,
+    pub ip: &'a str,
+    pub device: Option<&'a str>,
+    pub approval_url: &'a str,
+    pub expiry_minutes: i64,
+}
+
+/// Render the approval-request body for whoever it is addressed to. Split out
+/// so the wording and interpolation are unit-testable without a mail server.
+fn login_approval_body(request: &LoginApprovalMail<'_>, timestamp: &str) -> String {
+    let template = match request.recipient {
+        AlertRecipient::Owner(_) => LOGIN_APPROVAL_OWNER_BODY,
+        AlertRecipient::Operator(_) => LOGIN_APPROVAL_OPERATOR_BODY,
+    };
+    template
+        .replace("{username}", request.username)
+        .replace("{country}", request.country)
+        .replace("{timestamp}", timestamp)
+        .replace("{ip_address}", request.ip)
+        .replace("{device}", request.device.unwrap_or("unknown"))
+        .replace("{approval_url}", request.approval_url)
+        .replace("{expiry_minutes}", &request.expiry_minutes.to_string())
+}
+
+/// Subject line for a held sign-in, phrased for whoever it is addressed to.
+fn login_approval_subject(request: &LoginApprovalMail<'_>) -> String {
+    match request.recipient {
+        AlertRecipient::Owner(_) => format!(
+            "Approve the sign-in to your RUS account from {}",
+            request.country
+        ),
+        AlertRecipient::Operator(_) => format!(
+            "Approve the sign-in to RUS account {} from {}",
+            request.username, request.country
+        ),
+    }
+}
+
+/// Email `recipient` a single-use link that releases a held sign-in (RUS-19).
+///
+/// Unlike the after-the-fact alert this one is load-bearing: the sign-in stays
+/// held until the link is opened, so an `Err` here must fail the sign-in rather
+/// than let it through ungated. The caller checks `smtp_ready` before holding
+/// at all, so reaching this with no transport is a bug, not a configuration.
+pub async fn send_login_approval_request(
+    mail: &MailConfig,
+    request: LoginApprovalMail<'_>,
+) -> Result<(), String> {
+    let subject = login_approval_subject(&request);
+    let body = login_approval_body(&request, &Utc::now().to_rfc3339());
+
+    if !mail.smtp_ready() {
+        return Err("SMTP is not configured, so no approval link could be sent".to_string());
+    }
+
+    let from_email = mail
+        .smtp_from_email
+        .clone()
+        .ok_or_else(|| "SMTP sender email is missing".to_string())?;
+
+    let from_mailbox = Mailbox::new(
+        mail.smtp_from_name.clone(),
+        from_email
+            .parse()
+            .map_err(|error| format!("Invalid SMTP from address: {error}"))?,
+    );
+    let to_mailbox = request
+        .recipient
+        .address()
+        .parse()
+        .map_err(|error| format!("Invalid approval recipient address: {error}"))?;
+    let message = Message::builder()
+        .from(from_mailbox)
+        .to(Mailbox::new(None, to_mailbox))
+        .subject(subject)
+        .body(body)
+        .map_err(|error| format!("Sign-in approval request build failed: {error}"))?;
+
+    match smtp_transport(mail)?.send(message).await {
+        Ok(_) => {
+            tracing::info!(
+                delivery_mode = "smtp",
+                delivered = true,
+                route = request.recipient.route(),
+                username = %request.username,
+                "Sign-in approval request delivered"
+            );
+            Ok(())
+        }
+        Err(error) => {
+            tracing::error!(
+                delivery_mode = "smtp",
+                delivered = false,
+                route = request.recipient.route(),
+                username = %request.username,
+                error = %error,
+                "Sign-in approval request delivery failed"
+            );
+            Err(format!("Sign-in approval request delivery failed: {error}"))
         }
     }
 }

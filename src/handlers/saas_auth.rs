@@ -122,8 +122,16 @@ pub async fn maintenance_guard(
 
     let path = req.path().to_string();
 
-    // OIDC routes always pass through so users can finish auth flow.
-    if path.starts_with("/oauth2/") || path.starts_with("/webhooks/") || path.starts_with("/dev/") {
+    // OIDC routes always pass through so users can finish auth flow. RUS-19's
+    // approval page and API join them: an admin whose sign-in is held cannot
+    // become an admin session without them, so blocking these would lock the
+    // only account that can lift maintenance out of the app.
+    if path.starts_with("/oauth2/")
+        || path.starts_with("/webhooks/")
+        || path.starts_with("/dev/")
+        || path == crate::login_approval::APPROVAL_PAGE_PATH
+        || path == crate::login_approval::APPROVAL_API_PATH
+    {
         return Ok(next.call(req).await?.map_into_boxed_body());
     }
     if MAINTENANCE_ALLOWLIST.iter().any(|p| path == *p) {
@@ -194,6 +202,22 @@ mod tests {
             .route("/oauth2/login", web::get().to(|| async { "login" }))
             .route("/webhooks/maintenance", web::post().to(|| async { "wh" }))
             .wrap(actix_web::middleware::from_fn(maintenance_guard))
+    }
+
+    #[actix_web::test]
+    async fn approval_routes_survive_maintenance_mode() {
+        let state = make_test_state();
+        state.maintenance_mode.store(true, Ordering::SeqCst);
+        let app = test::init_service(build(state).route(
+            crate::login_approval::APPROVAL_PAGE_PATH,
+            web::get().to(|| async { "approve" }),
+        ))
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri(crate::login_approval::APPROVAL_PAGE_PATH)
+            .to_request();
+        assert_eq!(test::call_service(&app, req).await.status(), 200);
     }
 
     #[actix_web::test]

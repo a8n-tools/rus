@@ -75,6 +75,7 @@ src/
 ├── models.rs         # Data models and request/response types
 ├── security.rs       # Password validation, account lockout (standalone only)
 ├── location_alert.rs # New-sign-in-country detection, trusted-proxy gate (both modes)
+├── login_approval.rs # New-country sign-in gate, approval page and API (both modes)
 ├── mailer.rs         # Security alert email via SMTP, TLS by default (both modes)
 ├── auth/             # JWT handling (standalone only)
 │   ├── mod.rs
@@ -101,7 +102,7 @@ src/
 - k9f3x2m7.js (auth.js) handles token management
 
 ### API Structure
-- **Public**: `/api/register`, `/api/login`, `/{short_code}` (redirect)
+- **Public**: `/api/register`, `/api/login`, `/api/login-approval` (GET, POST), `/{short_code}` (redirect)
 - **Protected** (Bearer token): `/api/me` (GET, PATCH), `/api/shorten`, `/api/urls`, `/api/stats/{code}`, `/api/urls/{code}` (DELETE), `/api/urls/{code}/name` (PATCH)
 
 ### Key Implementation Details
@@ -132,7 +133,8 @@ RUST_LOG=info,rus=debug     # Log level filter (default: info,rus=debug)
 ### Security alerts (both modes)
 ```
 SECURITY_ALERT_EMAIL=          # Fallback mailbox for an account with no address
-LOGIN_LOCATION_ALERTS_ENABLED=true  # Kill switch (default: true; false/0/no disables)
+LOGIN_LOCATION_ALERTS_ENABLED=true  # Alert kill switch (default: true; false/0/no disables)
+LOGIN_APPROVAL_ENABLED=false   # Hold a new-country sign-in for approval (default: off; only "true" enables)
 SMTP_HOST=                     # SMTP_HOST and SMTP_FROM_EMAIL are required before
 SMTP_FROM_EMAIL=               # anything can be sent; otherwise it is logged instead
 SMTP_USERNAME=
@@ -147,6 +149,18 @@ The new-sign-in-location alert is routed to the account owner (RUS-11), in this 
 `users.email` is nullable in both schemas: saas ships it and populates it from the OP identity on every login (`src/oidc/jit.rs`), standalone gets it from an idempotent `ALTER TABLE` in `src/db.rs` and the account sets its own via `POST /api/register` (optional `email` field) or `PATCH /api/me`. Blank stores NULL rather than an empty string, and a stored value is re-validated on read, because SSO writes `""` when the OP omits the claim.
 
 The country comes from the `X-IPCountry` header injected by the reverse proxy's geoblock middleware, not an in-process geoip database, so with no such edge no country resolves and no alert fires.
+
+### New-country sign-in gate (both modes)
+
+`LOGIN_APPROVAL_ENABLED=true` upgrades the RUS-7 alert from a notice to a gate (RUS-19): a sign-in from a country the account has not used before is held, no session is minted, and a single-use emailed link releases it. Only the exact string `true` enables it; every other value leaves it off, because a misfiring gate is a lockout rather than noise. The decision lives in `src/login_approval.rs` (`gate_decision`, `gate_login`), the suspicion predicate is shared with the alert (`location_alert::is_new_country`), and the page plus API are `static/approve-login.html`, `GET /api/login-approval` and `POST /api/login-approval`.
+
+Never held, and each of these has a route-level test in both legs: a first-ever sign-in (no prior country), a sign-in whose country does not resolve, a sign-in from the same country, and anything at all while the switch is off. A held sign-in writes `pending_login_approvals` before the mail goes out, stores only a SHA-256 of a 256-bit token, expires in 15 minutes, and is claimed by a guarded `UPDATE ... WHERE token_hash = ? AND consumed_at IS NULL AND expires_at > ?` whose affected-row count decides a concurrent race. GET validates, POST claims, so a link scanner cannot burn the owner's link. `last_login_country` is written only once a sign-in completes, so an unapproved attempt cannot seed a familiar country. The per-account `notify_new_location` opt-out deliberately does NOT disable the gate.
+
+Deliverability is part of the decision: with no recipient resolvable (no account address and no `SECURITY_ALERT_EMAIL`) or no SMTP configured, the sign-in is ALLOWED and logged loudly rather than held, because a gate whose link can never arrive is a permanent lockout. A delivery that is configured and merely fails is different and answers 500 with nothing issued.
+
+**Recovery, both mail-independent:** set `LOGIN_APPROVAL_ENABLED=false` and restart (global), or `UPDATE users SET last_login_country = NULL WHERE username = '...'` so the next sign-in is a first-ever one (per account, no restart). Documented in README under "Recovering when the approval mail cannot arrive".
+
+**The approval page and its API must stay mounted outside every guard.** `main.rs` calls `.configure(login_approval::configure_routes)` before the guarded `/api` scope and before the `/{code}` catch-all in BOTH legs, and `maintenance_guard` allowlists both paths. Whoever follows the emailed link has no session by construction. auto-buyer's AB-67 shipped the same feature with these routes behind its auth middleware and the gate became a lockout, invisible because its tests called the handlers directly. `login_approval::tests` therefore asserts reachability through a real guarded app in both legs, and `main_mounts_the_approval_routes_ahead_of_every_guard` reads `src/main.rs` itself to check the mount order.
 
 ### Trusted proxies (both modes)
 

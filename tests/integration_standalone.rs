@@ -69,6 +69,10 @@ async fn build_app_with_state(
             .route("/api/config", web::get().to(get_config))
             .route("/api/version", web::get().to(get_version))
             .route("/api/setup/required", web::get().to(check_setup_required))
+            // RUS-19: same call main.rs makes, in the same place, so this
+            // mirror cannot drift into mounting the approval routes behind the
+            // guarded /api scope below. Sharing the whole table is RUS-21.
+            .configure(rus::login_approval::configure_routes)
             .route("/api/report-abuse", web::post().to(submit_abuse_report))
             .service(
                 web::scope("/api/admin")
@@ -612,6 +616,42 @@ async fn e2e_public_endpoints_accessible() {
     let req = test::TestRequest::get().uri("/k9f3x2m7.js").to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 200);
+}
+
+// =============================================================================
+// RUS-19 approval routes are reachable with no session
+// =============================================================================
+
+// The emailed link is opened by someone who is, by definition, not signed in.
+// Behind the bearer guard it would 401 and the gate would become a lockout,
+// which is exactly how auto-buyer's AB-67 shipped broken.
+#[actix_web::test]
+async fn e2e_approval_routes_need_no_bearer_token() {
+    let app = build_app().await;
+    let peer = "127.0.0.1:34567".parse().unwrap();
+
+    // Control: the guarded scope really is guarded in this app.
+    let req = test::TestRequest::get().uri("/api/me").to_request();
+    assert_eq!(test::call_service(&app, req).await.status(), 401);
+
+    let req = test::TestRequest::get()
+        .uri("/approve-login.html")
+        .to_request();
+    assert_eq!(test::call_service(&app, req).await.status(), 200);
+
+    // An unknown token is a 404 from the handler, not a 401 from a guard.
+    let req = test::TestRequest::get()
+        .uri("/api/login-approval?token=nosuchtoken")
+        .peer_addr(peer)
+        .to_request();
+    assert_eq!(test::call_service(&app, req).await.status(), 404);
+
+    let req = test::TestRequest::post()
+        .uri("/api/login-approval")
+        .peer_addr(peer)
+        .set_json(serde_json::json!({"token": "nosuchtoken"}))
+        .to_request();
+    assert_eq!(test::call_service(&app, req).await.status(), 404);
 }
 
 // =============================================================================

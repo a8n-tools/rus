@@ -10,10 +10,11 @@ use tracing::{debug, error, info, warn};
 use crate::auth::get_claims;
 use crate::auth::jwt::{create_jwt, generate_refresh_token};
 use crate::db::AppState;
+use crate::login_approval::GateDecision;
 use crate::mailer::normalize_account_email;
 use crate::models::{
-    AuthResponse, CurrentUserResponse, LoginRequest, RefreshRequest, RefreshResponse,
-    RegisterRequest, UpdateAccountRequest,
+    CurrentUserResponse, LoginRequest, RefreshRequest, RefreshResponse, RegisterRequest,
+    UpdateAccountRequest,
 };
 use crate::security::{is_account_locked, record_login_attempt, validate_password};
 
@@ -104,38 +105,25 @@ pub async fn register(
             // Get the user ID
             let user_id: i64 = db.last_insert_rowid();
 
-            // Create JWT token
-            match create_jwt(
+            // RUS-19: no gate here. A brand-new account has no prior country,
+            // so the predicate can never hold this sign-in; the alert below
+            // still records the baseline the next one is compared against.
+            match crate::auth::establish_session(
+                &db,
+                &data.config,
                 &req.username,
                 user_id,
                 is_admin,
-                &data.config.jwt_secret,
-                data.config.jwt_expiry_hours,
             ) {
-                Ok(token) => {
-                    // Create refresh token
-                    let refresh_token = generate_refresh_token();
-                    let expires_at =
-                        Utc::now() + Duration::days(data.config.refresh_token_expiry_days);
-                    let expires_at_str = expires_at.format("%Y-%m-%d %H:%M:%S").to_string();
-
-                    let _ = db.execute(
-                        "INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?1, ?2, ?3)",
-                        params![user_id, &refresh_token, &expires_at_str],
-                    );
-
+                Ok(session) => {
                     info!(username = %req.username, user_id, is_admin, "User registered");
                     // RUS-7: records the baseline country so a later sign-in
                     // from elsewhere alerts. A first login can never alert.
                     crate::location_alert::spawn_new_location_check(&data, user_id, &http_req);
-                    Ok(HttpResponse::Created().json(AuthResponse {
-                        token,
-                        refresh_token,
-                        username: req.username.clone(),
-                    }))
+                    Ok(HttpResponse::Created().json(session))
                 }
-                Err(_) => {
-                    error!(username = %req.username, "Failed to create JWT after registration");
+                Err(error) => {
+                    error!(username = %req.username, error = %error, "Failed to establish a session after registration");
                     Ok(HttpResponse::InternalServerError().json(serde_json::json!({
                         "error": "Failed to create token"
                     })))
@@ -164,6 +152,49 @@ pub async fn login(
     req: web::Json<LoginRequest>,
     http_req: HttpRequest,
 ) -> Result<HttpResponse> {
+    // Every database touch happens inside `login_locked`, which returns with the
+    // connection lock released. RUS-19's approval mail is awaited out here, so an
+    // SMTP round trip can never hold the single shared connection.
+    match login_locked(&data, &req, &http_req) {
+        LoginOutcome::Response(response) => Ok(response),
+        LoginOutcome::Hold {
+            user_id,
+            username,
+            context,
+            recipient,
+        } => Ok(
+            match crate::login_approval::request_login_approval(
+                &data, user_id, &context, &recipient, &http_req,
+            )
+            .await
+            {
+                Ok(()) => crate::login_approval::held_response(),
+                Err(error) => {
+                    error!(username = %username, error = %error, "RUS-19: approval mail failed, sign-in refused");
+                    crate::login_approval::hold_failed_response()
+                }
+            },
+        ),
+    }
+}
+
+/// What the locked half of a login decided: an answer, or a sign-in to hold.
+enum LoginOutcome {
+    Response(HttpResponse),
+    Hold {
+        user_id: i64,
+        username: String,
+        context: crate::login_approval::GateContext,
+        recipient: crate::mailer::AlertRecipient,
+    },
+}
+
+/// The whole of a login that needs the database, start to finish under one lock.
+fn login_locked(
+    data: &web::Data<AppState>,
+    req: &LoginRequest,
+    http_req: &HttpRequest,
+) -> LoginOutcome {
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Check for account lockout BEFORE any other database operations
@@ -175,7 +206,7 @@ pub async fn login(
         data.config.account_lockout_duration_minutes,
     ) {
         warn!(username = %req.username, "Login blocked: account locked");
-        return Ok(HttpResponse::TooManyRequests().json(serde_json::json!({
+        return LoginOutcome::Response(HttpResponse::TooManyRequests().json(serde_json::json!({
             "error": format!(
                 "Account locked due to too many failed attempts. Try again in {} minutes.",
                 data.config.account_lockout_duration_minutes
@@ -183,99 +214,105 @@ pub async fn login(
         })));
     }
 
-    // Get user from database
-    let mut stmt = match db
-        .prepare("SELECT userID, username, password, is_admin FROM users WHERE username = ?1")
-    {
-        Ok(stmt) => stmt,
-        Err(_) => {
-            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Database error"
-            })));
-        }
+    // Get user from database. Scoped so the prepared statement stops borrowing
+    // the connection.
+    let user_result: rusqlite::Result<(i64, String, String, i32)> = {
+        let mut stmt = match db
+            .prepare("SELECT userID, username, password, is_admin FROM users WHERE username = ?1")
+        {
+            Ok(stmt) => stmt,
+            Err(_) => {
+                return LoginOutcome::Response(HttpResponse::InternalServerError().json(
+                    serde_json::json!({
+                        "error": "Database error"
+                    }),
+                ));
+            }
+        };
+
+        stmt.query_row(params![&req.username], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
     };
 
-    let user_result: rusqlite::Result<(i64, String, String, i32)> = stmt
-        .query_row(params![&req.username], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-        });
+    let Ok((user_id, username, hashed_password, is_admin_int)) = user_result else {
+        // Record failed login attempt (user not found)
+        record_login_attempt(&db, &req.username, false);
+        warn!(username = %req.username, "Login failed: user not found");
+        return LoginOutcome::Response(HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Invalid credentials"
+        })));
+    };
+    let is_admin = is_admin_int != 0;
 
-    match user_result {
-        Ok((user_id, username, hashed_password, is_admin_int)) => {
-            let is_admin = is_admin_int != 0;
-            // Verify password (supports both Argon2id and legacy bcrypt hashes)
-            match verify_password(&req.password, &hashed_password) {
-                Ok(true) => {
-                    // Opportunistically rehash legacy bcrypt passwords to Argon2id
-                    if is_legacy_bcrypt_hash(&hashed_password) {
-                        if let Ok(new_hash) = hash_password(&req.password) {
-                            let _ = db.execute(
-                                "UPDATE users SET password = ?1 WHERE userID = ?2",
-                                params![&new_hash, user_id],
-                            );
-                        }
-                    }
-                    // Record successful login attempt
-                    record_login_attempt(&db, &req.username, true);
-                    // RUS-7: alert on a sign-in from a new country, off the hot path.
-                    crate::location_alert::spawn_new_location_check(&data, user_id, &http_req);
-                    // Create JWT token
-                    match create_jwt(
-                        &username,
-                        user_id,
-                        is_admin,
-                        &data.config.jwt_secret,
-                        data.config.jwt_expiry_hours,
-                    ) {
-                        Ok(token) => {
-                            // Create refresh token
-                            let refresh_token = generate_refresh_token();
-                            let expires_at =
-                                Utc::now() + Duration::days(data.config.refresh_token_expiry_days);
-                            let expires_at_str = expires_at.format("%Y-%m-%d %H:%M:%S").to_string();
-
-                            let _ = db.execute(
-                                "INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?1, ?2, ?3)",
-                                params![user_id, &refresh_token, &expires_at_str],
-                            );
-
-                            info!(username = %username, user_id, "User logged in");
-                            Ok(HttpResponse::Ok().json(AuthResponse {
-                                token,
-                                refresh_token,
-                                username,
-                            }))
-                        }
-                        Err(_) => {
-                            error!(username = %username, "Failed to create JWT after login");
-                            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                                "error": "Failed to create token"
-                            })))
-                        }
-                    }
-                }
-                Ok(false) => {
-                    // Record failed login attempt (wrong password)
-                    record_login_attempt(&db, &req.username, false);
-                    warn!(username = %req.username, "Login failed: invalid password");
-                    Ok(HttpResponse::Unauthorized().json(serde_json::json!({
-                        "error": "Invalid credentials"
-                    })))
-                }
-                Err(_) => {
-                    error!(username = %req.username, "Password verification error");
-                    Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                        "error": "Authentication error"
-                    })))
-                }
-            }
+    // Verify password (supports both Argon2id and legacy bcrypt hashes)
+    match verify_password(&req.password, &hashed_password) {
+        Ok(true) => {}
+        Ok(false) => {
+            // Record failed login attempt (wrong password)
+            record_login_attempt(&db, &req.username, false);
+            warn!(username = %req.username, "Login failed: invalid password");
+            return LoginOutcome::Response(HttpResponse::Unauthorized().json(serde_json::json!({
+                "error": "Invalid credentials"
+            })));
         }
         Err(_) => {
-            // Record failed login attempt (user not found)
-            record_login_attempt(&db, &req.username, false);
-            warn!(username = %req.username, "Login failed: user not found");
-            Ok(HttpResponse::Unauthorized().json(serde_json::json!({
-                "error": "Invalid credentials"
+            error!(username = %req.username, "Password verification error");
+            return LoginOutcome::Response(HttpResponse::InternalServerError().json(
+                serde_json::json!({
+                    "error": "Authentication error"
+                }),
+            ));
+        }
+    }
+
+    // Opportunistically rehash legacy bcrypt passwords to Argon2id
+    if is_legacy_bcrypt_hash(&hashed_password) {
+        if let Ok(new_hash) = hash_password(&req.password) {
+            let _ = db.execute(
+                "UPDATE users SET password = ?1 WHERE userID = ?2",
+                params![&new_hash, user_id],
+            );
+        }
+    }
+    // Record successful login attempt
+    record_login_attempt(&db, &req.username, true);
+
+    // RUS-19: the password is right, so this is the point a session would be
+    // established. Decide the gate before anything is minted.
+    let gate = crate::login_approval::gate_login(&db, &data.config.mail, user_id, http_req);
+    if let Some(context) = gate {
+        match &context.decision {
+            GateDecision::Hold(recipient) => {
+                let recipient = recipient.clone();
+                return LoginOutcome::Hold {
+                    user_id,
+                    username,
+                    context,
+                    recipient,
+                };
+            }
+            // Gate-worthy with nothing to deliver the link with. Holding here
+            // would be a lockout with no way back in, so the sign-in completes
+            // and the RUS-7 alert carries the signal instead.
+            GateDecision::AllowUndeliverable => {
+                warn!(username = %username, user_id, "RUS-19: new-country sign-in allowed because no approval link could be delivered; set SMTP_HOST, SMTP_FROM_EMAIL and an account address or SECURITY_ALERT_EMAIL");
+            }
+            GateDecision::Allow => {}
+        }
+    }
+
+    // RUS-7: alert on a sign-in from a new country, off the hot path.
+    crate::location_alert::spawn_new_location_check(data, user_id, http_req);
+    match crate::auth::establish_session(&db, &data.config, &username, user_id, is_admin) {
+        Ok(session) => {
+            info!(username = %username, user_id, "User logged in");
+            LoginOutcome::Response(HttpResponse::Ok().json(session))
+        }
+        Err(error) => {
+            error!(username = %username, error = %error, "Failed to establish a session after login");
+            LoginOutcome::Response(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to create token"
             })))
         }
     }
@@ -1267,5 +1304,219 @@ mod tests {
         assert_eq!(resp.status(), 200);
         assert!(!stored_notify(&state, "alice"), "alice opted out");
         assert!(stored_notify(&state, "bob"), "bob is untouched");
+    }
+
+    // ── RUS-19: the approval gate, at the real /api/login route ──────────────
+    //
+    // The pure decision is covered in `login_approval`; these drive it through
+    // the route that actually mints a standalone session, because the property
+    // that matters is "no token comes back", not "the predicate returned true".
+
+    /// A state whose gate is on and whose approval mail is deliverable by
+    /// configuration. The relay points at a closed port, so a held sign-in
+    /// writes its row and then fails the send immediately rather than hanging
+    /// the test on a network timeout.
+    fn gated_state() -> web::Data<AppState> {
+        let mut config = crate::testing::test_config();
+        config.mail = crate::config::MailConfig {
+            smtp_host: Some("127.0.0.1".to_string()),
+            smtp_port: Some(1),
+            smtp_from_email: Some("no-reply@example.com".to_string()),
+            login_approval_enabled: true,
+            ..crate::config::MailConfig::default()
+        };
+        web::Data::new(AppState::new(config).unwrap())
+    }
+
+    /// Trust the loopback so `X-IPCountry` is honoured at all (RUS-12).
+    fn trust_loopback() {
+        crate::location_alert::init_trusted_proxies(vec![
+            "127.0.0.0/8".parse().unwrap(),
+            "::1/128".parse().unwrap(),
+        ]);
+    }
+
+    fn set_account(
+        state: &web::Data<AppState>,
+        username: &str,
+        country: Option<&str>,
+        notify: bool,
+    ) {
+        let db = state.db.lock().unwrap();
+        db.execute(
+            "UPDATE users SET last_login_country = ?1, email = 'alice@example.com',
+             notify_new_location = ?2 WHERE username = ?3",
+            params![country, notify as i64, username],
+        )
+        .unwrap();
+    }
+
+    fn stored_country(state: &web::Data<AppState>, username: &str) -> Option<String> {
+        let db = state.db.lock().unwrap();
+        db.query_row(
+            "SELECT last_login_country FROM users WHERE username = ?1",
+            params![username],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    fn pending_rows(state: &web::Data<AppState>) -> i64 {
+        let db = state.db.lock().unwrap();
+        db.query_row("SELECT COUNT(*) FROM pending_login_approvals", [], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    }
+
+    /// Sign in as `username` from `country`, or from nowhere when it is `None`.
+    async fn login_from(
+        app: &impl actix_web::dev::Service<
+            actix_http::Request,
+            Response = actix_web::dev::ServiceResponse,
+            Error = actix_web::Error,
+        >,
+        username: &str,
+        country: Option<&str>,
+    ) -> actix_web::dev::ServiceResponse {
+        let mut req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(serde_json::json!({"username": username, "password": TEST_PASSWORD}));
+        if let Some(code) = country {
+            req = req
+                .peer_addr("127.0.0.1:34567".parse().unwrap())
+                .insert_header(("X-IPCountry", code));
+        }
+        test::call_service(app, req.to_request()).await
+    }
+
+    // Property 1. Getting this wrong means the first account ever created can
+    // never sign in.
+    #[actix_web::test]
+    async fn login_is_never_gated_on_a_first_ever_sign_in() {
+        trust_loopback();
+        let state = gated_state();
+        let app = setup_app!(state);
+        // Registered with no country, so there is no baseline to differ from.
+        do_register(&app, "alice").await;
+        set_account(&state, "alice", None, true);
+
+        let resp = login_from(&app, "alice", Some("DE")).await;
+        assert_eq!(resp.status(), 200);
+        let body: Value = test::read_body_json(resp).await;
+        assert!(body["token"].is_string());
+        assert_eq!(pending_rows(&state), 0);
+    }
+
+    // Property 2. Getting this wrong bricks every deployment without the
+    // geoblock edge, since off it no country ever resolves.
+    #[actix_web::test]
+    async fn login_is_never_gated_when_no_country_resolves() {
+        trust_loopback();
+        let state = gated_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+        set_account(&state, "alice", Some("US"), true);
+
+        let resp = login_from(&app, "alice", None).await;
+        assert_eq!(resp.status(), 200);
+        let body: Value = test::read_body_json(resp).await;
+        assert!(body["token"].is_string());
+        assert_eq!(pending_rows(&state), 0);
+    }
+
+    // Property 3. Off by default, so a deployment that says nothing behaves
+    // exactly as it did before RUS-19.
+    #[actix_web::test]
+    async fn login_is_never_gated_while_the_kill_switch_is_off() {
+        trust_loopback();
+        let state = make_test_state();
+        assert!(!state.config.mail.login_approval_enabled);
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+        set_account(&state, "alice", Some("US"), true);
+
+        let resp = login_from(&app, "alice", Some("DE")).await;
+        assert_eq!(resp.status(), 200);
+        let body: Value = test::read_body_json(resp).await;
+        assert!(body["token"].is_string());
+        assert_eq!(pending_rows(&state), 0);
+    }
+
+    #[actix_web::test]
+    async fn login_from_a_known_country_is_never_gated() {
+        trust_loopback();
+        let state = gated_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+        set_account(&state, "alice", Some("de"), true);
+
+        let resp = login_from(&app, "alice", Some("DE")).await;
+        assert_eq!(resp.status(), 200);
+        assert_eq!(pending_rows(&state), 0);
+    }
+
+    #[actix_web::test]
+    async fn login_from_a_new_country_yields_no_session() {
+        trust_loopback();
+        let state = gated_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+        set_account(&state, "alice", Some("US"), true);
+
+        let resp = login_from(&app, "alice", Some("DE")).await;
+        // The fixture's relay is unreachable, so the hold is written and the
+        // send then fails: closed, with nothing issued either way.
+        assert_eq!(resp.status(), 500);
+        let body: Value = test::read_body_json(resp).await;
+        assert!(body["token"].is_null(), "a held sign-in issues nothing");
+        assert_eq!(
+            pending_rows(&state),
+            1,
+            "the hold is recorded before the mail"
+        );
+        assert_eq!(
+            stored_country(&state, "alice").as_deref(),
+            Some("US"),
+            "an unapproved attempt must not make its country familiar"
+        );
+    }
+
+    // The alert opt-out is written from a session, so honouring it here would
+    // let anyone holding a session switch off the control that defends the
+    // account against them.
+    #[actix_web::test]
+    async fn the_alert_opt_out_does_not_disable_the_login_gate() {
+        trust_loopback();
+        let state = gated_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+        set_account(&state, "alice", Some("US"), false);
+
+        let resp = login_from(&app, "alice", Some("DE")).await;
+        assert_ne!(resp.status(), 200);
+        assert_eq!(pending_rows(&state), 1);
+    }
+
+    // A gate whose link cannot be delivered is a lockout, so an unconfigured
+    // transport degrades to the RUS-7 alert rather than holding.
+    #[actix_web::test]
+    async fn login_from_a_new_country_completes_when_no_link_can_be_delivered() {
+        trust_loopback();
+        let mut config = crate::testing::test_config();
+        config.mail = crate::config::MailConfig {
+            login_approval_enabled: true,
+            ..crate::config::MailConfig::default()
+        };
+        let state = web::Data::new(AppState::new(config).unwrap());
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+        set_account(&state, "alice", Some("US"), true);
+
+        let resp = login_from(&app, "alice", Some("DE")).await;
+        assert_eq!(resp.status(), 200);
+        let body: Value = test::read_body_json(resp).await;
+        assert!(body["token"].is_string());
+        assert_eq!(pending_rows(&state), 0);
     }
 }

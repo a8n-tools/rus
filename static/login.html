@@ -145,6 +145,13 @@
                     throw new Error(data.error || 'Login failed');
                 }
 
+                // RUS-19: a sign-in from a new country is held and answers 202
+                // with no tokens. Same waiting page the saas leg redirects to.
+                if (data.approval_required) {
+                    window.location.href = 'approve-login.html?pending=1';
+                    return;
+                }
+
                 // Save token, username, and refresh token
                 saveAuth(data.token, data.username, data.refresh_token);
 
