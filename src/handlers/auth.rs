@@ -1213,6 +1213,49 @@ mod tests {
         }
     }
 
+    // The two account fields are independent, and the dashboard submits only
+    // what the user changed, so a save of one must never disturb the other.
+    #[actix_web::test]
+    async fn patch_me_leaves_the_field_it_was_not_sent_alone() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+        patch_me(
+            &app,
+            token,
+            serde_json::json!({"email": "alice@example.com"}),
+        )
+        .await;
+
+        // Turning the alert off keeps the address, in the store and in the
+        // response the dashboard repaints its controls from.
+        let resp = patch_me(
+            &app,
+            token,
+            serde_json::json!({"notify_new_location": false}),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+        let echoed: Value = test::read_body_json(resp).await;
+        assert_eq!(echoed["email"], "alice@example.com");
+        assert_eq!(
+            stored_email(&state, "alice"),
+            Some("alice@example.com".to_string()),
+            "a toggle-only save must not clear the address"
+        );
+
+        // Changing the address keeps the opt-out.
+        let resp = patch_me(&app, token, serde_json::json!({"email": "new@example.com"})).await;
+        assert_eq!(resp.status(), 200);
+        let echoed: Value = test::read_body_json(resp).await;
+        assert_eq!(echoed["notify_new_location"], false);
+        assert!(
+            !stored_notify(&state, "alice"),
+            "an address-only save must not re-enable the alert"
+        );
+    }
+
     // The type is validated, never coerced: a string is a bad request and
     // changes nothing.
     #[actix_web::test]

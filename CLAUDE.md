@@ -96,9 +96,10 @@ src/
 
 ### Frontend (static/)
 - Vanilla HTML/CSS/JS (no frameworks)
-- JWT stored in localStorage
-- Pages: index.html (landing), login.html, signup.html, dashboard.html
+- JWT stored in localStorage (standalone); saas authenticates with the `rus_session` cookie instead
+- Pages: index.html (landing), login.html, signup.html, dashboard.html, admin.html, setup.html, report.html, 404.html, maintenance.html
 - k9f3x2m7.js (auth.js) handles token management
+- dashboard.html carries an Account section over `GET`/`PATCH /api/me`: the security alert address (standalone only, RUS-17) and the new-location alert opt-out (both modes, RUS-18). Its `apiFetch` helper picks the bearer token or the cookie from the `auth_mode` that `/api/config` reports, so one page serves both legs
 
 ### API Structure
 - **Public**: `/api/register`, `/api/login`, `/{short_code}` (redirect)
@@ -156,7 +157,7 @@ The country comes from the `X-IPCountry` header injected by the reverse proxy's 
 
 ### Account alert opt-out (both modes)
 
-`users.notify_new_location` is a per-account opt-out for the new-sign-in-location alert, on by default and checked before the alert is routed anywhere. It is not an environment variable: the account changes it itself with `PATCH /api/me` (`{"notify_new_location": false}` off, `true` on), and reads it back from `GET /api/me`. Both feature legs carry the pair (`update_current_user` / `get_current_user` in `src/handlers/auth.rs`, `saas_update_me` / `saas_me` in `src/handlers/saas_auth.rs`), and both derive the account from the session rather than the request body, so a user id in the payload is ignored. An absent key means "not submitted" and leaves the stored value alone; an explicit `false` persists; a non-boolean is a 400 rather than a coercion. The queries sit with the rest of the alert's SQL in `src/location_alert.rs` (`get_notify_new_location`, `set_notify_new_location`). The dashboard control is tracked in RUS-18.
+`users.notify_new_location` is a per-account opt-out for the new-sign-in-location alert, on by default and checked before the alert is routed anywhere. It is not an environment variable: the account changes it itself with `PATCH /api/me` (`{"notify_new_location": false}` off, `true` on), and reads it back from `GET /api/me`. Both feature legs carry the pair (`update_current_user` / `get_current_user` in `src/handlers/auth.rs`, `saas_update_me` / `saas_me` in `src/handlers/saas_auth.rs`), and both derive the account from the session rather than the request body, so a user id in the payload is ignored. An absent key means "not submitted" and leaves the stored value alone; an explicit `false` persists; a non-boolean is a 400 rather than a coercion. The queries sit with the rest of the alert's SQL in `src/location_alert.rs` (`get_notify_new_location`, `set_notify_new_location`). The browser control is the Account section of `static/dashboard.html`, which loads both account fields from `GET /api/me` and submits only the ones the user changed, so a toggle save never carries `email` and cannot clear the address.
 
 ### Standalone-only options
 ```

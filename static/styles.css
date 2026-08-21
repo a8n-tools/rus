@@ -187,7 +187,8 @@ label {
 
 input[type="text"],
 input[type="password"],
-input[type="url"] {
+input[type="url"],
+input[type="email"] {
     width: 100%;
     padding: 15px;
     border: 1px solid var(--border-color);
@@ -200,7 +201,8 @@ input[type="url"] {
 
 input[type="text"]:focus,
 input[type="password"]:focus,
-input[type="url"]:focus {
+input[type="url"]:focus,
+input[type="email"]:focus {
     outline: none;
     border-color: var(--rust-orange);
     box-shadow: 0 0 0 3px var(--focus-glow);
@@ -352,10 +354,33 @@ button[type="submit"]:disabled {
     padding: 24px 28px;
 }
 
-.create-section h2 {
+.create-section h2,
+.account-section h2 {
     color: var(--text-primary);
     margin-bottom: 20px;
     font-size: 1.3em;
+}
+
+/* Checkbox row: the label wraps the box, so it opts out of the block label rule */
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 0;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--rust-orange);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.checkbox-label input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--rust-orange);
+    outline-offset: 2px;
 }
 
 .urls-section .section-header {
