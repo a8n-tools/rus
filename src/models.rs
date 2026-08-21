@@ -35,13 +35,19 @@ pub struct RegisterRequest {
     pub email: Option<String>,
 }
 
-/// Account settings update - standalone only (RUS-11).
-#[cfg(feature = "standalone")]
+/// Account settings update. Shared by both feature legs; each leg's
+/// `PATCH /api/me` applies the fields it owns, so saas ignores `email`
+/// (its address comes from the OIDC identity).
 #[derive(Serialize, Deserialize)]
 pub struct UpdateAccountRequest {
-    /// Blank clears the address back to NULL.
+    /// Address security notices go to (RUS-11); blank clears it back to NULL.
     #[serde(default)]
     pub email: Option<String>,
+    /// Whether new-location alerts stay on (RUS-15). Absent means "not
+    /// submitted", so the stored value stands; an explicit `false` persists.
+    /// A non-boolean is rejected rather than coerced.
+    #[serde(default)]
+    pub notify_new_location: Option<bool>,
 }
 
 /// User login request - standalone only
@@ -174,6 +180,8 @@ pub struct CurrentUserResponse {
     /// Address security notices go to, or null when the account has none
     /// (RUS-11).
     pub email: Option<String>,
+    /// Whether sign-ins to this account raise a new-location alert (RUS-15).
+    pub notify_new_location: bool,
 }
 
 /// Admin statistics response - standalone only

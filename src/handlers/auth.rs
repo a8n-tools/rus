@@ -387,15 +387,22 @@ pub async fn get_current_user(
         }
     };
 
-    // RUS-11: the account needs to see the address its security notices go to.
-    let email: Option<String> = {
+    // The account needs to see the address its security notices go to (RUS-11)
+    // and whether its new-location alerts are on (RUS-15). One lock, both reads.
+    let (email, notify_new_location) = {
         let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
-        db.query_row(
-            "SELECT email FROM users WHERE userID = ?1",
-            params![claims.user_id],
-            |row| row.get(0),
-        )
-        .unwrap_or(None)
+        let email: Option<String> = db
+            .query_row(
+                "SELECT email FROM users WHERE userID = ?1",
+                params![claims.user_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(None);
+        let notify = crate::location_alert::get_notify_new_location(&db, claims.user_id)
+            .ok()
+            .flatten()
+            .unwrap_or(true);
+        (email, notify)
     };
 
     Ok(HttpResponse::Ok().json(CurrentUserResponse {
@@ -403,11 +410,14 @@ pub async fn get_current_user(
         username: claims.sub,
         is_admin: claims.is_admin,
         email,
+        notify_new_location,
     }))
 }
 
 /// Account settings endpoint: set or clear the address security notices go to
-/// (RUS-11). Sending a blank value clears it back to NULL.
+/// (RUS-11, blank clears it back to NULL), and turn this account's
+/// new-location sign-in alerts on or off (RUS-15). The account is always the
+/// session's, never an id taken from the body.
 pub async fn update_current_user(
     data: web::Data<AppState>,
     req: web::Json<UpdateAccountRequest>,
@@ -422,36 +432,83 @@ pub async fn update_current_user(
         }
     };
 
-    let email = match normalize_account_email(req.email.as_deref().unwrap_or_default()) {
-        Ok(value) => value,
-        Err(error_message) => {
-            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                "error": error_message
-            })));
-        }
+    // Both fields are optional and independent: an absent key means "not
+    // submitted" and leaves the stored value alone, so a request that only
+    // toggles the alert flag can never clear the account's address.
+    let email_update = match req.email.as_deref() {
+        Some(raw) => match normalize_account_email(raw) {
+            Ok(value) => Some(value),
+            Err(error_message) => {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": error_message
+                })));
+            }
+        },
+        None => None,
     };
 
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
-    match db.execute(
-        "UPDATE users SET email = ?1 WHERE userID = ?2",
-        params![email.as_deref(), claims.user_id],
-    ) {
-        Ok(rows_affected) if rows_affected > 0 => {
-            info!(
-                user_id = claims.user_id,
-                has_email = email.is_some(),
-                "Account email updated"
-            );
-            Ok(HttpResponse::Ok().json(serde_json::json!({
-                "message": "Account updated successfully",
-                "email": email,
-            })))
+
+    if let Some(email) = &email_update {
+        match db.execute(
+            "UPDATE users SET email = ?1 WHERE userID = ?2",
+            params![email.as_deref(), claims.user_id],
+        ) {
+            Ok(rows_affected) if rows_affected > 0 => {
+                info!(
+                    user_id = claims.user_id,
+                    has_email = email.is_some(),
+                    "Account email updated"
+                );
+            }
+            Ok(_) => {
+                return Ok(HttpResponse::NotFound().json(serde_json::json!({
+                    "error": "User not found"
+                })));
+            }
+            Err(e) => {
+                error!(user_id = claims.user_id, error = %e, "Failed to update account email");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to update account"
+                })));
+            }
         }
-        Ok(_) => Ok(HttpResponse::NotFound().json(serde_json::json!({
+    }
+
+    if let Some(enabled) = req.notify_new_location {
+        if let Err(e) = crate::location_alert::set_notify_new_location(&db, claims.user_id, enabled)
+        {
+            error!(user_id = claims.user_id, error = %e, "Failed to update account settings");
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to update account"
+            })));
+        }
+        info!(
+            user_id = claims.user_id,
+            notify_new_location = enabled,
+            "Account settings updated"
+        );
+    }
+
+    let stored_email: Option<String> = db
+        .query_row(
+            "SELECT email FROM users WHERE userID = ?1",
+            params![claims.user_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(None);
+
+    match crate::location_alert::get_notify_new_location(&db, claims.user_id) {
+        Ok(Some(notify_new_location)) => Ok(HttpResponse::Ok().json(serde_json::json!({
+            "message": "Account updated successfully",
+            "email": stored_email,
+            "notify_new_location": notify_new_location,
+        }))),
+        Ok(None) => Ok(HttpResponse::NotFound().json(serde_json::json!({
             "error": "User not found"
         }))),
         Err(e) => {
-            error!(user_id = claims.user_id, error = %e, "Failed to update account email");
+            error!(user_id = claims.user_id, error = %e, "Failed to read account settings");
             Ok(HttpResponse::InternalServerError().json(serde_json::json!({
                 "error": "Failed to update account"
             })))
@@ -1046,5 +1103,169 @@ mod tests {
         let body: Value = test::call_and_read_body_json(&app, req).await;
         assert!(body["refresh_token"].is_string());
         assert!(!body["refresh_token"].as_str().unwrap().is_empty());
+    }
+
+    // --- new-location alert opt-out (RUS-15) ---
+
+    /// The account's stored preference, straight from the column the alert reads.
+    fn stored_notify(state: &actix_web::web::Data<AppState>, username: &str) -> bool {
+        let db = state.db.lock().unwrap();
+        let user_id: i64 = db
+            .query_row(
+                "SELECT userID FROM users WHERE username = ?1",
+                params![username],
+                |r| r.get(0),
+            )
+            .unwrap();
+        crate::location_alert::get_notify_new_location(&db, user_id)
+            .unwrap()
+            .unwrap()
+    }
+
+    /// PATCH /api/me with the given JSON body.
+    #[actix_web::test]
+    async fn get_me_reports_the_stored_preference() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let token = do_register(&app, "alice").await["token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let me: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(me["notify_new_location"], true, "alerts default to on");
+
+        patch_me(
+            &app,
+            &token,
+            serde_json::json!({"notify_new_location": false}),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let me: Value = test::call_and_read_body_json(&app, req).await;
+        assert_eq!(me["notify_new_location"], false);
+    }
+
+    // An explicit false is a real opt-out and has to reach the column; sending
+    // true again turns the alerts back on.
+    #[actix_web::test]
+    async fn patch_me_persists_both_directions() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let token = do_register(&app, "alice").await["token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let resp = patch_me(
+            &app,
+            &token,
+            serde_json::json!({"notify_new_location": false}),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+        let body: Value = test::read_body_json(resp).await;
+        assert_eq!(body["notify_new_location"], false);
+        assert!(!stored_notify(&state, "alice"));
+
+        let resp = patch_me(
+            &app,
+            &token,
+            serde_json::json!({"notify_new_location": true}),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+        assert!(stored_notify(&state, "alice"));
+    }
+
+    // A missing key means "not submitted", so the stored value stands rather
+    // than silently reverting to the default.
+    #[actix_web::test]
+    async fn patch_me_without_the_key_leaves_the_value_unchanged() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let token = do_register(&app, "alice").await["token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        patch_me(
+            &app,
+            &token,
+            serde_json::json!({"notify_new_location": false}),
+        )
+        .await;
+
+        for body in [serde_json::json!({}), serde_json::json!({"unrelated": 1})] {
+            let resp = patch_me(&app, &token, body).await;
+            assert_eq!(resp.status(), 200);
+            assert!(
+                !stored_notify(&state, "alice"),
+                "an absent key must not re-enable alerts"
+            );
+        }
+    }
+
+    // The type is validated, never coerced: a string is a bad request and
+    // changes nothing.
+    #[actix_web::test]
+    async fn patch_me_rejects_a_non_boolean() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let token = do_register(&app, "alice").await["token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let resp = patch_me(
+            &app,
+            &token,
+            serde_json::json!({"notify_new_location": "false"}),
+        )
+        .await;
+        assert_eq!(resp.status(), 400);
+        assert!(stored_notify(&state, "alice"));
+    }
+
+    // The write targets the session's account. An id in the body is ignored, so
+    // one account cannot flip another's setting.
+    #[actix_web::test]
+    async fn patch_me_ignores_a_user_id_in_the_body() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let alice = do_register(&app, "alice").await["token"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        do_register(&app, "bob").await;
+        let bob_id: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT userID FROM users WHERE username = 'bob'", [], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+
+        let resp = patch_me(
+            &app,
+            &alice,
+            serde_json::json!({
+                "notify_new_location": false,
+                "user_id": bob_id,
+                "userID": bob_id,
+                "username": "bob",
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), 200);
+        assert!(!stored_notify(&state, "alice"), "alice opted out");
+        assert!(stored_notify(&state, "bob"), "bob is untouched");
     }
 }

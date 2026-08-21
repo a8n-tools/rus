@@ -196,6 +196,7 @@ async fn main() -> std::io::Result<()> {
                     web::scope("/api")
                         .wrap(actix_web::middleware::from_fn(oidc::require_session))
                         .route("/me", web::get().to(saas_me))
+                        .route("/me", web::patch().to(saas_update_me))
                         .route("/shorten", web::post().to(shorten_url))
                         .route("/stats/{code}", web::get().to(get_stats))
                         .route("/urls", web::get().to(get_user_urls))

@@ -265,6 +265,37 @@ fn update_last_login_country(
     )
 }
 
+/// Read this account's new-location alert preference (RUS-15). `None` when the
+/// account does not exist.
+pub fn get_notify_new_location(conn: &Connection, user_id: i64) -> rusqlite::Result<Option<bool>> {
+    let row = conn
+        .query_row(
+            "SELECT notify_new_location FROM users WHERE userID = ?1",
+            params![user_id],
+            |row| Ok(row.get::<_, i64>(0)? != 0),
+        )
+        .map(Some);
+
+    match row {
+        Ok(found) => Ok(found),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Persist this account's new-location alert preference (RUS-15). Returns the
+/// number of rows changed, so 0 means the account does not exist.
+pub fn set_notify_new_location(
+    conn: &Connection,
+    user_id: i64,
+    enabled: bool,
+) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE users SET notify_new_location = ?1 WHERE userID = ?2",
+        params![enabled as i64, user_id],
+    )
+}
+
 /// Evaluate the new-location alert off the login hot path.
 ///
 /// Resolves the country from the request and, when the global kill switch is on
@@ -631,6 +662,75 @@ mod tests {
         )
         .unwrap();
         conn.last_insert_rowid()
+    }
+
+    // RUS-15: the preference defaults to on and both directions persist.
+    #[test]
+    fn notify_new_location_persists_both_ways() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+        let user_id = insert_user(&db, "alice");
+
+        assert_eq!(
+            get_notify_new_location(&db, user_id).unwrap(),
+            Some(true),
+            "alerts default to on"
+        );
+
+        assert_eq!(set_notify_new_location(&db, user_id, false).unwrap(), 1);
+        assert_eq!(get_notify_new_location(&db, user_id).unwrap(), Some(false));
+
+        assert_eq!(set_notify_new_location(&db, user_id, true).unwrap(), 1);
+        assert_eq!(get_notify_new_location(&db, user_id).unwrap(), Some(true));
+    }
+
+    // A write only ever touches the account it names, so one account's opt-out
+    // cannot move another's.
+    #[test]
+    fn notify_new_location_write_touches_one_account() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+        let alice = insert_user(&db, "alice");
+        let bob = insert_user(&db, "bob");
+
+        set_notify_new_location(&db, alice, false).unwrap();
+        assert_eq!(get_notify_new_location(&db, alice).unwrap(), Some(false));
+        assert_eq!(get_notify_new_location(&db, bob).unwrap(), Some(true));
+    }
+
+    // A missing account reads as None and writes nothing, rather than erroring.
+    #[test]
+    fn notify_new_location_of_unknown_user_is_none() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+        assert_eq!(get_notify_new_location(&db, 987_654).unwrap(), None);
+        assert_eq!(set_notify_new_location(&db, 987_654, false).unwrap(), 0);
+    }
+
+    // The stored preference is the same column the alert decision reads, so
+    // opting out silences a genuine country change and opting back in restores it.
+    #[test]
+    fn stored_preference_drives_the_alert_decision() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+        let user_id = insert_user(&db, "alice");
+        update_last_login_country(&db, user_id, "US").unwrap();
+
+        set_notify_new_location(&db, user_id, false).unwrap();
+        let info = get_login_location(&db, user_id).unwrap().unwrap();
+        assert!(!should_alert(
+            info.notify_new_location,
+            info.last_country.as_deref(),
+            Some("DE")
+        ));
+
+        set_notify_new_location(&db, user_id, true).unwrap();
+        let info = get_login_location(&db, user_id).unwrap().unwrap();
+        assert!(should_alert(
+            info.notify_new_location,
+            info.last_country.as_deref(),
+            Some("DE")
+        ));
     }
 
     // The columns round-trip, and the opt-out default is on.
