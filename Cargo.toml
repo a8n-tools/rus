@@ -57,9 +57,9 @@ uuid = { version = "1", features = ["v4", "serde"], optional = true }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
 urlencoding = { version = "2", optional = true }
 moka = { version = "0.12", features = ["future"], optional = true }
-# Security alert email (RUS-7). No TLS backend: the transport is built with
-# builder_dangerous, and openssl is not in the pre-commit builder image.
-lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1"] }
+# Security alert email (RUS-7). rustls, not native-tls: it is pure Rust, so the
+# TLS transport (RUS-16) builds without openssl in the musl builder image.
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-rustls-tls"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-actix-web = "0.7"
