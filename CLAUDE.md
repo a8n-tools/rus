@@ -53,8 +53,10 @@ just build                             # Release build (standalone)
 just build-saas                        # Release build (saas)
 just test                              # Run tests (standalone)
 just test-saas                         # Run tests (saas)
+just test-js                           # Static page tests (static/tests, Node container)
 just lint                              # Clippy (standalone)
 just fmt                               # Format code
+just pre-commit                        # Every CI check: the seven cargo steps plus the static page tests
 ```
 
 ## Architecture
@@ -101,6 +103,8 @@ src/
 - Pages: index.html (landing), login.html, signup.html, dashboard.html, admin.html, setup.html, report.html, 404.html, maintenance.html
 - k9f3x2m7.js (auth.js) handles token management
 - dashboard.html carries an Account section over `GET`/`PATCH /api/me`: the security alert address (standalone only, RUS-17) and the new-location alert opt-out (both modes, RUS-18). Its `apiFetch` helper picks the bearer token or the cookie from the `auth_mode` that `/api/config` reports, so one page serves both legs
+- `static/tests/` covers that page logic (RUS-20). `dom.mjs` extracts a page's real `<script>` tags, resolving `k9f3x2m7.js` back to `auth.js` the way `serve_auth_js` does, and evaluates them in a `node:vm` context wired to a stub DOM, `fetch` and `localStorage`, so the tests drive the shipped page rather than a copy of its logic. Covered: the Account section painting and its changed-fields-only PATCH in both auth modes, the bearer-versus-cookie split, the 400 path, and signup's optional address
+- Run them with `just test-js`, or as the eighth step of `just pre-commit`; CI runs the same entry point in `.forgejo/workflows/check.yml`. `static/tests/run.mjs` is that entry point: it discovers the `*.test.mjs` files itself and exits non-zero when fewer than the expected number of tests report, because `node --test` exits 0 when its arguments match no file
 
 ### API Structure
 - **Public**: `/api/register`, `/api/login`, `/api/login-approval` (GET, POST), `/{short_code}` (redirect)
@@ -265,7 +269,7 @@ A single `Dockerfile` builds both modes via `BUILD_MODE` ARG (`standalone` defau
 - **`oci-build/get-tags.nu`**: Derives image tags from `git describe`.
 
 ### CI
-The Forgejo workflow builds both `rus` and `rus-saas` images in parallel via a matrix strategy.
+`.forgejo/workflows/check.yml` runs fmt, clippy, build and tests for both feature legs plus the static page tests on every push and pull request; the runner's Node is the `node24` binary, and the step fails rather than skipping when no runtime resolves. `.forgejo/workflows/build-oci-image.yml` builds both `rus` and `rus-saas` images in parallel via a matrix strategy.
 
 ### Container Directory Layout
 - `/app` — binary and static files (`WORKDIR`)
