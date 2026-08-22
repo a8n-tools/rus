@@ -37,3 +37,15 @@ jobs:
         run: cargo test --features standalone
       - name: Unit tests (saas)
         run: cargo test --no-default-features --features saas
+      - name: Static page tests
+        # The dev runner ships nodejs24. The bare `node` is a libalternatives
+        # wrapper whose target is not always installed, so prefer `node24` and
+        # fail the job when neither resolves rather than skipping the suite.
+        shell: nu {0}
+        run: |
+          let node_bin = (["node24" "node"] | where { |candidate| (which $candidate | is-not-empty) } | get 0?)
+          if ($node_bin | is-empty) {
+              print "No Node runtime on the runner; the static page tests cannot run."
+              exit 1
+          }
+          ^$node_bin static/tests/run.mjs
