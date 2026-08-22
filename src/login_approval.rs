@@ -1091,12 +1091,11 @@ mod tests {
 
     // ── Route-level gate evaluation ──────────────────────────────────────────
     //
-    // The saas gate sits in the OIDC callback, which cannot be driven without a
-    // live IdP (token exchange and JWKS are real HTTP); a stubbed OP for that
-    // is tracked in RUS-22. This mounts the exact entry point the callback
-    // calls behind a real route, so the header and peer resolution that feed
-    // the decision are exercised through actix in both legs. The standalone leg
-    // additionally covers its real `/api/login` route in `handlers::auth`.
+    // This mounts the exact entry point both legs call behind a real route, so
+    // the header and peer resolution that feed the decision are exercised
+    // through actix in both legs. Each leg also covers its own real sign-in
+    // route: `handlers::auth` for the standalone login, and `oidc::rp::tests`
+    // for the saas callback, driven against a stubbed OP (RUS-22).
 
     async fn gate_probe(data: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
         let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
