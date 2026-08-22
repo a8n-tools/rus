@@ -28,6 +28,9 @@
 README.md
 LICENSE
 
+# Static page test harness (never served; keeps test code out of the image)
+/static/tests
+
 # CI/CD
 .forgejo/
 .github/

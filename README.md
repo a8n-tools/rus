@@ -221,7 +221,8 @@ rus/
 │   ├── 404.html             # Custom 404 error page
 │   ├── theme.js             # Theme and contrast toggles
 │   ├── styles.css           # Global styles
-│   └── auth.js              # Authentication utilities
+│   ├── auth.js              # Authentication utilities
+│   └── tests/               # Node test harness for the pages (just test-js)
 ├── oci-build/
 │   ├── setup.nu             # Nushell build script
 │   └── get-tags.nu          # Image tag derivation from git describe
@@ -415,9 +416,16 @@ just dev saas                # Traefik-routed instance (saas)
 just dev-local               # Local dev with hot-reload
 just test                    # Run tests (standalone)
 just test-saas               # Run tests (saas)
+just test-js                 # Static page tests (static/tests, runs in a Node container)
 just lint                    # Clippy
 just fmt                     # Format
+just pre-commit              # Every CI check: the seven cargo steps plus the static page tests
 ```
+
+`just test-js` and the matching `just pre-commit` step run node's built-in test
+runner inside a pinned `node:24-alpine` container, so no Node install is needed
+on the host. The tests evaluate each page's real inline script against a stub
+DOM and `fetch`; `.forgejo/workflows/check.yml` runs the same entry point.
 
 ### Short Code Generation
 - 6-character alphanumeric codes (A-Z, a-z, 0-9)

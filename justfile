@@ -13,6 +13,11 @@ compose := "docker compose -f compose.dev.yml "
 # image (alpine + server ENTRYPOINT, no cargo), so pre-commit must not use it.
 dev_image := "ghcr.io/niceguyit/rust-builder-musl:v1.0.0-rust1.94-alpine"
 
+# Image for the static/ page tests. The rust-builder image ships no Node, so the
+# JS step gets its own pinned image; docker is already required by pre-commit, so
+# a developer with no Node on the host still runs the same check.
+node_image := "node:24-alpine"
+
 # Copy the appropriate .env file for the given mode
 [private]
 ensure-env mode="standalone":
@@ -72,6 +77,11 @@ test:
 # Run tests (saas) inside Docker
 test-saas:
     docker compose run --rm --no-deps -e SAAS_JWT_SECRET=test-saas-secret-32-chars-padded! app sh -c "cargo test --no-default-features --features saas 2>&1"
+
+# Run the static/ page tests (static/tests) in a pinned Node container
+test-js:
+    #!/usr/bin/env nu
+    ^docker run --rm --volume $"($env.PWD):/build:ro" --workdir /build "{{ node_image }}" node static/tests/run.mjs
 
 # Lint with Clippy (standalone)
 lint:
@@ -260,8 +270,9 @@ install-hooks:
 # Run the same checks as .forgejo/workflows/check.yml inside the rust-builder-musl
 # image so the toolchain matches CI. Runs cargo against the builder image, NOT the
 # production `app` runtime image (whose ENTRYPOINT boots the server), so a fresh
-# clone passes without booting any service. Test secrets are injected via --env;
-# no .env / ensure-env is required.
+# clone passes without booting any service. The final step drives the static/ pages
+# in a Node container, which the builder image does not carry. Test secrets are
+# injected via --env; no .env / ensure-env is required.
 [group: 'hooks']
 pre-commit:
     #!/usr/bin/env nu
@@ -284,5 +295,7 @@ pre-commit:
     ^docker run --rm ...$vols --env "JWT_SECRET=test-secret-at-least-32-chars-ok!" $img cargo test --lib --features standalone
     print "\n[pre-commit] cargo test --lib --no-default-features --features saas"
     ^docker run --rm ...$vols --env "SAAS_JWT_SECRET=test-saas-secret-32-chars-padded!" $img cargo test --lib --no-default-features --features saas
+    print "\n[pre-commit] node static/tests/run.mjs"
+    ^docker run --rm --volume $"($env.PWD):/build:ro" --workdir /build "{{ node_image }}" node static/tests/run.mjs
     print "\n[pre-commit] all checks passed"
 
