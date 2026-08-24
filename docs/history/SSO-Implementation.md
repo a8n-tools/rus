@@ -1,4 +1,6 @@
-# SSO-Implementation
+# SSO-Implementation (superseded)
+
+> Superseded design document, kept as history. This is the RUS-13 plan for moving saas mode off the legacy HS256 shared-cookie auth and onto OIDC, preserved for the reasoning behind the BFF Authorization Code + PKCE choice in "Pattern at a glance" and "Out of scope (intentionally)". Everything below is written in the imperative against the pre-OIDC tree, names a `SAAS_JWT_SECRET` that nothing reads, and tells the reader to delete code that is no longer there: read it for the reasoning, do not follow its instructions. For how saas mode authenticates today, read `src/oidc/` (`rp.rs` for the `/oauth2/*` routes, `verifier.rs` for token validation, `session.rs` for the `rus_session` cookie, `jit.rs` for provisioning) and the SaaS-only `OIDC_*` table in `README.md`.
 
 Implementation prompts for adding OIDC-based SSO to **rus** (Actix-web URL shortener), modeled after the canonical pattern used in the sibling projects.
 

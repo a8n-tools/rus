@@ -38,11 +38,18 @@ cargo build --release --features standalone
 
 ### SaaS
 
-Lightweight version for integration with a parent application:
-- No built-in user management (uses external auth via `access_token` cookie)
-- User identity extracted from parent app's JWT
-- No registration/login routes
-- Dashboard redirects to parent app if no valid session
+Lightweight version for integration with a parent application, which is also the
+OIDC provider:
+- No built-in user management: sign-in is the OIDC Authorization Code + PKCE
+  flow over `/oauth2/login` and `/oauth2/callback`
+- The browser session is an opaque `rus_session` cookie, stored SHA-256 hashed;
+  `at+jwt` access tokens are verified against the provider's JWKS
+- Accounts are provisioned just-in-time on first sign-in, linking an existing
+  local account by verified email
+- No registration/login routes; an unauthenticated dashboard request redirects
+  to `/oauth2/login`
+- Back-channel logout and user lifecycle events arrive as signed tokens on
+  `/oauth2/backchannel-logout` and `/oauth2/lifecycle-event`
 
 ```bash
 cargo build --release --no-default-features --features saas
@@ -202,8 +209,14 @@ rus/
 │   │   ├── admin.rs         # User management (standalone)
 │   │   ├── abuse.rs         # Abuse reporting
 │   │   ├── pages.rs         # Static page serving
-│   │   ├── saas_auth.rs     # Cookie-based auth (saas)
+│   │   ├── saas_auth.rs     # Account handlers over the OIDC session (saas)
 │   │   └── urls.rs          # URL CRUD, redirect, statistics
+│   ├── oidc/
+│   │   ├── mod.rs
+│   │   ├── rp.rs            # Relying party (BFF): /oauth2/* routes (saas)
+│   │   ├── verifier.rs      # Resource server: JWKS and token validation (saas)
+│   │   ├── session.rs       # Opaque rus_session cookie, hashed in the DB (saas)
+│   │   └── jit.rs           # Just-in-time user provisioning (saas)
 │   └── url/
 │       ├── mod.rs
 │       ├── shortener.rs     # Short code generation
@@ -453,8 +466,11 @@ covered as soon as its binary lands, and the guard fails if any recipe in the
 `justfile` or any step in `check.yml` reaches the test harness outside it.
 `just test` and `just test-saas` go through it too, with `--leg <name>`, which
 errors listing the known legs rather than selecting nothing and still holds the
-one leg it ran to that leg's floor. `static/tests/run.mjs` applies the same idea
-to the page tests.
+one leg it ran to that leg's floor. The same guard reads every target table in
+`Cargo.toml` and fails an entry that sets `test = false` while its source
+carries `#[cfg(test)]` or a `#[test]`-shaped attribute, because cargo never
+builds that block and it would otherwise look green having run nothing.
+`static/tests/run.mjs` applies the same idea to the page tests.
 
 ### Short Code Generation
 - 6-character alphanumeric codes (A-Z, a-z, 0-9)
