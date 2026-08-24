@@ -1,20 +1,16 @@
-use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{middleware, web, App, HttpServer};
-#[cfg(feature = "standalone")]
-use actix_web_httpauth::middleware::HttpAuthentication;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
 // Import from the `rus` library instead of re-declaring its modules here: a
 // second `mod` tree compiles and runs the whole unit suite twice (RUS-24).
-#[cfg(feature = "standalone")]
-use rus::auth::middleware::{admin_validator, jwt_validator};
 use rus::config::Config;
 use rus::db::AppState;
-use rus::handlers::*;
+#[cfg(feature = "saas")]
+use rus::handlers::maintenance_guard;
 #[cfg(feature = "saas")]
 use rus::oidc;
-use rus::{location_alert, login_approval};
+use rus::{location_alert, routes};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -64,26 +60,6 @@ async fn main() -> std::io::Result<()> {
     info!(host = %bind_host, port = bind_port, "Starting server");
 
     HttpServer::new(move || {
-        #[cfg(feature = "standalone")]
-        let auth = HttpAuthentication::bearer(jwt_validator);
-        #[cfg(feature = "standalone")]
-        let admin_auth = HttpAuthentication::bearer(admin_validator);
-
-        // Rate limiter: strict for auth endpoints (5 requests per minute)
-        #[cfg(feature = "standalone")]
-        let strict_rate_limit = GovernorConfigBuilder::default()
-            .seconds_per_request(12)
-            .burst_size(5)
-            .finish()
-            .unwrap();
-
-        // Rate limiter: moderate for public endpoints (30 requests per minute)
-        let moderate_rate_limit = GovernorConfigBuilder::default()
-            .seconds_per_request(2)
-            .burst_size(30)
-            .finish()
-            .unwrap();
-
         let app = App::new()
             .app_data(app_state.clone())
             .wrap(tracing_actix_web::TracingLogger::default())
@@ -95,151 +71,17 @@ async fn main() -> std::io::Result<()> {
                     .add(("Referrer-Policy", "strict-origin-when-cross-origin")),
             );
 
-        // Configure routes based on feature
-        #[cfg(feature = "standalone")]
-        let app = app
-            // Rate-limited auth routes
-            .service(
-                web::resource("/api/register")
-                    .wrap(Governor::new(&strict_rate_limit))
-                    .route(web::post().to(register)),
-            )
-            .service(
-                web::resource("/api/login")
-                    .wrap(Governor::new(&strict_rate_limit))
-                    .route(web::post().to(login)),
-            )
-            // Public API routes - MUST BE BEFORE scoped /api routes
-            .route("/api/refresh", web::post().to(refresh_token))
-            .route("/api/config", web::get().to(get_config))
-            .route("/api/version", web::get().to(get_version))
-            .route("/api/setup/required", web::get().to(check_setup_required))
-            // RUS-19: the approval page and its API, mounted here on purpose.
-            // Whoever follows the emailed link has no session yet, so these
-            // must sit above the guarded /api scope and above the short-code
-            // catch-all. AB-67 shipped this feature with the equivalent routes
-            // behind its auth middleware and the gate became a lockout.
-            .configure(login_approval::configure_routes)
-            .service(
-                web::resource("/api/report-abuse")
-                    .wrap(Governor::new(&moderate_rate_limit))
-                    .route(web::post().to(submit_abuse_report)),
-            )
-            // Admin-only routes - MUST BE BEFORE /api scope
-            .service(
-                web::scope("/api/admin")
-                    .wrap(admin_auth)
-                    .route("/users", web::get().to(admin_list_users))
-                    .route("/users/{user_id}", web::delete().to(admin_delete_user))
-                    .route(
-                        "/users/{user_id}/promote",
-                        web::post().to(admin_promote_user),
-                    )
-                    .route("/stats", web::get().to(admin_get_stats))
-                    .route("/reports", web::get().to(admin_list_reports))
-                    .route("/reports/{report_id}", web::post().to(admin_resolve_report)),
-            )
-            // Protected routes (require authentication)
-            .service(
-                web::scope("/api")
-                    .wrap(auth)
-                    .route("/me", web::get().to(get_current_user))
-                    .route("/me", web::patch().to(update_current_user))
-                    .route("/shorten", web::post().to(shorten_url))
-                    .route("/stats/{code}", web::get().to(get_stats))
-                    .route("/urls", web::get().to(get_user_urls))
-                    .route("/urls/{code}", web::delete().to(delete_url))
-                    .route("/urls/{code}/name", web::patch().to(update_url_name))
-                    .route("/urls/{code}/clicks", web::get().to(get_click_history))
-                    .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code)),
-            )
-            // Public page routes
-            .route("/", web::get().to(index))
-            .route("/login.html", web::get().to(login_page))
-            .route("/signup.html", web::get().to(signup_page))
-            .route("/dashboard.html", web::get().to(dashboard_page))
-            .route("/setup.html", web::get().to(setup_page))
-            .route("/admin.html", web::get().to(admin_page))
-            .route("/report.html", web::get().to(report_page))
-            .route("/styles.css", web::get().to(serve_css))
-            .route("/k9f3x2m7.js", web::get().to(serve_auth_js))
-            .route("/theme.js", web::get().to(serve_theme_js))
-            .route("/health", web::get().to(health_check))
-            // Catch-all route for short code redirects (MUST BE LAST)
-            .route("/{code}", web::get().to(redirect_url));
-
         #[cfg(feature = "saas")]
-        let app = {
-            let mut app = app
-                .app_data(oidc_state.clone())
-                // Webhook endpoint
-                .route(
-                    "/webhooks/maintenance",
-                    web::post().to(handle_maintenance_webhook),
-                )
-                // Public API
-                .route("/api/config", web::get().to(get_config))
-                .route("/api/version", web::get().to(get_version))
-                .service(
-                    web::resource("/api/report-abuse")
-                        .wrap(Governor::new(&moderate_rate_limit))
-                        .route(web::post().to(submit_abuse_report)),
-                )
-                // RUS-19: public by construction, above the session-guarded
-                // scope and the short-code catch-all. See the standalone leg.
-                .configure(login_approval::configure_routes)
-                // Protected /api routes (BFF session cookie)
-                .service(
-                    web::scope("/api")
-                        .wrap(actix_web::middleware::from_fn(oidc::require_session))
-                        .route("/me", web::get().to(saas_me))
-                        .route("/me", web::patch().to(saas_update_me))
-                        .route("/shorten", web::post().to(shorten_url))
-                        .route("/stats/{code}", web::get().to(get_stats))
-                        .route("/urls", web::get().to(get_user_urls))
-                        .route("/urls/{code}", web::delete().to(delete_url))
-                        .route("/urls/{code}/name", web::patch().to(update_url_name))
-                        .route("/urls/{code}/clicks", web::get().to(get_click_history))
-                        .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code)),
-                )
-                // OIDC RP routes
-                .route("/oauth2/login", web::get().to(oidc::rp::login))
-                .route("/oauth2/callback", web::get().to(oidc::rp::callback))
-                .route("/oauth2/logout", web::get().to(oidc::rp::logout))
-                .route(
-                    "/oauth2/backchannel-logout",
-                    web::post().to(oidc::rp::backchannel_logout),
-                )
-                .route(
-                    "/oauth2/lifecycle-event",
-                    web::post().to(oidc::rp::lifecycle_event),
-                );
+        let app = app.app_data(oidc_state.clone());
 
-            // Dev-only seed-session for local testing.
-            #[cfg(debug_assertions)]
-            {
-                app = app
-                    .route(
-                        "/dev/seed-session",
-                        web::get().to(oidc::rp::dev_seed_session),
-                    )
-                    .route("/dev/logout", web::get().to(oidc::rp::dev_logout));
-            }
+        // RUS-21: the one route table, shared with the integration tests, so
+        // no test can assert a routing property this binary does not have.
+        let app = app.configure(routes::configure_app);
 
-            app
-                // Public page routes
-                .route("/", web::get().to(index))
-                .route("/dashboard.html", web::get().to(dashboard_page))
-                .route("/report.html", web::get().to(report_page))
-                .route("/styles.css", web::get().to(serve_css))
-                .route("/k9f3x2m7.js", web::get().to(serve_auth_js))
-                .route("/theme.js", web::get().to(serve_theme_js))
-                .route("/health", web::get().to(health_check))
-                // Catch-all route for short code redirects (MUST BE LAST)
-                .route("/{code}", web::get().to(redirect_url))
-                // Maintenance guard: outermost middleware
-                .wrap(actix_web::middleware::from_fn(maintenance_guard))
-        };
+        // Maintenance guard: outermost middleware, registered last so it wraps
+        // everything the table above mounted.
+        #[cfg(feature = "saas")]
+        let app = app.wrap(actix_web::middleware::from_fn(maintenance_guard));
 
         app
     })

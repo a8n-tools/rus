@@ -587,8 +587,9 @@ fn complete_session(
 /// methods and the rate limit cannot drift. The caller must mount this OUTSIDE
 /// any authenticated scope and before the short-code catch-all: the person
 /// following the emailed link has no session, and an approval route behind the
-/// session check turns the gate into a lockout. `main.rs` mounts it before the
-/// guarded `/api` scope in both legs, and the tests below assert both halves.
+/// session check turns the gate into a lockout. `routes::configure_app` is the
+/// only caller in the crate, and its tests assert both halves against the real
+/// table in both legs (RUS-21).
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     // Same budget as the other public endpoints (30/minute). Guessing a 256-bit
     // token is hopeless; this is only here to bound the cost of trying.
@@ -614,10 +615,6 @@ mod tests {
     // Imported under another name: `use actix_web::test` would shadow the
     // built-in `#[test]` attribute for the synchronous tests below.
     use actix_web::{test as http_test, App};
-
-    /// The real `main.rs`, read at compile time so the wiring assertions below
-    /// check the file the binary is built from and not a copy of it.
-    const MAIN_RS: &str = include_str!("main.rs");
 
     const PEER: &str = "127.0.0.1:34567";
 
@@ -903,8 +900,8 @@ mod tests {
     // 401'd. It was invisible because the tests called the handlers directly.
     // These build the guarded scope the real app builds and go through it.
 
-    /// An app shaped like `main.rs`: the approval routes mounted before a
-    /// guarded `/api` scope, with a control route inside that scope.
+    /// The shape `routes::configure_app` mounts: the approval routes before
+    /// a guarded `/api` scope, with a control route inside that scope.
     macro_rules! guarded_app {
         ($state:expr, $guard:expr) => {
             http_test::init_service(
@@ -1159,41 +1156,5 @@ mod tests {
     async fn route_level_a_new_country_is_held() {
         let body = run_gate_probe(Some("US"), Some("DE")).await;
         assert_eq!(body["held"], true);
-    }
-
-    // ── Wiring: where main.rs mounts all of this ─────────────────────────────
-
-    /// Byte offsets of every occurrence of `needle` in `main.rs`.
-    fn positions(needle: &str) -> Vec<usize> {
-        MAIN_RS.match_indices(needle).map(|(i, _)| i).collect()
-    }
-
-    /// The reachability tests above prove the routes work outside a guarded
-    /// scope; this proves `main.rs` actually mounts them there, in both legs.
-    /// Together they are what AB-67 was missing.
-    #[test]
-    fn main_mounts_the_approval_routes_ahead_of_every_guard() {
-        let mounted = positions("configure(login_approval::configure_routes)");
-        let guarded_scopes = positions("web::scope(\"/api\")");
-        let catch_all = positions("route(\"/{code}\"");
-
-        assert_eq!(mounted.len(), 2, "one mount per feature leg");
-        assert_eq!(guarded_scopes.len(), 2, "one guarded /api scope per leg");
-        assert_eq!(catch_all.len(), 2, "one short-code catch-all per leg");
-
-        for (leg, (mount, scope)) in mounted.iter().zip(&guarded_scopes).enumerate() {
-            assert!(
-                mount < scope,
-                "leg {leg}: the approval routes must be mounted before the guarded /api scope, \
-                 or the session check answers them first"
-            );
-        }
-        for (leg, (mount, code)) in mounted.iter().zip(&catch_all).enumerate() {
-            assert!(
-                mount < code,
-                "leg {leg}: the approval page must be mounted before /{{code}}, or the \
-                 short-code redirect swallows it"
-            );
-        }
     }
 }

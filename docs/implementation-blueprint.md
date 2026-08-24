@@ -1,5 +1,7 @@
 # Implementation Blueprint: Rust URL Shortener
 
+> Historical build plan, kept for provenance. The `init.sql` the chunks below name was deleted in RUS-30: no build, compose file or test ever read it, and `src/db.rs` creates and migrates the live schema on every start.
+
 ## High-Level Architecture
 
 ### Phase 1: Self-Hosted Production Ready

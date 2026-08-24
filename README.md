@@ -194,7 +194,8 @@ Every module under `src/` has a row, and `scripts/check-source-tree.nu` fails a 
 rus/
 ├── src/
 │   ├── lib.rs               # Library root: owns every module, and every target compiles through it
-│   ├── main.rs              # Binary: HttpServer wiring and route mounts, importing from rus::
+│   ├── main.rs              # Binary: HttpServer, middleware and bind, importing from rus::
+│   ├── routes.rs            # The one route table, shared by the binary and the integration tests
 │   ├── config.rs            # Environment-based configuration
 │   ├── db.rs                # Database connection and schema
 │   ├── models.rs            # Data models and request/response types
@@ -386,6 +387,8 @@ Every account carries `notify_new_location`, an opt-out that is on by default an
 The saas leg signs no JWT of its own, so it has no counterpart to `JWT_SECRET`: the session arrives from the OP in the `rus_session` cookie, and both `JWT_SECRET` readers in `src/config.rs` are standalone-only.
 
 ## Database Schema
+
+`src/db.rs` is the only source of truth: it creates every table and applies the idempotent column migrations on every start. The repository ships no `.sql` file, deliberately, so nothing can disagree with it (RUS-30).
 
 ### users (standalone only)
 - `userID` - Primary key
