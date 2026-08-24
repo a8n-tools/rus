@@ -31,6 +31,9 @@ LICENSE
 # Static page test harness (never served; keeps test code out of the image)
 /static/tests
 
+# Check scripts run on the host and in CI, never inside the image
+/scripts
+
 # CI/CD
 .forgejo/
 .github/

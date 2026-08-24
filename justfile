@@ -270,9 +270,11 @@ install-hooks:
 # Run the same checks as .forgejo/workflows/check.yml inside the rust-builder-musl
 # image so the toolchain matches CI. Runs cargo against the builder image, NOT the
 # production `app` runtime image (whose ENTRYPOINT boots the server), so a fresh
-# clone passes without booting any service. The final step drives the static/ pages
-# in a Node container, which the builder image does not carry. Test secrets are
-# injected via --env; no .env / ensure-env is required.
+# clone passes without booting any service. The test step goes through
+# scripts/check-cargo-tests-ran.nu, which derives the feature legs from Cargo.toml
+# and fails a run that tested nothing (RUS-23). The final step drives the static/
+# pages in a Node container, which the builder image does not carry. Test secrets
+# are injected via --env; no .env / ensure-env is required.
 [group: 'hooks']
 pre-commit:
     #!/usr/bin/env nu
@@ -291,10 +293,13 @@ pre-commit:
     ^docker run --rm ...$vols $img cargo build --all-targets --features standalone
     print "\n[pre-commit] cargo build --all-targets --no-default-features --features saas"
     ^docker run --rm ...$vols $img cargo build --all-targets --no-default-features --features saas
-    print "\n[pre-commit] cargo test --lib --features standalone"
-    ^docker run --rm ...$vols --env "JWT_SECRET=test-secret-at-least-32-chars-ok!" $img cargo test --lib --features standalone
-    print "\n[pre-commit] cargo test --lib --no-default-features --features saas"
-    ^docker run --rm ...$vols --env "SAAS_JWT_SECRET=test-saas-secret-32-chars-padded!" $img cargo test --lib --no-default-features --features saas
+    print "\n[pre-commit] guarded library tests (every feature leg)"
+    # --self-test first: a guard that stopped detecting a vacuous run must fail
+    # here rather than wave every later leg through (RUS-23).
+    ^nu scripts/check-cargo-tests-ran.nu --self-test
+    let secrets = ["--env" "JWT_SECRET=test-secret-at-least-32-chars-ok!" "--env" "SAAS_JWT_SECRET=test-saas-secret-32-chars-padded!"]
+    let runner = (["docker" "run" "--rm"] | append $vols | append $secrets | append $img | str join " ")
+    ^nu scripts/check-cargo-tests-ran.nu --lib --runner $runner
     print "\n[pre-commit] node static/tests/run.mjs"
     ^docker run --rm --volume $"($env.PWD):/build:ro" --workdir /build "{{ node_image }}" node static/tests/run.mjs
     print "\n[pre-commit] all checks passed"
