@@ -340,7 +340,20 @@ Every account carries `notify_new_location`, an opt-out that is on by default an
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SAAS_JWT_SECRET` | JWT secret for validating parent app tokens | **Required** |
+| `OIDC_ISSUER` | OP issuer URL; empty disables the `/oauth2/*` routes | *(empty)* |
+| `OIDC_CLIENT_ID` | Client id; **required** once `OIDC_ISSUER` is set | *(empty)* |
+| `OIDC_CLIENT_SECRET` | Client secret, or mount it at `/run/secrets/oidc_client_secret`; **required** once `OIDC_ISSUER` is set | *(empty)* |
+| `OIDC_AUDIENCE` | Expected `aud` claim on `at+jwt` tokens | `<HOST_URL>/api` |
+| `OIDC_JWKS_URL` | Signing-key set | `<issuer>/.well-known/jwks.json` |
+| `OIDC_JWKS_CACHE_TTL` | JWKS cache lifetime in seconds | `300` |
+| `OIDC_REDIRECT_URI` | Authorization-code callback | `<HOST_URL>/oauth2/callback` |
+| `OIDC_POST_LOGOUT_REDIRECT_URI` | Where the OP returns after logout | `<HOST_URL>/` |
+| `OIDC_LEEWAY_SECONDS` | Clock-skew tolerance in seconds | `30` |
+| `OIDC_LIFECYCLE_JTI_CACHE_TTL` | Idempotency window for lifecycle and logout events | `300` |
+| `OIDC_SESSION_TTL_SECONDS` | `rus_session` cookie lifetime | `1209600` (14 days) |
+| `WEBHOOK_SECRET` | HMAC-SHA256 key validating `/webhooks/maintenance` | *(empty; signatures never validate)* |
+
+The saas leg signs no JWT of its own, so it has no counterpart to `JWT_SECRET`: the session arrives from the OP in the `rus_session` cookie, and both `JWT_SECRET` readers in `src/config.rs` are standalone-only.
 
 ## Database Schema
 
@@ -416,8 +429,8 @@ Every account carries `notify_new_location`, an opt-out that is on by default an
 just dev                     # Traefik-routed instance (standalone)
 just dev saas                # Traefik-routed instance (saas)
 just dev-local               # Local dev with hot-reload
-just test                    # Run tests (standalone)
-just test-saas               # Run tests (saas)
+just test                    # Guarded cargo tests, standalone leg only
+just test-saas               # Guarded cargo tests, saas leg only
 just test-js                 # Static page tests (static/tests, runs in a Node container)
 just lint                    # Clippy
 just fmt                     # Format
@@ -434,11 +447,14 @@ a minimum pass count. `scripts/check-cargo-tests-ran.nu` runs the cargo tests
 for every feature leg and fails on a missing `test result:` line, zero passed,
 any ignored or filtered-out case, or a total under the leg's floor: 270
 standalone and 205 saas for the `--lib` scope `just pre-commit` uses, 285 and
-205 for the all-targets scope CI uses. The legs come from the `[[bin]]`
-`required-features` in `Cargo.toml`, so a new build mode is covered as soon as
-its binary lands, and the guard fails if the `pre-commit` recipe or
-`check.yml` reaches the test harness outside it. `static/tests/run.mjs` applies
-the same idea to the page tests.
+205 for the all-targets scope CI and the single-leg recipes use. The legs come
+from the `[[bin]]` `required-features` in `Cargo.toml`, so a new build mode is
+covered as soon as its binary lands, and the guard fails if any recipe in the
+`justfile` or any step in `check.yml` reaches the test harness outside it.
+`just test` and `just test-saas` go through it too, with `--leg <name>`, which
+errors listing the known legs rather than selecting nothing and still holds the
+one leg it ran to that leg's floor. `static/tests/run.mjs` applies the same idea
+to the page tests.
 
 ### Short Code Generation
 - 6-character alphanumeric codes (A-Z, a-z, 0-9)

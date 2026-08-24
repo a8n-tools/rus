@@ -70,13 +70,29 @@ build:
 build-saas:
     cargo build --release --no-default-features --features saas
 
+# Run one feature leg's tests, all targets, through the empty-run guard (RUS-26).
+# Same builder image and caches as `just pre-commit`, so the target volume stays
+# warm and no .env, database or Node runtime is needed. NOT the compose `app`
+# service: its image ships a dummy-crate target tree whose artifacts look newer
+# than the mounted sources, so cargo skips rebuilding the library.
+[private]
+test-leg leg:
+    #!/usr/bin/env nu
+    let img = "{{ dev_image }}"
+    let user_name = (^whoami | str trim)
+    let target_vol = $"dev-rus-target-($user_name)"
+    let reg_vol = "dev-rus-cargo-registry"
+    let vols = ["--volume" $"($env.PWD):/build" "--workdir" "/build" "--volume" $"($target_vol):/build/target" "--volume" $"($reg_vol):/usr/local/cargo/registry"]
+    let secrets = ["--env" "JWT_SECRET=test-secret-at-least-32-chars-ok!"]
+    let runner = (["docker" "run" "--rm"] | append $vols | append $secrets | append $img | str join " ")
+    ^nu scripts/check-cargo-tests-ran.nu --self-test
+    ^nu scripts/check-cargo-tests-ran.nu --leg "{{ leg }}" --runner $runner
+
 # Run tests (standalone) inside Docker
-test:
-    docker compose run --rm --no-deps -e JWT_SECRET=test-secret-at-least-32-chars-ok! app sh -c "cargo test --features standalone 2>&1"
+test: (test-leg "standalone")
 
 # Run tests (saas) inside Docker
-test-saas:
-    docker compose run --rm --no-deps -e SAAS_JWT_SECRET=test-saas-secret-32-chars-padded! app sh -c "cargo test --no-default-features --features saas 2>&1"
+test-saas: (test-leg "saas")
 
 # Run the static/ page tests (static/tests) in a pinned Node container
 test-js:
@@ -297,7 +313,7 @@ pre-commit:
     # --self-test first: a guard that stopped detecting a vacuous run must fail
     # here rather than wave every later leg through (RUS-23).
     ^nu scripts/check-cargo-tests-ran.nu --self-test
-    let secrets = ["--env" "JWT_SECRET=test-secret-at-least-32-chars-ok!" "--env" "SAAS_JWT_SECRET=test-saas-secret-32-chars-padded!"]
+    let secrets = ["--env" "JWT_SECRET=test-secret-at-least-32-chars-ok!"]
     let runner = (["docker" "run" "--rm"] | append $vols | append $secrets | append $img | str join " ")
     ^nu scripts/check-cargo-tests-ran.nu --lib --runner $runner
     print "\n[pre-commit] node static/tests/run.mjs"
