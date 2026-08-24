@@ -33,10 +33,16 @@ jobs:
         run: cargo build --all-targets --features standalone
       - name: Build (saas)
         run: cargo build --all-targets --no-default-features --features saas
-      - name: Unit tests (standalone)
-        run: cargo test --features standalone
-      - name: Unit tests (saas)
-        run: cargo test --no-default-features --features saas
+      - name: Unit tests (every feature leg)
+        shell: nu {0}
+        # cargo exits 0 on a run that collected nothing, was fully filtered, or
+        # was entirely #[ignore]d, so the legs go through the guard, which reads
+        # them from the [[bin]] required-features in Cargo.toml (RUS-23).
+        # --self-test first, so a guard that stopped detecting fails the job
+        # instead of passing it vacuously.
+        run: |
+          nu scripts/check-cargo-tests-ran.nu --self-test
+          nu scripts/check-cargo-tests-ran.nu
       - name: Static page tests
         # The dev runner ships nodejs24. The bare `node` is a libalternatives
         # wrapper whose target is not always installed, so prefer `node24` and

@@ -226,6 +226,8 @@ rus/
 ├── oci-build/
 │   ├── setup.nu             # Nushell build script
 │   └── get-tags.nu          # Image tag derivation from git describe
+├── scripts/
+│   └── check-cargo-tests-ran.nu  # Fails a cargo test run that tested nothing
 ├── data/
 │   └── rus.db               # SQLite database (auto-created)
 ├── Cargo.toml
@@ -419,13 +421,24 @@ just test-saas               # Run tests (saas)
 just test-js                 # Static page tests (static/tests, runs in a Node container)
 just lint                    # Clippy
 just fmt                     # Format
-just pre-commit              # Every CI check: the seven cargo steps plus the static page tests
+just pre-commit              # Every CI check: fmt, clippy and build per leg, the guarded cargo tests, the static page tests
 ```
 
 `just test-js` and the matching `just pre-commit` step run node's built-in test
 runner inside a pinned `node:24-alpine` container, so no Node install is needed
 on the host. The tests evaluate each page's real inline script against a stub
 DOM and `fetch`; `.forgejo/workflows/check.yml` runs the same entry point.
+
+Both test harnesses exit 0 on a run that collected nothing, so both are held to
+a minimum pass count. `scripts/check-cargo-tests-ran.nu` runs the cargo tests
+for every feature leg and fails on a missing `test result:` line, zero passed,
+any ignored or filtered-out case, or a total under the leg's floor: 270
+standalone and 205 saas for the `--lib` scope `just pre-commit` uses, 555 and
+410 for the all-targets scope CI uses. The legs come from the `[[bin]]`
+`required-features` in `Cargo.toml`, so a new build mode is covered as soon as
+its binary lands, and the guard fails if the `pre-commit` recipe or
+`check.yml` reaches the test harness outside it. `static/tests/run.mjs` applies
+the same idea to the page tests.
 
 ### Short Code Generation
 - 6-character alphanumeric codes (A-Z, a-z, 0-9)

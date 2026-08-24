@@ -56,7 +56,7 @@ just test-saas                         # Run tests (saas)
 just test-js                           # Static page tests (static/tests, Node container)
 just lint                              # Clippy (standalone)
 just fmt                               # Format code
-just pre-commit                        # Every CI check: the seven cargo steps plus the static page tests
+just pre-commit                        # Every CI check: fmt, clippy and build per leg, the guarded cargo tests, the static page tests
 ```
 
 ## Architecture
@@ -104,7 +104,7 @@ src/
 - k9f3x2m7.js (auth.js) handles token management
 - dashboard.html carries an Account section over `GET`/`PATCH /api/me`: the security alert address (standalone only, RUS-17) and the new-location alert opt-out (both modes, RUS-18). Its `apiFetch` helper picks the bearer token or the cookie from the `auth_mode` that `/api/config` reports, so one page serves both legs
 - `static/tests/` covers that page logic (RUS-20). `dom.mjs` extracts a page's real `<script>` tags, resolving `k9f3x2m7.js` back to `auth.js` the way `serve_auth_js` does, and evaluates them in a `node:vm` context wired to a stub DOM, `fetch` and `localStorage`, so the tests drive the shipped page rather than a copy of its logic. Covered: the Account section painting and its changed-fields-only PATCH in both auth modes, the bearer-versus-cookie split, the 400 path, and signup's optional address
-- Run them with `just test-js`, or as the eighth step of `just pre-commit`; CI runs the same entry point in `.forgejo/workflows/check.yml`. `static/tests/run.mjs` is that entry point: it discovers the `*.test.mjs` files itself and exits non-zero when fewer than the expected number of tests report, because `node --test` exits 0 when its arguments match no file
+- Run them with `just test-js`, or as the last step of `just pre-commit`; CI runs the same entry point in `.forgejo/workflows/check.yml`. `static/tests/run.mjs` is that entry point: it discovers the `*.test.mjs` files itself and exits non-zero when fewer than the expected number of tests report, because `node --test` exits 0 when its arguments match no file. The cargo legs are held to the same kind of floor by `scripts/check-cargo-tests-ran.nu`; see "Test floors" under CI
 
 ### API Structure
 - **Public**: `/api/register`, `/api/login`, `/api/login-approval` (GET, POST), `/{short_code}` (redirect)
@@ -267,9 +267,18 @@ A single `Dockerfile` builds both modes via `BUILD_MODE` ARG (`standalone` defau
 ### Supporting scripts
 - **`oci-build/setup.nu`**: Nushell build script (alternative to Dockerfile inline builds). Accepts `standalone` or `saas` as argument.
 - **`oci-build/get-tags.nu`**: Derives image tags from `git describe`.
+- **`scripts/check-cargo-tests-ran.nu`**: Runs the cargo tests for every feature leg and fails a run that tested nothing (RUS-23). See "Test floors" below.
+
+### Test floors
+Both test harnesses exit 0 on an empty run, so both are held to a minimum pass count rather than to their exit code alone.
+
+- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 270 / `saas` 205 for the `--lib` scope `just pre-commit` uses, and `standalone` 555 / `saas` 410 for the all-targets scope CI uses, against measured counts of 290 / 222 and 597 / 444. Raise them as the legs grow; never lower one to make a red run green.
+- JavaScript: `static/tests/run.mjs` fails below 3 test files or 14 passing tests (RUS-20).
+
+The legs are read from the `[[bin]]` `required-features` in `Cargo.toml`, so a third build mode is guarded the moment its binary lands, and the guard re-reads the `pre-commit` recipe and `check.yml` on every run and fails if either invokes the test harness outside it. `--self-test` runs first at both call sites and feeds fabricated vacuous, ignored, filtered, silent and under-floor runs through the checker, so a guard that stopped detecting fails the build instead of passing it.
 
 ### CI
-`.forgejo/workflows/check.yml` runs fmt, clippy, build and tests for both feature legs plus the static page tests on every push and pull request; the runner's Node is the `node24` binary, and the step fails rather than skipping when no runtime resolves. `.forgejo/workflows/build-oci-image.yml` builds both `rus` and `rus-saas` images in parallel via a matrix strategy.
+`.forgejo/workflows/check.yml` runs fmt, clippy and build for both feature legs, then the guarded cargo tests and the static page tests, on every push and pull request; the runner's Node is the `node24` binary, and the step fails rather than skipping when no runtime resolves. `.forgejo/workflows/build-oci-image.yml` builds both `rus` and `rus-saas` images in parallel via a matrix strategy.
 
 ### Container Directory Layout
 - `/app` — binary and static files (`WORKDIR`)
