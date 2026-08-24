@@ -287,8 +287,9 @@ install-hooks:
 # image so the toolchain matches CI. Runs cargo against the builder image, NOT the
 # production `app` runtime image (whose ENTRYPOINT boots the server), so a fresh
 # clone passes without booting any service. The test step goes through
-# scripts/check-cargo-tests-ran.nu, which derives the feature legs from Cargo.toml
-# and fails a run that tested nothing (RUS-23). The final step drives the static/
+# scripts/check-cargo-tests-ran.nu, which derives the feature legs from Cargo.toml,
+# fails a run that tested nothing (RUS-23) and fails a `test = false` target whose
+# source carries test code cargo test never runs (RUS-27). The final step drives the static/
 # pages in a Node container, which the builder image does not carry. Test secrets
 # are injected via --env; no .env / ensure-env is required.
 [group: 'hooks']
@@ -310,8 +311,9 @@ pre-commit:
     print "\n[pre-commit] cargo build --all-targets --no-default-features --features saas"
     ^docker run --rm ...$vols $img cargo build --all-targets --no-default-features --features saas
     print "\n[pre-commit] guarded library tests (every feature leg)"
-    # --self-test first: a guard that stopped detecting a vacuous run must fail
-    # here rather than wave every later leg through (RUS-23).
+    # --self-test first: a guard that stopped detecting a vacuous run, or a
+    # `test = false` target carrying test code, must fail here rather than wave
+    # every later leg through (RUS-23, RUS-27).
     ^nu scripts/check-cargo-tests-ran.nu --self-test
     let secrets = ["--env" "JWT_SECRET=test-secret-at-least-32-chars-ok!"]
     let runner = (["docker" "run" "--rm"] | append $vols | append $secrets | append $img | str join " ")

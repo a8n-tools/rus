@@ -10,8 +10,8 @@ name = "rus"
 path = "src/lib.rs"
 
 # test = false: src/main.rs holds only the HttpServer wiring, so a second test
-# harness for it is duplicate work (RUS-24). RUS-27 adds the guard that fails a
-# #[cfg(test)] block added here, which would otherwise never run.
+# harness for it is duplicate work (RUS-24). scripts/check-cargo-tests-ran.nu
+# fails a #[cfg(test)] block added here, which would otherwise never run (RUS-27).
 [[bin]]
 name = "rus"
 path = "src/main.rs"

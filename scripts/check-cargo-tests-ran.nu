@@ -13,6 +13,11 @@
 # and the whole justfile plus the workflow are re-read on every run, so an
 # invocation added beside this guard is reported instead of quietly escaping it.
 #
+# The same manifest drives the second check (RUS-27): a target that sets
+# `test = false` opts out of `cargo test`, so a `#[cfg(test)]` block there
+# compiles under `cargo clippy --all-targets` and is then never run. Any
+# excluded target whose source carries test code fails the build.
+#
 # Usage:
 #   nu scripts/check-cargo-tests-ran.nu --self-test
 #   nu scripts/check-cargo-tests-ran.nu --lib --runner "docker run --rm ... <image>"
@@ -21,7 +26,8 @@
 #
 # Exit codes:
 # - 0: every leg ran, nothing was ignored or filtered out, every floor was met.
-# - 1: a leg failed, ran nothing, was filtered, or passed fewer than its floor.
+# - 1: a leg failed, ran nothing, was filtered, or passed fewer than its floor,
+#      or a `test = false` target carries test code `cargo test` never runs.
 
 # Every recipe in the justfile and every step in this workflow must reach the
 # test harness through this guard. The named recipe must also still exist.
@@ -191,6 +197,82 @@ def call-site-violations []: nothing -> list<string> {
     $found
 }
 
+# Cargo's target tables. `lib` is one entry; the rest are arrays of entries.
+const TARGET_TABLES = ["lib" "bin" "example" "test" "bench"]
+
+# Test code that never runs when its target is excluded from `cargo test`: a
+# cfg predicate naming `test`, or a test attribute at the head of a line. Both
+# are anchored, so prose and commented-out blocks do not trip the guard.
+const TEST_CODE_PATTERNS = [
+    '(?m)^\s*#!?\[\s*cfg(_attr)?\s*\([^)]*\btest\b'
+    '(?m)^\s*#!?\[\s*(\w+\s*::\s*)*test\s*[\](]'
+]
+
+# Cargo's default layout, so an entry that omits `path` still resolves to a file.
+def default-target-path [kind: string, name: string]: nothing -> string {
+    match $kind {
+        "lib" => "src/lib.rs",
+        "bin" => $"src/bin/($name).rs",
+        "example" => $"examples/($name).rs",
+        "test" => $"tests/($name).rs",
+        "bench" => $"benches/($name).rs",
+        _ => "",
+    }
+}
+
+# Targets that opt out of `cargo test`, read from the manifest rather than
+# hand-listed, so a third binary is covered the moment its entry lands.
+def untested-targets [manifest: record]: nothing -> table {
+    $TARGET_TABLES
+    | each {|kind|
+        let declared = ($manifest | get --optional $kind | default [])
+        let entries = if (($declared | describe) | str starts-with "record") { [$declared] } else { $declared }
+        $entries
+        | where {|entry| ($entry | get --optional test | default true) == false }
+        | each {|entry|
+            let name = ($entry | get --optional name | default $kind)
+            let declared_path = ($entry | get --optional path | default "")
+            let path = if ($declared_path | is-not-empty) { $declared_path } else { default-target-path $kind $name }
+            {kind: $kind, name: $name, path: $path}
+        }
+    }
+    | flatten
+}
+
+# A target cargo never builds for tests must carry no test code: the block
+# compiles under `cargo clippy --all-targets` and is then silently dropped, so
+# it looks green while asserting nothing, the same failure one level up (RUS-27).
+def test-code-violations [targets: table]: nothing -> list<string> {
+    $targets
+    | where {|target| $TEST_CODE_PATTERNS | any {|pattern| $target.source =~ $pattern } }
+    | group-by path
+    | items {|path, rows|
+        let names = ($rows | get name | uniq | str join ", ")
+        let tables = ($rows | get kind | uniq | each {|kind| $"[[($kind)]]" } | str join ", ")
+        $"($path) carries test code and is the source of ($names), which set test = false, so cargo test never builds or runs it; move the block into the library under src/lib.rs, or drop test = false from the ($tables) entry in Cargo.toml"
+    }
+}
+
+# Read every excluded target's source and report the ones carrying test code. A
+# source that cannot be read is a violation too: the guard fails closed rather
+# than passing a target it never looked at.
+def excluded-target-violations []: nothing -> list<string> {
+    let targets = (untested-targets (open Cargo.toml))
+    let unreadable = (
+        $targets
+        | where {|target| ($target.path | is-empty) or (not ($target.path | path exists)) }
+        | each {|target|
+            $"($target.name): sets test = false but no source could be read at ($target.path), so this guard cannot prove it carries no test code; point its [[($target.kind)]] entry in Cargo.toml at a file that exists"
+        }
+    )
+    let readable = (
+        $targets
+        | where {|target| ($target.path | is-not-empty) and ($target.path | path exists) }
+        | each {|target| $target | merge {source: (open --raw $target.path)} }
+    )
+    $unreadable | append (test-code-violations $readable)
+}
+
 # Prove the guard still rejects the runs that look green. Without this a broken
 # parser would pass every job silently, the same blindness one level up.
 def run-self-test [floors: record] {
@@ -260,7 +342,45 @@ def run-self-test [floors: record] {
         exit 1
     }
 
-    print "[check-cargo-tests] SELF-TEST OK: vacuous, ignored, filtered, silent, under-floor and unfloored runs are all rejected, and --leg cannot select nothing."
+    # The excluded-target check (RUS-27). The set comes from the manifest, so a
+    # target that never opted out of `cargo test` must be left alone.
+    let fabricated = {
+        lib: {name: "rus", path: "src/lib.rs"}
+        bin: [
+            {name: "rus", path: "src/main.rs", required-features: ["standalone"], test: false}
+            {name: "rus-saas", path: "src/main.rs", required-features: ["saas"], test: false}
+            {name: "rus-tested", path: "src/other.rs"}
+        ]
+    }
+    let derived = (untested-targets $fabricated | get name | uniq | sort)
+    if $derived != ["rus", "rus-saas"] {
+        print --stderr $"[check-cargo-tests] SELF-TEST FAILED: the manifest reader called ($derived) the test = false targets."
+        exit 1
+    }
+
+    let excluded_rejects = [
+        {name: "a #[cfg(test)] module", source: "fn main() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n"}
+        {name: "a feature-gated test module", source: "#[cfg(all(test, feature = \"saas\"))]\nmod tests {}\n"}
+        {name: "a cfg_attr keyed on test", source: "#[cfg_attr(test, derive(Debug))]\nstruct S;\n"}
+        {name: "a bare #[test] function", source: "fn main() {}\n#[test]\nfn t() {}\n"}
+        {name: "an indented async test attribute", source: "    #[tokio::test]\n    async fn t() {}\n"}
+    ]
+    for case in $excluded_rejects {
+        let rows = [{kind: "bin", name: "rus", path: "src/main.rs", source: $case.source}]
+        if (test-code-violations $rows | is-empty) {
+            print --stderr $"[check-cargo-tests] SELF-TEST FAILED: ($case.name) in a test = false target was accepted."
+            exit 1
+        }
+    }
+    # A guard that cried wolf on prose or a commented-out block would be turned
+    # off, so the healthy source is asserted too.
+    let clean = [{kind: "bin", name: "rus", path: "src/main.rs", source: "// the #[cfg(test)] block lives in the library\n#[actix_web::main]\nasync fn main() {}\n"}]
+    if (test-code-violations $clean | is-not-empty) {
+        print --stderr "[check-cargo-tests] SELF-TEST FAILED: a test = false target carrying no test code was rejected."
+        exit 1
+    }
+
+    print "[check-cargo-tests] SELF-TEST OK: vacuous, ignored, filtered, silent, under-floor and unfloored runs are all rejected, --leg cannot select nothing, and a test = false target carrying test code is caught."
 }
 
 export def main [
@@ -284,6 +404,15 @@ export def main [
     if ($drift | is-not-empty) {
         print --stderr "[check-cargo-tests] FAILED: a test step runs outside this guard:"
         for problem in $drift {
+            print --stderr $"  - ($problem)"
+        }
+        exit 1
+    }
+
+    let excluded = (excluded-target-violations)
+    if ($excluded | is-not-empty) {
+        print --stderr "[check-cargo-tests] FAILED: a target excluded from cargo test carries test code that never runs:"
+        for problem in $excluded {
             print --stderr $"  - ($problem)"
         }
         exit 1

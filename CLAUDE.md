@@ -23,11 +23,12 @@ cargo build --release --features standalone
 ```
 
 ### SaaS Mode
-Lightweight version designed for integration with a parent SaaS application:
-- No built-in user management (uses external auth via access_token cookie)
-- User identity extracted from parent app's JWT cookie
-- No registration/login routes
-- Dashboard redirects to parent app if no valid session
+Lightweight version designed for integration with a parent SaaS application, which is also the OIDC provider:
+- No built-in user management: sign-in is the OIDC Authorization Code + PKCE flow over `/oauth2/login` and `/oauth2/callback`
+- The browser session is an opaque `rus_session` cookie, stored SHA-256 hashed; `at+jwt` access tokens are verified against the provider's JWKS
+- Accounts are provisioned just-in-time on first sign-in, linking an existing local account by verified email
+- No registration/login routes; an unauthenticated dashboard request redirects to `/oauth2/login`
+- Back-channel logout and user lifecycle events arrive as signed tokens on `/oauth2/backchannel-logout` and `/oauth2/lifecycle-event`
 
 ```bash
 cargo build --release --no-default-features --features saas
@@ -65,7 +66,7 @@ just pre-commit                        # Every CI check: fmt, clippy and build p
 - **Framework**: Actix-web 4.4 with Tokio async runtime
 - **Database**: SQLite via rusqlite (bundled)
 - **Auth (standalone)**: JWT tokens with Argon2id password hashing
-- **Auth (saas)**: Cookie-based auth from parent application
+- **Auth (saas)**: OIDC BFF in `src/oidc/` - Authorization Code + PKCE against the parent SaaS provider, opaque `rus_session` cookie for the browser leg
 - **Storage**: `./data/rus.db` locally (auto-created), `/data/rus.db` in Docker (set via `ENV DB_PATH`)
 
 ### Source Structure
@@ -89,8 +90,14 @@ src/
 │   ├── admin.rs      # User management (standalone only)
 │   ├── abuse.rs      # Abuse reporting
 │   ├── pages.rs      # Static page serving
-│   ├── saas_auth.rs  # Cookie-based auth (saas only)
+│   ├── saas_auth.rs  # Account handlers over the OIDC session (saas only)
 │   └── urls.rs       # URL shortening, redirect, statistics
+├── oidc/             # OIDC SSO (saas only)
+│   ├── mod.rs
+│   ├── rp.rs         # Relying party (BFF): /oauth2/* routes
+│   ├── verifier.rs   # Resource server: JWKS and token validation
+│   ├── session.rs    # Opaque rus_session cookie, hashed in the DB
+│   └── jit.rs        # Just-in-time user provisioning
 └── url/
     ├── mod.rs
     ├── shortener.rs  # Short code generation
@@ -267,16 +274,17 @@ A single `Dockerfile` builds both modes via `BUILD_MODE` ARG (`standalone` defau
 ### Supporting scripts
 - **`oci-build/setup.nu`**: Nushell build script (alternative to Dockerfile inline builds). Accepts `standalone` or `saas` as argument.
 - **`oci-build/get-tags.nu`**: Derives image tags from `git describe`.
-- **`scripts/check-cargo-tests-ran.nu`**: Runs the cargo tests for every feature leg, or for one leg with `--leg <name>` (RUS-26), and fails a run that tested nothing (RUS-23). See "Test floors" below.
+- **`scripts/check-cargo-tests-ran.nu`**: Runs the cargo tests for every feature leg, or for one leg with `--leg <name>` (RUS-26), fails a run that tested nothing (RUS-23), and fails a target that opted out of `cargo test` while carrying test code (RUS-27). See "Test floors" below.
 
 ### Test floors
 Both test harnesses exit 0 on an empty run, so both are held to a minimum pass count rather than to their exit code alone.
 
 - Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 270 / `saas` 205 for the `--lib` scope `just pre-commit` uses, and `standalone` 285 / `saas` 205 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 290 / 222 and 307 / 222. Raise them as the legs grow; never lower one to make a red run green.
 - `--leg <name>` narrows a run to one leg, for the single-leg developer recipes (RUS-26). An unknown name is an error listing the known legs rather than an empty selection, because a run with no leg has no row left to violate anything, and the selected leg is still held to its own floor. The guard prints that floor beside the pass count on every run.
+- Excluded targets: the same guard reads every target table in `Cargo.toml` (`lib`, `bin`, `example`, `test`, `bench`), and fails when an entry that sets `test = false` has a source carrying `#[cfg(test)]`, `#[cfg_attr(test, ...)]` or a `#[test]`-shaped attribute (RUS-27). Such a block compiles under `cargo clippy --all-targets` and is then never run, which is the same vacuous green the pass floors exist to catch. A source the guard cannot read is a failure too, so it never passes a target it did not look at.
 - JavaScript: `static/tests/run.mjs` fails below 3 test files or 14 passing tests (RUS-20).
 
-The all-targets counts halved in RUS-24 without a test being retired: `src/main.rs` used to re-declare every library module, so the binary compiled and ran a second copy of the whole unit suite, and it now imports from `rus::` and sets `test = false` on both `[[bin]]` entries. The legs are read from the `[[bin]]` `required-features` in `Cargo.toml`, so a third build mode is guarded the moment its binary lands, and the guard re-reads the whole `justfile` and `check.yml` on every run and fails if either reaches the test harness outside it, so a raw `cargo test` in any recipe is reported rather than exempted. `--self-test` runs first at all four call sites (`pre-commit`, `check.yml`, `test`, `test-saas`) and feeds fabricated vacuous, ignored, filtered, silent and under-floor runs through the checker, plus a `--leg` name matching nothing, so a guard that stopped detecting fails the build instead of passing it.
+The all-targets counts halved in RUS-24 without a test being retired: `src/main.rs` used to re-declare every library module, so the binary compiled and ran a second copy of the whole unit suite, and it now imports from `rus::` and sets `test = false` on both `[[bin]]` entries. The legs are read from the `[[bin]]` `required-features` in `Cargo.toml`, so a third build mode is guarded the moment its binary lands, and the guard re-reads the whole `justfile` and `check.yml` on every run and fails if either reaches the test harness outside it, so a raw `cargo test` in any recipe is reported rather than exempted. `--self-test` runs first at all four call sites (`pre-commit`, `check.yml`, `test`, `test-saas`) and feeds fabricated vacuous, ignored, filtered, silent and under-floor runs through the checker, plus a `--leg` name matching nothing and a fabricated `test = false` target carrying test code, so a guard that stopped detecting fails the build instead of passing it.
 
 ### CI
 `.forgejo/workflows/check.yml` runs fmt, clippy and build for both feature legs, then the guarded cargo tests and the static page tests, on every push and pull request; the runner's Node is the `node24` binary, and the step fails rather than skipping when no runtime resolves. `.forgejo/workflows/build-oci-image.yml` builds both `rus` and `rus-saas` images in parallel via a matrix strategy.
