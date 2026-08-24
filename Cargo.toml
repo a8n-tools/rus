@@ -9,15 +9,20 @@ build = "build.rs"
 name = "rus"
 path = "src/lib.rs"
 
+# test = false: src/main.rs holds only the HttpServer wiring, so a second test
+# harness for it is duplicate work (RUS-24). RUS-27 adds the guard that fails a
+# #[cfg(test)] block added here, which would otherwise never run.
 [[bin]]
 name = "rus"
 path = "src/main.rs"
 required-features = ["standalone"]
+test = false
 
 [[bin]]
 name = "rus-saas"
 path = "src/main.rs"
 required-features = ["saas"]
+test = false
 
 [features]
 default = ["standalone"]

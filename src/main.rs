@@ -5,29 +5,16 @@ use actix_web_httpauth::middleware::HttpAuthentication;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
+// Import from the `rus` library instead of re-declaring its modules here: a
+// second `mod` tree compiles and runs the whole unit suite twice (RUS-24).
 #[cfg(feature = "standalone")]
-mod auth;
-mod config;
-mod db;
-mod handlers;
-mod location_alert;
-mod login_approval;
-mod mailer;
-mod models;
+use rus::auth::middleware::{admin_validator, jwt_validator};
+use rus::config::Config;
+use rus::db::AppState;
+use rus::handlers::*;
 #[cfg(feature = "saas")]
-mod oidc;
-#[cfg(feature = "standalone")]
-mod security;
-mod url;
-
-#[cfg(test)]
-mod testing;
-
-#[cfg(feature = "standalone")]
-use auth::middleware::{admin_validator, jwt_validator};
-use config::Config;
-use db::AppState;
-use handlers::*;
+use rus::oidc;
+use rus::{location_alert, login_approval};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

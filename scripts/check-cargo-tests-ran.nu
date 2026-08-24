@@ -31,9 +31,10 @@ const GUARDED_WORKFLOW = ".forgejo/workflows/check.yml"
 # empty, filtered or all-ignored run cannot clear them. Raise as the legs grow.
 # --lib scope, what `just pre-commit` runs: 290 standalone, 222 saas.
 const MIN_LIB_PASSED = {standalone: 270, saas: 205}
-# All targets, what CI runs: 597 standalone (lib 290 + bin 290 + tests/ 17),
-# 444 saas (lib 222 + bin 222).
-const MIN_FULL_PASSED = {standalone: 555, saas: 410}
+# All targets, what CI runs: 307 standalone (lib 290 + tests/ 17), 222 saas
+# (lib 222). RUS-24 dropped the duplicate bin-target copy of the unit suite,
+# so these fell from 597 and 444 without a single test being retired.
+const MIN_FULL_PASSED = {standalone: 285, saas: 205}
 
 # Fold a run's harness output into counts. A run that printed no summary line
 # reports zero summaries, which is itself a violation.
