@@ -433,8 +433,8 @@ Both test harnesses exit 0 on a run that collected nothing, so both are held to
 a minimum pass count. `scripts/check-cargo-tests-ran.nu` runs the cargo tests
 for every feature leg and fails on a missing `test result:` line, zero passed,
 any ignored or filtered-out case, or a total under the leg's floor: 270
-standalone and 205 saas for the `--lib` scope `just pre-commit` uses, 555 and
-410 for the all-targets scope CI uses. The legs come from the `[[bin]]`
+standalone and 205 saas for the `--lib` scope `just pre-commit` uses, 285 and
+205 for the all-targets scope CI uses. The legs come from the `[[bin]]`
 `required-features` in `Cargo.toml`, so a new build mode is covered as soon as
 its binary lands, and the guard fails if the `pre-commit` recipe or
 `check.yml` reaches the test harness outside it. `static/tests/run.mjs` applies
