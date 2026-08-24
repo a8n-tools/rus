@@ -23,6 +23,14 @@ jobs:
         # nproc/2 cap: never claim more than half the host (see CI.md "Concurrency cap").
         run: echo "CARGO_BUILD_JOBS=$(($(nproc) / 2))" >> "$GITHUB_ENV"
 
+      - name: Source tree vs src/
+        shell: nu {0}
+        # Static: no cargo, so a source tree that drifted from src/ fails in
+        # seconds rather than after the build (RUS-29). --self-test first, so a
+        # parser that stopped matching fails the job instead of passing it.
+        run: |
+          nu scripts/check-source-tree.nu --self-test
+          nu scripts/check-source-tree.nu
       - name: Check formatting
         run: cargo fmt --check
       - name: Clippy (standalone)

@@ -286,7 +286,9 @@ install-hooks:
 # Run the same checks as .forgejo/workflows/check.yml inside the rust-builder-musl
 # image so the toolchain matches CI. Runs cargo against the builder image, NOT the
 # production `app` runtime image (whose ENTRYPOINT boots the server), so a fresh
-# clone passes without booting any service. The test step goes through
+# clone passes without booting any service. The first step is
+# scripts/check-source-tree.nu, which compiles nothing and fails a README / CLAUDE
+# source tree that drifted from src/ (RUS-29). The test step goes through
 # scripts/check-cargo-tests-ran.nu, which derives the feature legs from Cargo.toml,
 # fails a run that tested nothing (RUS-23) and fails a `test = false` target whose
 # source carries test code cargo test never runs (RUS-27). The final step drives the static/
@@ -300,6 +302,11 @@ pre-commit:
     let target_vol = $"dev-rus-target-($user_name)"
     let reg_vol = "dev-rus-cargo-registry"
     let vols = ["--volume" $"($env.PWD):/build" "--workdir" "/build" "--volume" $"($target_vol):/build/target" "--volume" $"($reg_vol):/usr/local/cargo/registry"]
+    # Static and instant, so a source tree that drifted from src/ fails before
+    # anything is compiled. --self-test first, same reason as the cargo guard.
+    print "\n[pre-commit] source tree vs src/"
+    ^nu scripts/check-source-tree.nu --self-test
+    ^nu scripts/check-source-tree.nu
     print "\n[pre-commit] cargo fmt --check"
     ^docker run --rm ...$vols $img cargo fmt --check
     print "\n[pre-commit] cargo clippy --all-targets --features standalone -- -D warnings"

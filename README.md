@@ -88,14 +88,14 @@ Each developer gets their own HTTPS instance at `https://{USER}-rus.a8n.run` (wh
 ```bash
 just dev                 # Start standalone instance
 just dev saas            # Start SaaS mode instance
-just dev-stop            # Stop instance
+just down                # Stop both dev stacks
 ```
 
 For local development without Traefik (cargo-watch with hot-reload on localhost:4001):
 
 ```bash
 just dev-local           # Start local dev server
-just dev-local-stop      # Stop local dev server
+just down                # Stop both dev stacks
 ```
 
 ## Usage
@@ -188,10 +188,13 @@ curl http://localhost:4001/api/urls \
 
 ## Project Structure
 
+Every module under `src/` has a row, and `scripts/check-source-tree.nu` fails a build when one does not or when a row names a module that no longer exists. The rest of the tree is a curated map of the parts a reader needs, not a full inventory.
+
 ```
 rus/
 ├── src/
-│   ├── main.rs              # Entry point, route configuration
+│   ├── lib.rs               # Library root: owns every module, and every target compiles through it
+│   ├── main.rs              # Binary: HttpServer wiring and route mounts, importing from rus::
 │   ├── config.rs            # Environment-based configuration
 │   ├── db.rs                # Database connection and schema
 │   ├── models.rs            # Data models and request/response types
@@ -199,6 +202,7 @@ rus/
 │   ├── location_alert.rs    # New-sign-in-country detection, trusted-proxy gate
 │   ├── login_approval.rs    # New-country sign-in gate, approval page and API
 │   ├── mailer.rs            # Security alert email via SMTP
+│   ├── testing.rs           # Test-only stubs and fixtures: StubOp, StubSmtp
 │   ├── auth/
 │   │   ├── mod.rs
 │   │   ├── jwt.rs           # JWT creation and validation
@@ -210,7 +214,8 @@ rus/
 │   │   ├── abuse.rs         # Abuse reporting
 │   │   ├── pages.rs         # Static page serving
 │   │   ├── saas_auth.rs     # Account handlers over the OIDC session (saas)
-│   │   └── urls.rs          # URL CRUD, redirect, statistics
+│   │   ├── urls.rs          # URL CRUD, redirect, statistics
+│   │   └── webhook.rs       # HMAC-signed /webhooks/maintenance receiver (saas)
 │   ├── oidc/
 │   │   ├── mod.rs
 │   │   ├── rp.rs            # Relying party (BFF): /oauth2/* routes (saas)
@@ -236,16 +241,28 @@ rus/
 │   ├── styles.css           # Global styles
 │   ├── auth.js              # Authentication utilities
 │   └── tests/               # Node test harness for the pages (just test-js)
-├── oci-build/
-│   ├── setup.nu             # Nushell build script
-│   └── get-tags.nu          # Image tag derivation from git describe
+├── tests/
+│   └── integration_standalone.rs  # Integration tests over a real app (standalone)
 ├── scripts/
-│   └── check-cargo-tests-ran.nu  # Fails a cargo test run that tested nothing
+│   ├── check-cargo-tests-ran.nu  # Fails a cargo test run that tested nothing
+│   └── check-source-tree.nu      # Fails when the src/ block above and src/ disagree
+├── oci-build/
+│   ├── Dockerfile           # Production multi-stage image, both build modes
+│   └── get-tags.nu          # Image tag derivation from git describe
+├── docs/
+│   ├── history/             # Superseded plans, kept for provenance
+│   ├── prompts/             # Chunk-by-chunk build prompts the project was written from
+│   └── superpowers/         # Feature plans and design specs
+├── examples/
+│   └── compose.yml          # Parent-app deployment example, routed by Traefik
+├── .forgejo/
+│   └── workflows/           # CI: check, build-oci-image, create-release
 ├── data/
-│   └── rus.db               # SQLite database (auto-created)
+│   └── rus.db               # SQLite database, created at runtime and gitignored
+├── build.rs                 # Stamps GIT_TAG, GIT_HASH and BUILD_DATE into the binary
 ├── Cargo.toml
-├── Dockerfile
-├── compose.yml
+├── Dockerfile               # Local dev image (cargo-watch)
+├── compose.yml              # Local dev stack on localhost:4001
 ├── compose.dev.yml          # Per-developer Traefik compose
 ├── justfile                 # Task runner recipes
 ├── .env.standalone          # Env template for standalone mode
@@ -445,9 +462,11 @@ just dev-local               # Local dev with hot-reload
 just test                    # Guarded cargo tests, standalone leg only
 just test-saas               # Guarded cargo tests, saas leg only
 just test-js                 # Static page tests (static/tests, runs in a Node container)
+just down                    # Stop both dev stacks
+just dev-clean               # ...and remove this repo's volumes, target/ and data/
 just lint                    # Clippy
 just fmt                     # Format
-just pre-commit              # Every CI check: fmt, clippy and build per leg, the guarded cargo tests, the static page tests
+just pre-commit              # Every CI check: the source-tree guard, fmt, clippy and build per leg, the guarded cargo tests, the static page tests
 ```
 
 `just test-js` and the matching `just pre-commit` step run node's built-in test
@@ -471,6 +490,12 @@ one leg it ran to that leg's floor. The same guard reads every target table in
 carries `#[cfg(test)]` or a `#[test]`-shaped attribute, because cargo never
 builds that block and it would otherwise look green having run nothing.
 `static/tests/run.mjs` applies the same idea to the page tests.
+
+`scripts/check-source-tree.nu` guards the `src/` block of the tree above, and
+the matching tree in `CLAUDE.md`, against `src/**/*.rs` in both directions: a
+module with no row and a row naming no module both fail the build, as does a
+tree the parser can no longer read. Only file names are compared, never the
+comments beside them, so rewording a description is free.
 
 ### Short Code Generation
 - 6-character alphanumeric codes (A-Z, a-z, 0-9)
