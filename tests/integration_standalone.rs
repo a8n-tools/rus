@@ -1,21 +1,23 @@
 //! Integration tests for the standalone build mode.
 //!
-//! These tests spin up a near-complete Actix application (without rate limiting)
+//! These tests run the binary's own route table (`rus::routes::configure_app`)
 //! and exercise end-to-end flows: registration → login → shorten → redirect → stats.
 
 #![cfg(feature = "standalone")]
 
 use actix_web::{test, web, App};
-use actix_web_httpauth::middleware::HttpAuthentication;
 use serde_json::Value;
 
 // We import from the `rus` library crate.
-use rus::auth::middleware::{admin_validator, jwt_validator};
 use rus::config::Config;
 use rus::db::AppState;
-use rus::handlers::*;
 
 const TEST_PASSWORD: &str = "TestPass1!";
+
+/// The rate-limited rows use the peer-IP key extractor, which answers 500 when
+/// a `TestRequest` carries no peer address. One peer means one bucket: register
+/// and login share a burst of 5 per app, which every test below stays under.
+const PEER: &str = "127.0.0.1:34567";
 
 fn test_config() -> Config {
     Config {
@@ -40,7 +42,7 @@ fn make_state() -> web::Data<AppState> {
     web::Data::new(AppState::new(test_config()).unwrap())
 }
 
-/// Build an app that mirrors the real standalone route layout (minus rate limiting).
+/// Build an app from the binary's own route table.
 async fn build_app() -> impl actix_web::dev::Service<
     actix_http::Request,
     Response = actix_web::dev::ServiceResponse,
@@ -57,59 +59,12 @@ async fn build_app_with_state(
     Response = actix_web::dev::ServiceResponse,
     Error = actix_web::Error,
 > {
-    let auth = HttpAuthentication::bearer(jwt_validator);
-    let admin_auth = HttpAuthentication::bearer(admin_validator);
-
+    // RUS-21: the table `main.rs` mounts, not a copy of it, so no assertion
+    // here can hold for a routing property the real binary does not have.
     test::init_service(
         App::new()
             .app_data(state)
-            .route("/api/register", web::post().to(register))
-            .route("/api/login", web::post().to(login))
-            .route("/api/refresh", web::post().to(refresh_token))
-            .route("/api/config", web::get().to(get_config))
-            .route("/api/version", web::get().to(get_version))
-            .route("/api/setup/required", web::get().to(check_setup_required))
-            // RUS-19: same call main.rs makes, in the same place, so this
-            // mirror cannot drift into mounting the approval routes behind the
-            // guarded /api scope below. Sharing the whole table is RUS-21.
-            .configure(rus::login_approval::configure_routes)
-            .route("/api/report-abuse", web::post().to(submit_abuse_report))
-            .service(
-                web::scope("/api/admin")
-                    .wrap(admin_auth)
-                    .route("/users", web::get().to(admin_list_users))
-                    .route("/users/{user_id}", web::delete().to(admin_delete_user))
-                    .route(
-                        "/users/{user_id}/promote",
-                        web::post().to(admin_promote_user),
-                    )
-                    .route("/stats", web::get().to(admin_get_stats))
-                    .route("/reports", web::get().to(admin_list_reports))
-                    .route("/reports/{report_id}", web::post().to(admin_resolve_report)),
-            )
-            .service(
-                web::scope("/api")
-                    .wrap(auth)
-                    .route("/me", web::get().to(get_current_user))
-                    .route("/shorten", web::post().to(shorten_url))
-                    .route("/stats/{code}", web::get().to(get_stats))
-                    .route("/urls", web::get().to(get_user_urls))
-                    .route("/urls/{code}", web::delete().to(delete_url))
-                    .route("/urls/{code}/name", web::patch().to(update_url_name))
-                    .route("/urls/{code}/clicks", web::get().to(get_click_history))
-                    .route("/urls/{code}/qr/{format}", web::get().to(get_qr_code)),
-            )
-            .route("/", web::get().to(index))
-            .route("/login.html", web::get().to(login_page))
-            .route("/signup.html", web::get().to(signup_page))
-            .route("/dashboard.html", web::get().to(dashboard_page))
-            .route("/setup.html", web::get().to(setup_page))
-            .route("/admin.html", web::get().to(admin_page))
-            .route("/report.html", web::get().to(report_page))
-            .route("/styles.css", web::get().to(serve_css))
-            .route("/k9f3x2m7.js", web::get().to(serve_auth_js))
-            .route("/health", web::get().to(health_check))
-            .route("/{code}", web::get().to(redirect_url)),
+            .configure(rus::routes::configure_app),
     )
     .await
 }
@@ -125,6 +80,7 @@ async fn do_register(
 ) -> Value {
     let req = test::TestRequest::post()
         .uri("/api/register")
+        .peer_addr(PEER.parse().unwrap())
         .set_json(serde_json::json!({"username": username, "password": TEST_PASSWORD}))
         .to_request();
     test::call_and_read_body_json(app, req).await
@@ -141,6 +97,7 @@ async fn do_login(
 ) -> Value {
     let req = test::TestRequest::post()
         .uri("/api/login")
+        .peer_addr(PEER.parse().unwrap())
         .set_json(serde_json::json!({"username": username, "password": TEST_PASSWORD}))
         .to_request();
     test::call_and_read_body_json(app, req).await
@@ -550,6 +507,7 @@ async fn e2e_abuse_report_and_admin_resolution() {
     // Submit abuse report (public)
     let req = test::TestRequest::post()
         .uri("/api/report-abuse")
+        .peer_addr(PEER.parse().unwrap())
         .set_json(serde_json::json!({
             "short_code": code,
             "reason": "spam",
@@ -628,7 +586,7 @@ async fn e2e_public_endpoints_accessible() {
 #[actix_web::test]
 async fn e2e_approval_routes_need_no_bearer_token() {
     let app = build_app().await;
-    let peer = "127.0.0.1:34567".parse().unwrap();
+    let peer = PEER.parse().unwrap();
 
     // Control: the guarded scope really is guarded in this app.
     let req = test::TestRequest::get().uri("/api/me").to_request();
@@ -668,6 +626,7 @@ async fn e2e_registration_disabled_after_first_user() {
     // First user always allowed (bootstrap)
     let req = test::TestRequest::post()
         .uri("/api/register")
+        .peer_addr(PEER.parse().unwrap())
         .set_json(serde_json::json!({"username": "admin", "password": TEST_PASSWORD}))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -676,6 +635,7 @@ async fn e2e_registration_disabled_after_first_user() {
     // Second user blocked
     let req = test::TestRequest::post()
         .uri("/api/register")
+        .peer_addr(PEER.parse().unwrap())
         .set_json(serde_json::json!({"username": "bob", "password": TEST_PASSWORD}))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -720,6 +680,7 @@ async fn e2e_abuse_report_ban_user() {
     // Abuse report is filed
     let req = test::TestRequest::post()
         .uri("/api/report-abuse")
+        .peer_addr(PEER.parse().unwrap())
         .set_json(serde_json::json!({
             "short_code": code,
             "reason": "malware distribution"
@@ -755,6 +716,7 @@ async fn e2e_abuse_report_ban_user() {
     // The banned user cannot login
     let req = test::TestRequest::post()
         .uri("/api/login")
+        .peer_addr(PEER.parse().unwrap())
         .set_json(serde_json::json!({"username": "badguy", "password": TEST_PASSWORD}))
         .to_request();
     let resp = test::call_service(&app, req).await;

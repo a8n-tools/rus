@@ -15,6 +15,7 @@ pub mod mailer;
 pub mod models;
 #[cfg(feature = "saas")]
 pub mod oidc;
+pub mod routes;
 #[cfg(feature = "standalone")]
 pub mod security;
 pub mod url;

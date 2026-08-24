@@ -37,10 +37,10 @@ const GUARDED_WORKFLOW = ".forgejo/workflows/check.yml"
 # Floors, not targets: measured on main for RUS-23 and rounded down by roughly
 # seven percent, so retiring a stale case does not fail the build while an
 # empty, filtered or all-ignored run cannot clear them. Raise as the legs grow.
-# --lib scope, what `just pre-commit` runs: 290 standalone, 222 saas.
+# --lib scope, what `just pre-commit` runs: 294 standalone, 226 saas.
 const MIN_LIB_PASSED = {standalone: 270, saas: 205}
-# All targets, what CI and `just test` / `just test-saas` run: 307 standalone
-# (lib 290 + tests/ 17), 222 saas (lib 222). RUS-24 dropped the duplicate
+# All targets, what CI and `just test` / `just test-saas` run: 311 standalone
+# (lib 294 + tests/ 17), 226 saas (lib 226). RUS-24 dropped the duplicate
 # bin-target copy of the unit suite, so these fell from 597 and 444 without a
 # single test being retired.
 const MIN_FULL_PASSED = {standalone: 285, saas: 205}

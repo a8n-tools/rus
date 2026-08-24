@@ -69,6 +69,7 @@ just pre-commit                        # Every CI check: the source-tree guard, 
 - **Auth (standalone)**: JWT tokens with Argon2id password hashing
 - **Auth (saas)**: OIDC BFF in `src/oidc/` - Authorization Code + PKCE against the parent SaaS provider, opaque `rus_session` cookie for the browser leg
 - **Storage**: `./data/rus.db` locally (auto-created), `/data/rus.db` in Docker (set via `ENV DB_PATH`)
+- **Routing**: one table in `src/routes.rs` (`configure_app`), mounted by `main.rs` and by `tests/integration_standalone.rs`. `main.rs` keeps only what cannot move into a `ServiceConfig`: `app_data`, the `DefaultHeaders` wrap and the saas `maintenance_guard`, which wraps the whole `App`. The rows both legs share are written once and only the ones that differ carry a `#[cfg]`, so a route cannot land in one leg and miss the other (RUS-21)
 
 ### Source Structure
 
@@ -77,7 +78,8 @@ Every module under `src/` has a row. `scripts/check-source-tree.nu` fails a buil
 ```
 src/
 ├── lib.rs            # Library root: owns every module, and every target compiles through it
-├── main.rs           # Binary: HttpServer wiring and route mounts, importing from rus:: (RUS-24)
+├── main.rs           # Binary: HttpServer, middleware and bind, importing from rus:: (RUS-24)
+├── routes.rs         # The one route table, shared by the binary and the tests (RUS-21)
 ├── config.rs         # Environment-based configuration
 ├── db.rs             # Database connection and schema
 ├── models.rs         # Data models and request/response types
@@ -181,7 +183,7 @@ Deliverability is part of the decision: with no recipient resolvable (no account
 
 The saas sign-in is driven end to end in `oidc::rp::tests` against a stubbed OP (RUS-22): a loopback server serving the token endpoint and a JWKS whose Ed25519 key really signs the ID token, plus a loopback SMTP sink, so the callback's own gate call site is covered by a test rather than by reading it. Both never-held properties are asserted through the real callback route there, and the held case reads the approval link out of the mail the app sent and releases the sign-in with it. Both stubs live in `src/testing.rs` (`StubOp`, `StubSmtp`); nothing disables signature verification, and a token signed by a key outside the JWKS is asserted to be rejected.
 
-**The approval page and its API must stay mounted outside every guard.** `main.rs` calls `.configure(login_approval::configure_routes)` before the guarded `/api` scope and before the `/{code}` catch-all in BOTH legs, and `maintenance_guard` allowlists both paths. Whoever follows the emailed link has no session by construction. auto-buyer's AB-67 shipped the same feature with these routes behind its auth middleware and the gate became a lockout, invisible because its tests called the handlers directly. `login_approval::tests` therefore asserts reachability through a real guarded app in both legs, and `main_mounts_the_approval_routes_ahead_of_every_guard` reads `src/main.rs` itself to check the mount order.
+**The approval page and its API must stay mounted outside every guard.** `routes::configure_app` calls `login_approval::configure_routes` before the guarded `/api` scope and before the `/{code}` catch-all in BOTH legs, and `maintenance_guard` allowlists both paths. Whoever follows the emailed link has no session by construction. auto-buyer's AB-67 shipped the same feature with these routes behind its auth middleware and the gate became a lockout, invisible because its tests called the handlers directly. Since RUS-21 there is one table rather than one per caller, so `routes::tests` asserts the reachability directly against it in both legs (the approval page and API answer with no session, every row inside the guarded scope answers 401, the catch-all sits below the pages), and `main_builds_its_table_from_this_module` reads `src/main.rs` at compile time to check that the binary still goes through that table and declares no route of its own. That last one is a source read because `src/main.rs` is a `test = false` target and nothing can exercise its wiring.
 
 ### Trusted proxies (both modes)
 
@@ -226,6 +228,8 @@ The deprecated cookie-JWT path's `SAAS_*` env vars (its shared secret and its lo
 **Important:** When adding or changing environment variables, update both `.env.standalone` and `.env.saas` to keep them in sync. Shared variables go in both files; mode-specific variables go only in the relevant file.
 
 ## Database Schema
+
+`src/db.rs` is the only source of truth: it creates every table and applies the idempotent column migrations on every start. The repository ships no `.sql` file, deliberately, so nothing can disagree with it (RUS-30).
 
 **users**: userID, username (unique), password (hashed), created_at, last_login_country, notify_new_location (per-account alert opt-out, set via `PATCH /api/me`)
 **urls**: id, user_id (FK), original_url, short_code (unique indexed), name, clicks, created_at
@@ -287,7 +291,7 @@ A single `Dockerfile` builds both modes via `BUILD_MODE` ARG (`standalone` defau
 ### Test floors
 Both test harnesses exit 0 on an empty run, so both are held to a minimum pass count rather than to their exit code alone.
 
-- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 270 / `saas` 205 for the `--lib` scope `just pre-commit` uses, and `standalone` 285 / `saas` 205 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 290 / 222 and 307 / 222. Raise them as the legs grow; never lower one to make a red run green.
+- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 270 / `saas` 205 for the `--lib` scope `just pre-commit` uses, and `standalone` 285 / `saas` 205 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 294 / 226 and 311 / 226. Raise them as the legs grow; never lower one to make a red run green.
 - `--leg <name>` narrows a run to one leg, for the single-leg developer recipes (RUS-26). An unknown name is an error listing the known legs rather than an empty selection, because a run with no leg has no row left to violate anything, and the selected leg is still held to its own floor. The guard prints that floor beside the pass count on every run.
 - Excluded targets: the same guard reads every target table in `Cargo.toml` (`lib`, `bin`, `example`, `test`, `bench`), and fails when an entry that sets `test = false` has a source carrying `#[cfg(test)]`, `#[cfg_attr(test, ...)]` or a `#[test]`-shaped attribute (RUS-27). Such a block compiles under `cargo clippy --all-targets` and is then never run, which is the same vacuous green the pass floors exist to catch. A source the guard cannot read is a failure too, so it never passes a target it did not look at.
 - JavaScript: `static/tests/run.mjs` fails below 3 test files or 14 passing tests (RUS-20).
