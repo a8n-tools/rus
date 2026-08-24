@@ -51,8 +51,8 @@ just dev-local-clean                   # Remove containers and volumes
 # Build, test, lint
 just build                             # Release build (standalone)
 just build-saas                        # Release build (saas)
-just test                              # Run tests (standalone)
-just test-saas                         # Run tests (saas)
+just test                              # Guarded cargo tests, standalone leg only
+just test-saas                         # Guarded cargo tests, saas leg only
 just test-js                           # Static page tests (static/tests, Node container)
 just lint                              # Clippy (standalone)
 just fmt                               # Format code
@@ -203,11 +203,11 @@ OIDC_LEEWAY_SECONDS=30                     # Clock-skew tolerance
 OIDC_LIFECYCLE_JTI_CACHE_TTL=300           # Idempotency window for lifecycle/logout events
 OIDC_SESSION_TTL_SECONDS=1209600           # `rus_session` cookie lifetime (14 days)
 
-# Maintenance webhook (HMAC-SHA256 signed; previously reused SAAS_JWT_SECRET)
+# Maintenance webhook (HMAC-SHA256 signed)
 WEBHOOK_SECRET=                            # Required to validate /webhooks/maintenance
 ```
 
-The legacy `SAAS_JWT_SECRET`, `SAAS_LOGIN_URL`, `SAAS_LOGOUT_URL`, `SAAS_MEMBERSHIP_URL`, and `SAAS_REFRESH_URL` env vars from the deprecated cookie-JWT path have been removed.
+The deprecated cookie-JWT path's `SAAS_*` env vars (its shared secret and its login, logout, membership and refresh URLs) are gone. The saas leg reads no JWT secret at all: both `JWT_SECRET` readers in `src/config.rs` are `#[cfg(feature = "standalone")]`, and the saas session comes from the OP through the `rus_session` cookie. Nothing sets a saas secret for the tests either (RUS-25).
 
 **Important:** When adding or changing environment variables, update both `.env.standalone` and `.env.saas` to keep them in sync. Shared variables go in both files; mode-specific variables go only in the relevant file.
 
@@ -267,15 +267,16 @@ A single `Dockerfile` builds both modes via `BUILD_MODE` ARG (`standalone` defau
 ### Supporting scripts
 - **`oci-build/setup.nu`**: Nushell build script (alternative to Dockerfile inline builds). Accepts `standalone` or `saas` as argument.
 - **`oci-build/get-tags.nu`**: Derives image tags from `git describe`.
-- **`scripts/check-cargo-tests-ran.nu`**: Runs the cargo tests for every feature leg and fails a run that tested nothing (RUS-23). See "Test floors" below.
+- **`scripts/check-cargo-tests-ran.nu`**: Runs the cargo tests for every feature leg, or for one leg with `--leg <name>` (RUS-26), and fails a run that tested nothing (RUS-23). See "Test floors" below.
 
 ### Test floors
 Both test harnesses exit 0 on an empty run, so both are held to a minimum pass count rather than to their exit code alone.
 
-- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 270 / `saas` 205 for the `--lib` scope `just pre-commit` uses, and `standalone` 285 / `saas` 205 for the all-targets scope CI uses, against measured counts of 290 / 222 and 307 / 222. Raise them as the legs grow; never lower one to make a red run green.
+- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 270 / `saas` 205 for the `--lib` scope `just pre-commit` uses, and `standalone` 285 / `saas` 205 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 290 / 222 and 307 / 222. Raise them as the legs grow; never lower one to make a red run green.
+- `--leg <name>` narrows a run to one leg, for the single-leg developer recipes (RUS-26). An unknown name is an error listing the known legs rather than an empty selection, because a run with no leg has no row left to violate anything, and the selected leg is still held to its own floor. The guard prints that floor beside the pass count on every run.
 - JavaScript: `static/tests/run.mjs` fails below 3 test files or 14 passing tests (RUS-20).
 
-The all-targets counts halved in RUS-24 without a test being retired: `src/main.rs` used to re-declare every library module, so the binary compiled and ran a second copy of the whole unit suite, and it now imports from `rus::` and sets `test = false` on both `[[bin]]` entries. The legs are read from the `[[bin]]` `required-features` in `Cargo.toml`, so a third build mode is guarded the moment its binary lands, and the guard re-reads the `pre-commit` recipe and `check.yml` on every run and fails if either invokes the test harness outside it. `--self-test` runs first at both call sites and feeds fabricated vacuous, ignored, filtered, silent and under-floor runs through the checker, so a guard that stopped detecting fails the build instead of passing it.
+The all-targets counts halved in RUS-24 without a test being retired: `src/main.rs` used to re-declare every library module, so the binary compiled and ran a second copy of the whole unit suite, and it now imports from `rus::` and sets `test = false` on both `[[bin]]` entries. The legs are read from the `[[bin]]` `required-features` in `Cargo.toml`, so a third build mode is guarded the moment its binary lands, and the guard re-reads the whole `justfile` and `check.yml` on every run and fails if either reaches the test harness outside it, so a raw `cargo test` in any recipe is reported rather than exempted. `--self-test` runs first at all four call sites (`pre-commit`, `check.yml`, `test`, `test-saas`) and feeds fabricated vacuous, ignored, filtered, silent and under-floor runs through the checker, plus a `--leg` name matching nothing, so a guard that stopped detecting fails the build instead of passing it.
 
 ### CI
 `.forgejo/workflows/check.yml` runs fmt, clippy and build for both feature legs, then the guarded cargo tests and the static page tests, on every push and pull request; the runner's Node is the `node24` binary, and the step fails rather than skipping when no runtime resolves. `.forgejo/workflows/build-oci-image.yml` builds both `rus` and `rus-saas` images in parallel via a matrix strategy.
