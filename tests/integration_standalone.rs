@@ -8,39 +8,16 @@
 use actix_web::{test, web, App};
 use serde_json::Value;
 
-// We import from the `rus` library crate.
-use rus::config::Config;
+// We import from the `rus` library crate. RUS-31: the fixtures come from
+// `rus::testing`, the same ones the unit suite uses, so the app under test here
+// cannot be built from a Config the unit suite never sees.
 use rus::db::AppState;
-
-const TEST_PASSWORD: &str = "TestPass1!";
+use rus::testing::{make_test_state, test_config, TEST_PASSWORD};
 
 /// The rate-limited rows use the peer-IP key extractor, which answers 500 when
 /// a `TestRequest` carries no peer address. One peer means one bucket: register
 /// and login share a burst of 5 per app, which every test below stays under.
 const PEER: &str = "127.0.0.1:34567";
-
-fn test_config() -> Config {
-    Config {
-        max_url_length: 2048,
-        click_retention_days: 30,
-        host_url: "http://localhost:4001".to_string(),
-        db_path: ":memory:".to_string(),
-        host: "127.0.0.1".to_string(),
-        port: 4001,
-        mail: rus::config::MailConfig::default(),
-        trusted_proxy_cidrs: Vec::new(),
-        jwt_secret: "test-secret-at-least-32-chars-ok!".to_string(),
-        jwt_expiry_hours: 1,
-        refresh_token_expiry_days: 7,
-        account_lockout_attempts: 5,
-        account_lockout_duration_minutes: 30,
-        allow_registration: true,
-    }
-}
-
-fn make_state() -> web::Data<AppState> {
-    web::Data::new(AppState::new(test_config()).unwrap())
-}
 
 /// Build an app from the binary's own route table.
 async fn build_app() -> impl actix_web::dev::Service<
@@ -48,7 +25,7 @@ async fn build_app() -> impl actix_web::dev::Service<
     Response = actix_web::dev::ServiceResponse,
     Error = actix_web::Error,
 > {
-    let state = make_state();
+    let state = make_test_state();
     build_app_with_state(state).await
 }
 

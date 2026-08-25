@@ -2537,6 +2537,7 @@ dependencies = [
  "qrcode",
  "rand 0.8.5",
  "reqwest",
+ "rus",
  "rusqlite",
  "serde",
  "serde_json",

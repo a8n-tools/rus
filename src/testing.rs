@@ -1,4 +1,6 @@
-//! Shared test utilities - compiled only when running `cargo test`.
+//! Shared test utilities for the unit suite and the integration targets.
+//! Compiled under `#[cfg(test)]` or the `testing` feature, and never in a
+//! release build, which enables neither (RUS-31).
 
 use crate::config::Config;
 use crate::db::AppState;
