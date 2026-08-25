@@ -35,6 +35,9 @@ saas = [
     "dep:urlencoding",
     "dep:moka",
 ]
+# Compiles src/testing.rs into the plain library, which is what an integration
+# target links: `#[cfg(test)]` does not reach across the crate boundary (RUS-31).
+testing = []
 
 [dependencies]
 actix-web = "4.4"
@@ -72,6 +75,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-actix-web = "0.7"
 
 [dev-dependencies]
+# The crate dev-depends on itself so `cargo test` turns the `testing` feature on
+# for the library the integration targets link. default-features = false keeps
+# the saas leg from pulling `standalone` back in through `default` (RUS-31).
+rus = { path = ".", default-features = false, features = ["testing"] }
 actix-http = "3"
 hmac = "0.12"
 sha2 = "0.10"

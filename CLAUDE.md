@@ -70,6 +70,7 @@ just pre-commit                        # Every CI check: the source-tree guard, 
 - **Auth (saas)**: OIDC BFF in `src/oidc/` - Authorization Code + PKCE against the parent SaaS provider, opaque `rus_session` cookie for the browser leg
 - **Storage**: `./data/rus.db` locally (auto-created), `/data/rus.db` in Docker (set via `ENV DB_PATH`)
 - **Routing**: one table in `src/routes.rs` (`configure_app`), mounted by `main.rs` and by `tests/integration_standalone.rs`. `main.rs` keeps only what cannot move into a `ServiceConfig`: `app_data`, the `DefaultHeaders` wrap and the saas `maintenance_guard`, which wraps the whole `App`. The rows both legs share are written once and only the ones that differ carry a `#[cfg]`, so a route cannot land in one leg and miss the other (RUS-21)
+- **Test fixtures**: one `test_config()` / `make_test_state()` in `src/testing.rs`, used by the unit suite and by `tests/integration_standalone.rs`. An integration target links the plain library, where `#[cfg(test)]` does not reach, so the module is gated `#[cfg(any(test, feature = "testing"))]` and the crate dev-depends on itself with `default-features = false, features = ["testing"]` to switch it on for `cargo test` only. A release build enables neither, so the fixtures never ship (RUS-31)
 
 ### Source Structure
 
@@ -87,7 +88,7 @@ src/
 ├── location_alert.rs # New-sign-in-country detection, trusted-proxy gate (both modes)
 ├── login_approval.rs # New-country sign-in gate, approval page and API (both modes)
 ├── mailer.rs         # Security alert email via SMTP, TLS by default (both modes)
-├── testing.rs        # Test-only stubs and fixtures: StubOp, StubSmtp (#[cfg(test)])
+├── testing.rs        # The one test Config and state, plus StubOp / StubSmtp (test or feature "testing")
 ├── auth/             # JWT handling (standalone only)
 │   ├── mod.rs
 │   ├── jwt.rs
@@ -291,7 +292,7 @@ A single `Dockerfile` builds both modes via `BUILD_MODE` ARG (`standalone` defau
 ### Test floors
 Both test harnesses exit 0 on an empty run, so both are held to a minimum pass count rather than to their exit code alone.
 
-- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 270 / `saas` 205 for the `--lib` scope `just pre-commit` uses, and `standalone` 285 / `saas` 205 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 294 / 226 and 311 / 226. Raise them as the legs grow; never lower one to make a red run green.
+- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 270 / `saas` 205 for the `--lib` scope `just pre-commit` uses, and `standalone` 300 / `saas` 205 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 294 / 226 and 311 / 226. An all-targets floor has to sit above its own leg's `--lib` count, because the guard sums the pass counts of every target in the leg: standalone was 285 until RUS-31, so the whole `tests/` suite could have stopped running and the 294 library tests left would still have cleared it. Raise them as the legs grow; never lower one to make a red run green.
 - `--leg <name>` narrows a run to one leg, for the single-leg developer recipes (RUS-26). An unknown name is an error listing the known legs rather than an empty selection, because a run with no leg has no row left to violate anything, and the selected leg is still held to its own floor. The guard prints that floor beside the pass count on every run.
 - Excluded targets: the same guard reads every target table in `Cargo.toml` (`lib`, `bin`, `example`, `test`, `bench`), and fails when an entry that sets `test = false` has a source carrying `#[cfg(test)]`, `#[cfg_attr(test, ...)]` or a `#[test]`-shaped attribute (RUS-27). Such a block compiles under `cargo clippy --all-targets` and is then never run, which is the same vacuous green the pass floors exist to catch. A source the guard cannot read is a failure too, so it never passes a target it did not look at.
 - JavaScript: `static/tests/run.mjs` fails below 3 test files or 14 passing tests (RUS-20).

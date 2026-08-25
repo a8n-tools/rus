@@ -20,5 +20,8 @@ pub mod routes;
 pub mod security;
 pub mod url;
 
-#[cfg(test)]
+// `test` covers the library's own unit tests; `testing` (set by the self
+// dev-dependency) puts the same module in the library an integration target
+// links, so both share one fixture (RUS-31).
+#[cfg(any(test, feature = "testing"))]
 pub mod testing;

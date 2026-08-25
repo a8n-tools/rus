@@ -43,7 +43,13 @@ const MIN_LIB_PASSED = {standalone: 270, saas: 205}
 # (lib 294 + tests/ 17), 226 saas (lib 226). RUS-24 dropped the duplicate
 # bin-target copy of the unit suite, so these fell from 597 and 444 without a
 # single test being retired.
-const MIN_FULL_PASSED = {standalone: 285, saas: 205}
+#
+# standalone is 300, not the usual seven percent below 311, because the counts
+# here are summed across targets: at 285 the whole tests/ suite could stop
+# running and the leg's remaining 294 library tests would still clear the floor,
+# which is the vacuous green this guard exists to catch (RUS-23, found in
+# RUS-31). Any all-targets floor must sit above its leg's --lib count.
+const MIN_FULL_PASSED = {standalone: 300, saas: 205}
 
 # Fold a run's harness output into counts. A run that printed no summary line
 # reports zero summaries, which is itself a violation.

@@ -203,7 +203,7 @@ rus/
 │   ├── location_alert.rs    # New-sign-in-country detection, trusted-proxy gate
 │   ├── login_approval.rs    # New-country sign-in gate, approval page and API
 │   ├── mailer.rs            # Security alert email via SMTP
-│   ├── testing.rs           # Test-only stubs and fixtures: StubOp, StubSmtp
+│   ├── testing.rs           # The one test Config and state, shared by the unit and integration suites
 │   ├── auth/
 │   │   ├── mod.rs
 │   │   ├── jwt.rs           # JWT creation and validation
@@ -481,8 +481,11 @@ Both test harnesses exit 0 on a run that collected nothing, so both are held to
 a minimum pass count. `scripts/check-cargo-tests-ran.nu` runs the cargo tests
 for every feature leg and fails on a missing `test result:` line, zero passed,
 any ignored or filtered-out case, or a total under the leg's floor: 270
-standalone and 205 saas for the `--lib` scope `just pre-commit` uses, 285 and
-205 for the all-targets scope CI and the single-leg recipes use. The legs come
+standalone and 205 saas for the `--lib` scope `just pre-commit` uses, 300 and
+205 for the all-targets scope CI and the single-leg recipes use. An all-targets
+floor sits above its own leg's `--lib` count on purpose: the guard sums every
+target in the leg, so a lower one would let the whole `tests/` suite stop
+running while the library tests alone still cleared it. The legs come
 from the `[[bin]]` `required-features` in `Cargo.toml`, so a new build mode is
 covered as soon as its binary lands, and the guard fails if any recipe in the
 `justfile` or any step in `check.yml` reaches the test harness outside it.
