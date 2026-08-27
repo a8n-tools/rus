@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RUS - URL Shortener | Part of a8n-tools</title>
-    <link rel="stylesheet" href="styles.css?v=4" />
+    <link rel="stylesheet" href="styles.css?v=5" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
     <script src="theme.js"></script>
     <style>
@@ -151,27 +151,53 @@
       }
 
       .cta-primary {
-        background: var(--rust-orange);
+        display: inline-flex;
+        height: 2.75rem;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        border-radius: calc(0.5rem - 2px);
+        border-width: 0;
+        padding-left: 2rem;
+        padding-right: 2rem;
+        font-size: 0.875rem;
+        font-weight: 500;
         color: #fff;
-        border: none;
-        box-shadow: 0 1px 4px rgba(249, 115, 22, 0.3);
+        background: linear-gradient(to right, var(--rust-orange), var(--indigo));
+        box-shadow: 0 10px 15px -3px var(--btn-hover-shadow),
+                    0 4px 6px -4px var(--btn-hover-shadow);
+        /* opacity is listed because this rule replaces .cta-btn's transition */
+        transition: opacity 0.15s cubic-bezier(.4, 0, .2, 1),
+                    color 0.15s cubic-bezier(.4, 0, .2, 1),
+                    background-color 0.15s cubic-bezier(.4, 0, .2, 1),
+                    border-color 0.15s cubic-bezier(.4, 0, .2, 1);
       }
 
       .cta-primary:hover {
-        background: var(--rust-orange-dark);
-        transform: translateY(-1px);
-        box-shadow: 0 6px 18px rgba(249, 115, 22, 0.35);
+        opacity: 0.92;
       }
 
       .cta-secondary {
-        background: transparent;
-        color: var(--text-primary);
-        border: 1.5px solid var(--border-color);
+        display: inline-flex;
+        height: 2.75rem;
+        align-items: center;
+        justify-content: center;
+        border-radius: calc(0.5rem - 2px);
+        border: 1px solid var(--cta-secondary-border);
+        background-color: var(--bg-darker);
+        padding-left: 2rem;
+        padding-right: 2rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--cta-secondary-text);
+        transition: color 0.15s cubic-bezier(.4, 0, .2, 1),
+                    background-color 0.15s cubic-bezier(.4, 0, .2, 1),
+                    border-color 0.15s cubic-bezier(.4, 0, .2, 1);
       }
 
       .cta-secondary:hover {
-        border-color: var(--text-secondary);
-        transform: translateY(-1px);
+        border-color: var(--cta-secondary-border-hover);
+        background-color: var(--bg-dark);
       }
 
       /* ---- Features section ---- */

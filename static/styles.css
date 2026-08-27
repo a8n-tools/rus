@@ -35,6 +35,10 @@
     --heavy-shadow: rgba(0, 0, 0, 0.5);
     --focus-glow: rgba(247, 76, 0, 0.15);
     --btn-hover-shadow: rgba(247, 76, 0, 0.3);
+    /* Landing page secondary CTA */
+    --cta-secondary-text: #a5b4fc;
+    --cta-secondary-border: rgba(165, 180, 252, 0.3);
+    --cta-secondary-border-hover: rgba(165, 180, 252, 0.6);
 }
 
 body {
@@ -882,6 +886,7 @@ button[type="submit"]:disabled {
         --heavy-shadow: rgba(0, 0, 0, 0.1);
         --focus-glow: rgba(249, 115, 22, 0.2);
         --btn-hover-shadow: rgba(249, 115, 22, 0.25);
+        --cta-secondary-text: #4f46e5;
     }
 }
 
@@ -905,6 +910,7 @@ button[type="submit"]:disabled {
     --heavy-shadow: rgba(0, 0, 0, 0.1);
     --focus-glow: rgba(249, 115, 22, 0.2);
     --btn-hover-shadow: rgba(249, 115, 22, 0.25);
+    --cta-secondary-text: #4f46e5;
 }
 
 /* Theme toggle button */
@@ -979,6 +985,8 @@ button[type="submit"]:disabled {
     --heavy-shadow: rgba(255, 255, 255, 0.1);
     --focus-glow: rgba(247, 76, 0, 0.3);
     --btn-hover-shadow: rgba(247, 76, 0, 0.4);
+    --cta-secondary-border: #ffffff;
+    --cta-secondary-border-hover: #ffffff;
 }
 
 /* ============================================================
@@ -1004,6 +1012,8 @@ button[type="submit"]:disabled {
     --heavy-shadow: rgba(0, 0, 0, 0.2);
     --focus-glow: rgba(197, 61, 0, 0.3);
     --btn-hover-shadow: rgba(197, 61, 0, 0.35);
+    --cta-secondary-border: #000000;
+    --cta-secondary-border-hover: #000000;
 }
 
 @media (prefers-color-scheme: light) {
@@ -1027,5 +1037,7 @@ button[type="submit"]:disabled {
         --heavy-shadow: rgba(0, 0, 0, 0.2);
         --focus-glow: rgba(197, 61, 0, 0.3);
         --btn-hover-shadow: rgba(197, 61, 0, 0.35);
+        --cta-secondary-border: #000000;
+        --cta-secondary-border-hover: #000000;
     }
 }
