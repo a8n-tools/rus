@@ -385,7 +385,7 @@ pub async fn refresh_token(
 }
 
 /// Hash a password using Argon2id
-fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
+pub(crate) fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
     Ok(argon2

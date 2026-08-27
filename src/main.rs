@@ -10,7 +10,7 @@ use rus::db::AppState;
 use rus::handlers::maintenance_guard;
 #[cfg(feature = "saas")]
 use rus::oidc;
-use rus::{location_alert, routes};
+use rus::{location_alert, routes, setup_admin};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -45,6 +45,10 @@ async fn main() -> std::io::Result<()> {
     ));
 
     info!("Database connection established");
+
+    // DEV-300: the fleet-standard SETUP_DEFAULT_ADMIN bootstrap. A no-op unless
+    // this is a debug build, which no shipped image is.
+    setup_admin::ensure_default_admin(&app_state);
 
     // Build the OIDC verifier + RP state once and share across workers.
     #[cfg(feature = "saas")]
