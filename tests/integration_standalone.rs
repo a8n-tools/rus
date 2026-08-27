@@ -699,3 +699,100 @@ async fn e2e_abuse_report_ban_user() {
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401);
 }
+
+// =============================================================================
+// DEV-300: the SETUP_DEFAULT_ADMIN bootstrap, end to end
+// =============================================================================
+
+/// One value, shared by the three tests below so only the gate differs.
+const SEEDED_ADMIN: &str = "admin@a8n.run:Admin1234!";
+
+/// The seed is only worth anything if the credential it writes can be typed
+/// into the real login route and comes back with admin rights. Asserting the
+/// row alone would pass even if the hash were unusable.
+#[actix_web::test]
+async fn e2e_seeded_default_admin_can_sign_in_and_use_the_admin_api() {
+    let state = make_test_state();
+    {
+        let db = state.db.lock().unwrap();
+        rus::setup_admin::seed_default_admin(&db, true, Some(SEEDED_ADMIN));
+    }
+    let app = build_app_with_state(state).await;
+
+    let req = test::TestRequest::post()
+        .uri("/api/login")
+        .peer_addr(PEER.parse().unwrap())
+        .set_json(serde_json::json!({"username": "admin", "password": "Admin1234!"}))
+        .to_request();
+    let body: Value = test::call_and_read_body_json(&app, req).await;
+    let token = body["token"]
+        .as_str()
+        .expect("the seeded admin must sign in");
+
+    let req = test::TestRequest::get()
+        .uri("/api/admin/users")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .to_request();
+    let users: Value = test::call_and_read_body_json(&app, req).await;
+    assert_eq!(users.as_array().unwrap().len(), 1);
+    assert_eq!(users[0]["username"], "admin");
+    assert_eq!(users[0]["is_admin"], true);
+}
+
+/// The interaction the seed changes: a seeded admin fills the first-user slot,
+/// so setup is no longer required and the next registration is an ordinary
+/// user. Deliberate, and asserted here so a later change to `register` cannot
+/// quietly hand admin to a second account.
+#[actix_web::test]
+async fn e2e_a_seeded_admin_takes_the_first_user_slot() {
+    let state = make_test_state();
+    {
+        let db = state.db.lock().unwrap();
+        rus::setup_admin::seed_default_admin(&db, true, Some(SEEDED_ADMIN));
+    }
+    let app = build_app_with_state(state).await;
+
+    let req = test::TestRequest::get()
+        .uri("/api/setup/required")
+        .to_request();
+    let body: Value = test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["setup_required"], false);
+
+    let bob = do_register(&app, "bob").await;
+    let token = bob["token"].as_str().expect("bob must register");
+    let req = test::TestRequest::get()
+        .uri("/api/admin/users")
+        .insert_header(("Authorization", format!("Bearer {token}")))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 403, "the second account must not be admin");
+}
+
+/// The production gate, driven through the same route table the binary mounts:
+/// same value, same empty database, release profile, and nothing is created.
+#[actix_web::test]
+async fn e2e_a_release_build_seeds_no_admin() {
+    let state = make_test_state();
+    {
+        let db = state.db.lock().unwrap();
+        rus::setup_admin::seed_default_admin(&db, false, Some(SEEDED_ADMIN));
+    }
+    let app = build_app_with_state(state).await;
+
+    let req = test::TestRequest::get()
+        .uri("/api/setup/required")
+        .to_request();
+    let body: Value = test::call_and_read_body_json(&app, req).await;
+    assert_eq!(
+        body["setup_required"], true,
+        "a release build seeded a user"
+    );
+
+    let req = test::TestRequest::post()
+        .uri("/api/login")
+        .peer_addr(PEER.parse().unwrap())
+        .set_json(serde_json::json!({"username": "admin", "password": "Admin1234!"}))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 401);
+}

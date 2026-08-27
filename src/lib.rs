@@ -18,6 +18,7 @@ pub mod oidc;
 pub mod routes;
 #[cfg(feature = "standalone")]
 pub mod security;
+pub mod setup_admin;
 pub mod url;
 
 // `test` covers the library's own unit tests; `testing` (set by the self

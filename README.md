@@ -200,6 +200,7 @@ rus/
 │   ├── db.rs                # Database connection and schema
 │   ├── models.rs            # Data models and request/response types
 │   ├── security.rs          # Password validation, account lockout
+│   ├── setup_admin.rs       # SETUP_DEFAULT_ADMIN dev-only admin seed (standalone)
 │   ├── location_alert.rs    # New-sign-in-country detection, trusted-proxy gate
 │   ├── login_approval.rs    # New-country sign-in gate, approval page and API
 │   ├── mailer.rs            # Security alert email via SMTP
@@ -366,6 +367,23 @@ Every account carries `notify_new_location`, an opt-out that is on by default an
 | `ACCOUNT_LOCKOUT_ATTEMPTS` | Failed attempts before lockout | `5` |
 | `ACCOUNT_LOCKOUT_DURATION` | Lockout duration in minutes | `30` |
 | `ALLOW_REGISTRATION` | Allow public signups | `true` |
+| `SETUP_DEFAULT_ADMIN` | **Development only.** Seed an admin as `email:password` while no admin exists. Ignored, with an error logged, on a release build | unset |
+
+#### Seeding a default admin for development
+
+A fresh database has no accounts, so the first person to register becomes the admin. That is fine for a real deployment and awkward for a developer, who wants to `just dev-local` and sign straight in. `SETUP_DEFAULT_ADMIN=admin@a8n.run:Admin1234!` creates that admin at startup while no admin exists, using the same single-variable spelling as the other apps in the fleet.
+
+**It only works on a debug build**, which is the same gate that mounts the `/dev/*` routes. Every published rus image is compiled `--release`, so a deployed container refuses to seed and logs an error instead, no matter what its environment says. Setting it on a production stack is dead config rather than a back door, and the deployment compose files therefore do not carry it. Use `just dev-local` or `just run`, both of which are debug builds and read `.env`; `just dev` builds the production image and will refuse.
+
+The value is checked against the rules registration already enforces, so the account it creates is one you could have signed up for by hand:
+
+- The half before the first `:` must be a usable email address. It is stored as the account's security-alert address and its local part becomes the username, reduced to the characters registration accepts (`admin@a8n.run` gives the username `admin`).
+- The half after the first `:` must pass the password policy: at least 8 characters, one uppercase, one number, one special character. A password may itself contain a `:`, since only the first one splits. `admin1234`, the value some sibling repos use, is refused.
+- Anything malformed is refused with a log line naming the reason, and nothing is written.
+
+Seeding is idempotent. It runs on every start, does nothing once any admin exists, and never errors on a second boot. If the derived username is already taken by a non-admin account it is suffixed (`admin-2` through `admin-5`).
+
+Two consequences worth knowing: the seeded admin fills the first-user slot, so the next account you register is an ordinary user and `/setup.html` no longer asks for setup; and in SaaS mode the variable is refused outright, because sign-in and the admin role both come from the identity provider, which rewrites the role on every login.
 
 ### SaaS only
 

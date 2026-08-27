@@ -37,19 +37,19 @@ const GUARDED_WORKFLOW = ".forgejo/workflows/check.yml"
 # Floors, not targets: measured on main for RUS-23 and rounded down by roughly
 # seven percent, so retiring a stale case does not fail the build while an
 # empty, filtered or all-ignored run cannot clear them. Raise as the legs grow.
-# --lib scope, what `just pre-commit` runs: 294 standalone, 226 saas.
-const MIN_LIB_PASSED = {standalone: 270, saas: 205}
-# All targets, what CI and `just test` / `just test-saas` run: 311 standalone
-# (lib 294 + tests/ 17), 226 saas (lib 226). RUS-24 dropped the duplicate
+# --lib scope, what `just pre-commit` runs: 304 standalone, 230 saas.
+const MIN_LIB_PASSED = {standalone: 282, saas: 213}
+# All targets, what CI and `just test` / `just test-saas` run: 324 standalone
+# (lib 304 + tests/ 20), 230 saas (lib 230). RUS-24 dropped the duplicate
 # bin-target copy of the unit suite, so these fell from 597 and 444 without a
 # single test being retired.
 #
-# standalone is 300, not the usual seven percent below 311, because the counts
-# here are summed across targets: at 285 the whole tests/ suite could stop
-# running and the leg's remaining 294 library tests would still clear the floor,
+# standalone is 310, not the usual seven percent below 324, because the counts
+# here are summed across targets: below 304 the whole tests/ suite could stop
+# running and the leg's remaining 304 library tests would still clear the floor,
 # which is the vacuous green this guard exists to catch (RUS-23, found in
 # RUS-31). Any all-targets floor must sit above its leg's --lib count.
-const MIN_FULL_PASSED = {standalone: 300, saas: 205}
+const MIN_FULL_PASSED = {standalone: 310, saas: 213}
 
 # Fold a run's harness output into counts. A run that printed no summary line
 # reports zero summaries, which is itself a violation.

@@ -85,6 +85,7 @@ src/
 ├── db.rs             # Database connection and schema
 ├── models.rs         # Data models and request/response types
 ├── security.rs       # Password validation, account lockout (standalone only)
+├── setup_admin.rs    # SETUP_DEFAULT_ADMIN dev-only admin seed (DEV-300)
 ├── location_alert.rs # New-sign-in-country detection, trusted-proxy gate (both modes)
 ├── login_approval.rs # New-country sign-in gate, approval page and API (both modes)
 ├── mailer.rs         # Security alert email via SMTP, TLS by default (both modes)
@@ -196,6 +197,18 @@ The saas sign-in is driven end to end in `oidc::rp::tests` against a stubbed OP 
 
 `users.notify_new_location` is a per-account opt-out for the new-sign-in-location alert, on by default and checked before the alert is routed anywhere. It is not an environment variable: the account changes it itself with `PATCH /api/me` (`{"notify_new_location": false}` off, `true` on), and reads it back from `GET /api/me`. Both feature legs carry the pair (`update_current_user` / `get_current_user` in `src/handlers/auth.rs`, `saas_update_me` / `saas_me` in `src/handlers/saas_auth.rs`), and both derive the account from the session rather than the request body, so a user id in the payload is ignored. An absent key means "not submitted" and leaves the stored value alone; an explicit `false` persists; a non-boolean is a 400 rather than a coercion. The queries sit with the rest of the alert's SQL in `src/location_alert.rs` (`get_notify_new_location`, `set_notify_new_location`). The browser control is the Account section of `static/dashboard.html`, which loads both account fields from `GET /api/me` and submits only the ones the user changed, so a toggle save never carries `email` and cannot clear the address.
 
+### Default admin bootstrap (standalone, debug builds only)
+
+`SETUP_DEFAULT_ADMIN=email:password` seeds an admin on startup while no admin exists (DEV-300), so a developer signs in to a fresh database instead of racing to be the first registered user. It is the fleet's single-variable convention, shared with menkent (`api/src/main.rs`), bunyip (`bunyip-api/src/main.rs`), eform (`src/main.rs`) and lets-chat (`server/src/setup_admin.rs`); rusty-links' three-variable `SETUP_DEFAULT_ADMIN_EMAIL` / `_PASSWORD` / `_NAME` spelling is the outlier and is deliberately not copied. The logic is `src/setup_admin.rs`, called once from `main.rs` right after `AppState::new`.
+
+**The gate is `cfg!(debug_assertions)`, the same dev detection `routes::configure_app` uses for `/dev/seed-session`.** Every image rus ships is `cargo build --release` (`oci-build/Dockerfile`), so a deployed binary refuses and logs an error rather than seeding, whatever its environment says. That is why the deployment compose files do not carry the variable: it would be dead config. `seed_default_admin(&db, dev_build, raw)` takes the gate as an argument so `a_release_build_writes_nothing_even_when_configured` (unit) and `e2e_a_release_build_seeds_no_admin` (integration, through the real route table) drive the release branch against a real database rather than assuming it.
+
+**Standalone only.** The saas leg refuses with its own log line: it has no local password to seed, and `oidc::jit::load_or_provision` rewrites `users.is_admin` from the OP's `role` claim on every login, so a seeded admin there would be demoted by the first sign-in. `the_saas_leg_refuses_even_on_a_dev_build` asserts it. That is the trap lets-chat hit with `mirror_bunyip_admin_role`, checked here before the seed was written rather than after.
+
+The value is held to the rules `POST /api/register` already applies, so the seeded row is shaped like a registered one: the email half goes through `mailer::normalize_account_email`, the password half through `security::validate_password` (so `admin1234`, the value some sibling repos use, is refused for having no uppercase and no special character), and the username is the email local part reduced to the characters register accepts. Only the first `:` splits, so a password may contain one. Seeding is idempotent by an admin-exists check, and a username already taken by a non-admin is suffixed `-2` through `-5` the way `oidc::jit::load_or_provision` suffixes. Every outcome is logged: seeded, an admin already exists, refused for a release build, refused for a saas build, or refused as malformed with the reason.
+
+**Interaction with the first-user rule.** `handlers::auth::register` grants admin to the first registered account (`user_count == 0`), so a seeded admin occupies that slot on purpose: the next registration is an ordinary user and `pages::check_setup_required` reports `false`. `e2e_a_seeded_admin_takes_the_first_user_slot` pins that, so a later change cannot quietly hand admin to a second account. A dev box that also sets `ALLOW_REGISTRATION=false` can no longer self-register once the seed has run, for the same reason it could not once any user existed.
+
 ### Standalone-only options
 ```
 JWT_EXPIRY=1                # JWT expiry in hours (default: 1)
@@ -203,6 +216,7 @@ REFRESH_TOKEN_EXPIRY=7      # Refresh token expiry in days (default: 7)
 ACCOUNT_LOCKOUT_ATTEMPTS=5  # Failed attempts before lockout (default: 5)
 ACCOUNT_LOCKOUT_DURATION=30 # Lockout duration in minutes (default: 30)
 ALLOW_REGISTRATION=true     # Allow public signups (default: true)
+SETUP_DEFAULT_ADMIN=        # DEV ONLY: seed an admin as email:password (debug builds only)
 ```
 
 ### SaaS-only options (OIDC SSO + webhook)
@@ -292,7 +306,7 @@ A single `Dockerfile` builds both modes via `BUILD_MODE` ARG (`standalone` defau
 ### Test floors
 Both test harnesses exit 0 on an empty run, so both are held to a minimum pass count rather than to their exit code alone.
 
-- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 270 / `saas` 205 for the `--lib` scope `just pre-commit` uses, and `standalone` 300 / `saas` 205 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 294 / 226 and 311 / 226. An all-targets floor has to sit above its own leg's `--lib` count, because the guard sums the pass counts of every target in the leg: standalone was 285 until RUS-31, so the whole `tests/` suite could have stopped running and the 294 library tests left would still have cleared it. Raise them as the legs grow; never lower one to make a red run green.
+- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 282 / `saas` 213 for the `--lib` scope `just pre-commit` uses, and `standalone` 310 / `saas` 213 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 304 / 230 and 324 / 230. An all-targets floor has to sit above its own leg's `--lib` count, because the guard sums the pass counts of every target in the leg: standalone was 285 until RUS-31, so the whole `tests/` suite could have stopped running and the library tests left would still have cleared it. Raise them as the legs grow; never lower one to make a red run green.
 - `--leg <name>` narrows a run to one leg, for the single-leg developer recipes (RUS-26). An unknown name is an error listing the known legs rather than an empty selection, because a run with no leg has no row left to violate anything, and the selected leg is still held to its own floor. The guard prints that floor beside the pass count on every run.
 - Excluded targets: the same guard reads every target table in `Cargo.toml` (`lib`, `bin`, `example`, `test`, `bench`), and fails when an entry that sets `test = false` has a source carrying `#[cfg(test)]`, `#[cfg_attr(test, ...)]` or a `#[test]`-shaped attribute (RUS-27). Such a block compiles under `cargo clippy --all-targets` and is then never run, which is the same vacuous green the pass floors exist to catch. A source the guard cannot read is a failure too, so it never passes a target it did not look at.
 - JavaScript: `static/tests/run.mjs` fails below 3 test files or 14 passing tests (RUS-20).
