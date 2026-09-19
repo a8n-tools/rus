@@ -32,9 +32,8 @@ on:
 jobs:
   build-and-push:
     name: Build and push ${{ matrix.image }}
-    # Base label: every compile happens inside docker buildx, so the runner
-    # itself only needs git, nu and docker. No C toolchain required.
-    runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_LATEST }}
+    # Heavy: `docker buildx build` compiles the release binary for each image.
+    runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_HEAVY }}
     permissions:
       contents: read
       packages: write
@@ -57,6 +56,9 @@ jobs:
         uses: https://code.forgejo.org/actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Start job metrics sampler
+        uses: https://dev.a8n.run/psa-systems/common/.forgejo/actions/job-metrics-start@main
 
       - name: Verify Docker availability
         run: |
@@ -117,10 +119,14 @@ jobs:
           print $"BUILD_DATE=($build_date)"
 
       - name: Set up buildx builder
-        # The `docker-container` driver is required for any cache export;
-        # the default `docker` driver only carries inline cache, which
-        # misses the dependency-build layer.
-        run: docker buildx create --name container-builder --driver docker-container --use
+        # The `docker-container` driver is required for any cache export; common's action gives each job its own builder.
+        uses: https://dev.a8n.run/psa-systems/common/.forgejo/actions/setup-buildx@main
+        with:
+          name: ${{ matrix.image }}
+
+      - name: Set build parallelism
+        # Exports CARGO_BUILD_JOBS / NEXTEST_TEST_THREADS / CI_JOBS from the runner, with a warned fallback.
+        uses: https://dev.a8n.run/psa-systems/common/.forgejo/actions/build-parallelism@main
 
       - name: Export Actions runtime env for buildx gha cache
         # A raw `docker buildx build` (unlike docker/build-push-action)
@@ -164,6 +170,7 @@ jobs:
           (
             ^docker buildx build ...$push_args
               --build-arg $"BUILD_MODE=($build_mode)"
+              --build-arg $"CARGO_BUILD_JOBS=($env.CARGO_BUILD_JOBS)"
               --build-arg $"GIT_TAG=($git_tag)"
               --build-arg $"GIT_HASH=($git_hash)"
               --build-arg $"BUILD_DATE=($build_date)"
@@ -181,3 +188,7 @@ jobs:
           let image = "${{ matrix.image }}"
           let registry = $env.IMAGE_REGISTRY
           print $"($prefix) ($registry)/($image):($tag)"
+
+      - name: Report job metrics
+        if: always()
+        uses: https://dev.a8n.run/psa-systems/common/.forgejo/actions/job-metrics-report@main
