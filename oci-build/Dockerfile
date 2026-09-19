@@ -10,6 +10,8 @@ ARG BUILD_MODE=standalone
 FROM ghcr.io/niceguyit/rust-builder-musl:v1.0.0-rust1.94-alpine AS builder
 
 ARG BUILD_MODE
+# CI passes the runner's value (DEV-769); `default` lets cargo pick for a local build.
+ARG CARGO_BUILD_JOBS=default
 # Version metadata baked into the binary (surfaced via /api/version, /health,
 # and the startup banner). Pass these from CI; fall back to "unknown" so local
 # `docker build` still works.
