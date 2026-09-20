@@ -8,6 +8,10 @@ on:
     branches:
       - main
 jobs:
+  secrets:
+    uses: psa-systems/common/.forgejo/workflows/check-secrets.yml@main
+    runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_MEDIUM }}
+    secrets: inherit
   check:
     name: fmt + clippy + build + tests
     # Heavy: compiles Rust natively, which needs cc/ld and the OpenSSL headers of the dev image.
