@@ -7,7 +7,7 @@
 ARG BUILD_MODE=standalone
 
 # Build stage
-FROM ghcr.io/niceguyit/rust-builder-musl:v1.0.0-rust1.94-alpine AS builder
+FROM ghcr.io/niceguyit/rust-builder-musl:v1.1.0-rust1.98.1-alpine AS builder
 
 ARG BUILD_MODE
 # CI passes the runner's value (DEV-769); `default` lets cargo pick for a local build.
