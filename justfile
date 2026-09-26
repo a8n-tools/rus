@@ -11,7 +11,7 @@ compose := "docker compose -f compose.dev.yml "
 # oci-build/Dockerfile so `just pre-commit` runs the same toolchain rus is
 # built against. The compose `app` service builds the production runtime
 # image (alpine + server ENTRYPOINT, no cargo), so pre-commit must not use it.
-dev_image := "ghcr.io/niceguyit/rust-builder-musl:v1.0.0-rust1.94-alpine"
+dev_image := "ghcr.io/niceguyit/rust-builder-musl:v1.1.0-rust1.98.1-alpine"
 
 # Image for the static/ page tests. The rust-builder image ships no Node, so the
 # JS step gets its own pinned image; docker is already required by pre-commit, so
