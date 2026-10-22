@@ -52,27 +52,32 @@ RUN set -e; \
     fi
 
 # Runtime stage
-FROM alpine:3.21
+FROM alpine:3.23
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata \
-    && adduser -D -u 1001 appuser
+RUN apk add --no-cache ca-certificates tzdata gosu shadow \
+    && addgroup -g 1001 appuser \
+    && adduser -D -H -u 1001 -G appuser appuser
 
 COPY --from=builder /build/app /app/app
 COPY static ./static
+COPY oci-build/gosu-entrypoint.sh /usr/local/bin/gosu-entrypoint.sh
 
-RUN mkdir -p /data /config \
+RUN chmod 0755 /usr/local/bin/gosu-entrypoint.sh \
+    && mkdir -p /data /config \
     && chown -R appuser:appuser /app /data /config
-
-USER appuser
 
 LABEL org.opencontainers.image.source=https://dev.a8n.run/a8n-tools/rus
 
 ENV HOST=0.0.0.0
 ENV RUST_LOG=info
 ENV DB_PATH=/data/rus.db
+ENV APP_USER=appuser DATA_DIRS="/data /config"
 
 EXPOSE 4001
 
-ENTRYPOINT ["/app/app"]
+# The container starts as root; gosu-entrypoint.sh remaps appuser to PUID/PGID (or the
+# first data dir's owner) and drops to it with gosu. A compose `user:` pin disables the
+# remap and chown and instead requires every DATA_DIRS entry already be writable.
+ENTRYPOINT ["/usr/local/bin/gosu-entrypoint.sh", "/app/app"]
