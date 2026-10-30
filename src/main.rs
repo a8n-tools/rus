@@ -27,8 +27,12 @@ async fn main() -> std::io::Result<()> {
         .with_file(false)
         .init();
 
-    // Load configuration from environment
-    let config = Config::from_env();
+    // Load configuration from environment. A set but unparseable value is a
+    // misconfiguration, not a default to silently fall back to.
+    let config = Config::from_env().unwrap_or_else(|error| {
+        eprintln!("Invalid configuration: {error}");
+        std::process::exit(1);
+    });
 
     // Print startup banner with configuration
     config.print_banner();

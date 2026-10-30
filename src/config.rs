@@ -68,6 +68,22 @@ impl SmtpTlsMode {
     }
 }
 
+/// Reads an optional environment variable as `T`. Unset returns `default`; set
+/// but unparseable returns an error naming the variable and the value, so a
+/// typo in configuration fails startup instead of silently taking the default.
+fn env_parsed<T: std::str::FromStr>(key: &str, default: T) -> Result<T, String>
+where
+    T::Err: std::fmt::Display,
+{
+    match env::var(key) {
+        Err(_) => Ok(default),
+        Ok(raw) => raw
+            .trim()
+            .parse::<T>()
+            .map_err(|e| format!("{key} is set to \"{raw}\" which is not valid: {e}")),
+    }
+}
+
 /// RUS-12: parse `TRUSTED_PROXY_CIDRS` (comma-separated CIDRs or bare IPs).
 /// Unparseable entries warn and are dropped rather than failing boot.
 fn parse_trusted_proxy_cidrs(raw: &str) -> Vec<IpNetwork> {
@@ -219,8 +235,10 @@ pub struct Config {
 }
 
 impl Config {
-    /// Load configuration from environment variables
-    pub fn from_env() -> Self {
+    /// Load configuration from environment variables. Returns an error naming
+    /// the variable and the invalid value when one is set but unparseable;
+    /// an unset variable still takes its documented default.
+    pub fn from_env() -> Result<Self, String> {
         #[cfg(feature = "standalone")]
         let jwt_secret = env::var("JWT_SECRET").unwrap_or_else(|_| {
             tracing::warn!("JWT_SECRET not set in environment, using default (insecure)");
@@ -228,38 +246,20 @@ impl Config {
         });
 
         #[cfg(feature = "standalone")]
-        let jwt_expiry_hours = env::var("JWT_EXPIRY")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1);
+        let jwt_expiry_hours: i64 = env_parsed("JWT_EXPIRY", 1)?;
 
         #[cfg(feature = "standalone")]
-        let refresh_token_expiry_days = env::var("REFRESH_TOKEN_EXPIRY")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(7);
+        let refresh_token_expiry_days: i64 = env_parsed("REFRESH_TOKEN_EXPIRY", 7)?;
 
-        let max_url_length = env::var("MAX_URL_LENGTH")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2048);
+        let max_url_length: usize = env_parsed("MAX_URL_LENGTH", 2048)?;
 
         #[cfg(feature = "standalone")]
-        let account_lockout_attempts = env::var("ACCOUNT_LOCKOUT_ATTEMPTS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(5);
+        let account_lockout_attempts: i32 = env_parsed("ACCOUNT_LOCKOUT_ATTEMPTS", 5)?;
 
         #[cfg(feature = "standalone")]
-        let account_lockout_duration_minutes = env::var("ACCOUNT_LOCKOUT_DURATION")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(30);
+        let account_lockout_duration_minutes: i64 = env_parsed("ACCOUNT_LOCKOUT_DURATION", 30)?;
 
-        let click_retention_days = env::var("CLICK_RETENTION_DAYS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(30);
+        let click_retention_days: i64 = env_parsed("CLICK_RETENTION_DAYS", 30)?;
 
         let host_url = env::var("HOST_URL").unwrap_or_else(|_| "http://localhost:4001".to_string());
 
@@ -267,16 +267,10 @@ impl Config {
 
         let host = env::var("APP_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
 
-        let port = env::var("APP_PORT")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(4001);
+        let port: u16 = env_parsed("APP_PORT", 4001)?;
 
         #[cfg(feature = "standalone")]
-        let allow_registration = env::var("ALLOW_REGISTRATION")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(true);
+        let allow_registration: bool = env_parsed("ALLOW_REGISTRATION", true)?;
 
         #[cfg(feature = "saas")]
         let webhook_secret = env::var("WEBHOOK_SECRET").unwrap_or_else(|_| {
@@ -297,9 +291,9 @@ impl Config {
         }
 
         #[cfg(feature = "saas")]
-        let oidc = build_oidc_config(&host_url);
+        let oidc = build_oidc_config(&host_url)?;
 
-        Config {
+        Ok(Config {
             #[cfg(feature = "standalone")]
             jwt_secret,
             #[cfg(feature = "standalone")]
@@ -324,7 +318,7 @@ impl Config {
             webhook_secret,
             #[cfg(feature = "saas")]
             oidc,
-        }
+        })
     }
 
     /// Get JWT secret (helper method for compatibility) - standalone only
@@ -384,7 +378,7 @@ impl Config {
 }
 
 #[cfg(feature = "saas")]
-fn build_oidc_config(host_url: &str) -> OidcConfig {
+fn build_oidc_config(host_url: &str) -> Result<OidcConfig, String> {
     let host_url_trim = host_url.trim_end_matches('/').to_string();
     let issuer = env::var("OIDC_ISSUER").unwrap_or_default();
 
@@ -398,10 +392,7 @@ fn build_oidc_config(host_url: &str) -> OidcConfig {
         }
     });
 
-    let jwks_cache_ttl = env::var("OIDC_JWKS_CACHE_TTL")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(300);
+    let jwks_cache_ttl: u64 = env_parsed("OIDC_JWKS_CACHE_TTL", 300)?;
 
     let client_id = env::var("OIDC_CLIENT_ID").unwrap_or_default();
 
@@ -417,20 +408,11 @@ fn build_oidc_config(host_url: &str) -> OidcConfig {
     let post_logout_redirect_uri =
         env::var("OIDC_POST_LOGOUT_REDIRECT_URI").unwrap_or_else(|_| format!("{host_url_trim}/"));
 
-    let leeway_seconds = env::var("OIDC_LEEWAY_SECONDS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(30);
+    let leeway_seconds: u64 = env_parsed("OIDC_LEEWAY_SECONDS", 30)?;
 
-    let lifecycle_jti_cache_ttl = env::var("OIDC_LIFECYCLE_JTI_CACHE_TTL")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(300);
+    let lifecycle_jti_cache_ttl: u64 = env_parsed("OIDC_LIFECYCLE_JTI_CACHE_TTL", 300)?;
 
-    let session_ttl_seconds = env::var("OIDC_SESSION_TTL_SECONDS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(1_209_600); // 14 days
+    let session_ttl_seconds: u64 = env_parsed("OIDC_SESSION_TTL_SECONDS", 1_209_600)?; // 14 days
 
     if !issuer.is_empty() && (client_id.is_empty() || client_secret.is_empty()) {
         tracing::error!(
@@ -449,7 +431,7 @@ fn build_oidc_config(host_url: &str) -> OidcConfig {
         );
     }
 
-    OidcConfig {
+    Ok(OidcConfig {
         issuer,
         audience,
         jwks_url,
@@ -461,7 +443,7 @@ fn build_oidc_config(host_url: &str) -> OidcConfig {
         leeway_seconds,
         lifecycle_jti_cache_ttl,
         session_ttl_seconds,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -588,5 +570,48 @@ mod tests {
         assert!(parsed
             .iter()
             .any(|net| net.contains("192.0.2.7".parse().unwrap())));
+    }
+
+    // RUS-41: unset means the default.
+    #[test]
+    fn env_parsed_returns_default_when_unset() {
+        assert_eq!(
+            env_parsed::<u16>("RUS_TEST_ENV_PARSED_UNSET", 4001),
+            Ok(4001)
+        );
+    }
+
+    // RUS-41: a set but unparseable value is an error naming the variable and
+    // the value, never a silent fallback to the default.
+    #[test]
+    fn env_parsed_errors_on_unparseable_value() {
+        // SAFETY: test-only, no other thread in this process reads this key.
+        unsafe {
+            env::set_var("RUS_TEST_ENV_PARSED_BAD", "80a0");
+        }
+        let result = env_parsed::<u16>("RUS_TEST_ENV_PARSED_BAD", 4001);
+        unsafe {
+            env::remove_var("RUS_TEST_ENV_PARSED_BAD");
+        }
+        let error = result.unwrap_err();
+        assert!(error.contains("RUS_TEST_ENV_PARSED_BAD"), "{error}");
+        assert!(error.contains("80a0"), "{error}");
+    }
+
+    // RUS-41: a malformed APP_PORT must stop startup rather than silently
+    // binding the default port.
+    #[test]
+    fn from_env_errors_on_malformed_app_port() {
+        // SAFETY: test-only; cleared immediately after the assertion.
+        unsafe {
+            env::set_var("APP_PORT", "80a0");
+        }
+        let result = Config::from_env();
+        unsafe {
+            env::remove_var("APP_PORT");
+        }
+        let error = result.unwrap_err();
+        assert!(error.contains("APP_PORT"), "{error}");
+        assert!(error.contains("80a0"), "{error}");
     }
 }
