@@ -2,7 +2,6 @@ use actix_web::{web, HttpMessage};
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 
 use crate::auth::jwt::decode_jwt;
-use crate::config::Config;
 use crate::db::AppState;
 
 /// JWT validator middleware for protected routes
@@ -12,11 +11,18 @@ pub async fn jwt_validator(
 ) -> Result<actix_web::dev::ServiceRequest, (actix_web::Error, actix_web::dev::ServiceRequest)> {
     let token = credentials.token();
 
-    // Get the secret from app state
-    let secret = req
-        .app_data::<web::Data<AppState>>()
-        .map(|state| state.config.jwt_secret.clone())
-        .unwrap_or_else(Config::get_jwt_secret);
+    // Get the secret from app state. No AppState attached is a wiring bug,
+    // not a reason to fall back to a known secret (RUS-40).
+    let secret = match req.app_data::<web::Data<AppState>>() {
+        Some(state) => state.config.jwt_secret.clone(),
+        None => {
+            tracing::error!("jwt_validator ran with no AppState attached; refusing the request");
+            return Err((
+                actix_web::error::ErrorInternalServerError("Server misconfigured"),
+                req,
+            ));
+        }
+    };
 
     match decode_jwt(token, &secret) {
         Ok(claims) => {
@@ -34,11 +40,18 @@ pub async fn admin_validator(
 ) -> Result<actix_web::dev::ServiceRequest, (actix_web::Error, actix_web::dev::ServiceRequest)> {
     let token = credentials.token();
 
-    // Get the secret from app state
-    let secret = req
-        .app_data::<web::Data<AppState>>()
-        .map(|state| state.config.jwt_secret.clone())
-        .unwrap_or_else(Config::get_jwt_secret);
+    // Get the secret from app state. No AppState attached is a wiring bug,
+    // not a reason to fall back to a known secret (RUS-40).
+    let secret = match req.app_data::<web::Data<AppState>>() {
+        Some(state) => state.config.jwt_secret.clone(),
+        None => {
+            tracing::error!("admin_validator ran with no AppState attached; refusing the request");
+            return Err((
+                actix_web::error::ErrorInternalServerError("Server misconfigured"),
+                req,
+            ));
+        }
+    };
 
     match decode_jwt(token, &secret) {
         Ok(claims) => {
@@ -269,6 +282,48 @@ mod tests {
             .to_request();
         let body: serde_json::Value = test::call_and_read_body_json(&app, req).await;
         assert_eq!(body["is_admin"], true);
+    }
+
+    // RUS-40: with no AppState attached, the validator must answer 500
+    // instead of falling back to a known secret.
+    #[actix_web::test]
+    async fn jwt_validator_rejects_with_500_when_no_app_state() {
+        let auth = HttpAuthentication::bearer(jwt_validator);
+        let app = test::init_service(
+            App::new().service(
+                web::scope("/api")
+                    .wrap(auth)
+                    .route("/test", web::get().to(dummy_handler)),
+            ),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/api/test")
+            .insert_header(("Authorization", "Bearer anything"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 500);
+    }
+
+    #[actix_web::test]
+    async fn admin_validator_rejects_with_500_when_no_app_state() {
+        let auth = HttpAuthentication::bearer(admin_validator);
+        let app = test::init_service(
+            App::new().service(
+                web::scope("/admin")
+                    .wrap(auth)
+                    .route("/test", web::get().to(dummy_handler)),
+            ),
+        )
+        .await;
+
+        let req = test::TestRequest::get()
+            .uri("/admin/test")
+            .insert_header(("Authorization", "Bearer anything"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 500);
     }
 
     #[actix_web::test]

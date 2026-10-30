@@ -218,14 +218,36 @@ pub struct Config {
     pub oidc: OidcConfig,
 }
 
+/// The well-known placeholder shipped in old templates. A deployment that
+/// still carries it has no real secret: anyone who knows the placeholder can
+/// mint valid tokens for it.
+#[cfg(feature = "standalone")]
+const PLACEHOLDER_JWT_SECRET: &str = "your-secret-key-change-this-in-production";
+
 impl Config {
-    /// Load configuration from environment variables
-    pub fn from_env() -> Self {
+    /// Load configuration from environment variables. Fails closed when
+    /// `JWT_SECRET` is unset, empty, or the placeholder: a security-relevant
+    /// input that must exist must not fall back to a known value.
+    pub fn from_env() -> Result<Self, String> {
         #[cfg(feature = "standalone")]
-        let jwt_secret = env::var("JWT_SECRET").unwrap_or_else(|_| {
-            tracing::warn!("JWT_SECRET not set in environment, using default (insecure)");
-            "your-secret-key-change-this-in-production".to_string()
-        });
+        let jwt_secret = match env::var("JWT_SECRET") {
+            Ok(value) if value.is_empty() => {
+                return Err(
+                    "JWT_SECRET is set but empty. Generate a secret with `openssl rand -base64 32` and set it before starting the server.".to_string(),
+                )
+            }
+            Ok(value) if value == PLACEHOLDER_JWT_SECRET => {
+                return Err(
+                    "JWT_SECRET is set to the placeholder value. Generate a secret with `openssl rand -base64 32` and set it before starting the server.".to_string(),
+                )
+            }
+            Ok(value) => value,
+            Err(_) => {
+                return Err(
+                    "JWT_SECRET is not set. Generate a secret with `openssl rand -base64 32` and set it before starting the server.".to_string(),
+                )
+            }
+        };
 
         #[cfg(feature = "standalone")]
         let jwt_expiry_hours = env::var("JWT_EXPIRY")
@@ -299,7 +321,7 @@ impl Config {
         #[cfg(feature = "saas")]
         let oidc = build_oidc_config(&host_url);
 
-        Config {
+        Ok(Config {
             #[cfg(feature = "standalone")]
             jwt_secret,
             #[cfg(feature = "standalone")]
@@ -324,15 +346,6 @@ impl Config {
             webhook_secret,
             #[cfg(feature = "saas")]
             oidc,
-        }
-    }
-
-    /// Get JWT secret (helper method for compatibility) - standalone only
-    #[cfg(feature = "standalone")]
-    pub fn get_jwt_secret() -> String {
-        env::var("JWT_SECRET").unwrap_or_else(|_| {
-            tracing::warn!("JWT_SECRET not set in environment, using default (insecure)");
-            "your-secret-key-change-this-in-production".to_string()
         })
     }
 
@@ -516,11 +529,49 @@ mod tests {
         cfg.print_banner();
     }
 
+    // RUS-40: a missing, empty, or placeholder JWT_SECRET must fail startup
+    // rather than fall back to a known value. Serialized via a mutex because
+    // these tests mutate the process environment.
+    #[cfg(feature = "standalone")]
+    static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[cfg(feature = "standalone")]
     #[test]
-    fn get_jwt_secret_returns_default_when_unset() {
-        let secret = Config::get_jwt_secret();
-        assert!(!secret.is_empty());
+    fn from_env_fails_closed_when_jwt_secret_unset() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        env::remove_var("JWT_SECRET");
+        let err = Config::from_env().expect_err("missing JWT_SECRET must fail startup");
+        assert!(err.contains("JWT_SECRET"));
+    }
+
+    #[cfg(feature = "standalone")]
+    #[test]
+    fn from_env_fails_closed_when_jwt_secret_empty() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        env::set_var("JWT_SECRET", "");
+        let err = Config::from_env().expect_err("empty JWT_SECRET must fail startup");
+        assert!(err.contains("JWT_SECRET"));
+        env::remove_var("JWT_SECRET");
+    }
+
+    #[cfg(feature = "standalone")]
+    #[test]
+    fn from_env_fails_closed_when_jwt_secret_is_placeholder() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        env::set_var("JWT_SECRET", super::PLACEHOLDER_JWT_SECRET);
+        let err = Config::from_env().expect_err("placeholder JWT_SECRET must fail startup");
+        assert!(err.contains("JWT_SECRET"));
+        env::remove_var("JWT_SECRET");
+    }
+
+    #[cfg(feature = "standalone")]
+    #[test]
+    fn from_env_succeeds_with_a_real_jwt_secret() {
+        let _guard = ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        env::set_var("JWT_SECRET", "a-real-secret-that-is-not-the-placeholder");
+        let cfg = Config::from_env().expect("a real JWT_SECRET must load");
+        assert_eq!(cfg.jwt_secret, "a-real-secret-that-is-not-the-placeholder");
+        env::remove_var("JWT_SECRET");
     }
 
     // Each accepted spelling maps to its own mode.

@@ -402,7 +402,7 @@ Two consequences worth knowing: the seeded admin fills the first-user slot, so t
 | `OIDC_SESSION_TTL_SECONDS` | `rus_session` cookie lifetime | `1209600` (14 days) |
 | `WEBHOOK_SECRET` | HMAC-SHA256 key validating `/webhooks/maintenance` | *(empty; signatures never validate)* |
 
-The saas leg signs no JWT of its own, so it has no counterpart to `JWT_SECRET`: the session arrives from the OP in the `rus_session` cookie, and both `JWT_SECRET` readers in `src/config.rs` are standalone-only.
+The saas leg signs no JWT of its own, so it has no counterpart to `JWT_SECRET`: the session arrives from the OP in the `rus_session` cookie, and the `JWT_SECRET` reader in `src/config.rs` is standalone-only. `Config::from_env` refuses to start when it is unset, empty, or the old placeholder value, rather than falling back to a known secret (RUS-40).
 
 ## Database Schema
 

@@ -27,8 +27,12 @@ async fn main() -> std::io::Result<()> {
         .with_file(false)
         .init();
 
-    // Load configuration from environment
-    let config = Config::from_env();
+    // Load configuration from environment. Fails closed: a security-relevant
+    // input that must exist (RUS-40) must not fall back to a known value.
+    let config = Config::from_env().unwrap_or_else(|error| {
+        tracing::error!("{error}");
+        std::process::exit(1);
+    });
 
     // Print startup banner with configuration
     config.print_banner();

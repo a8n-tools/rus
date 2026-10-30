@@ -79,10 +79,18 @@ pub async fn register(
     // Acquire lock once for all DB operations (prevents TOCTOU race)
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Check registration allowed + first user in a single lock scope
-    let user_count: i64 = db
-        .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
-        .unwrap_or(0);
+    // Check registration allowed + first user in a single lock scope. A
+    // database error must not be read as "no users": that would skip the
+    // allow_registration guard and could grant the new account admin (RUS-40).
+    let user_count: i64 = match db.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0)) {
+        Ok(count) => count,
+        Err(error) => {
+            error!(username = %req.username, error = %error, "Failed to count users during registration");
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to create user"
+            })));
+        }
+    };
 
     if !data.config.allow_registration && user_count > 0 {
         return Ok(HttpResponse::Forbidden().json(serde_json::json!({
@@ -714,6 +722,25 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 400);
+    }
+
+    // RUS-40: a failed user count must not be read as "no users" (which
+    // would skip the allow_registration guard and could grant admin).
+    #[actix_web::test]
+    async fn register_fails_closed_when_user_count_query_errors() {
+        let state = make_test_state();
+        {
+            let db = state.db.lock().unwrap();
+            db.execute("DROP TABLE users", []).unwrap();
+        }
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::post()
+            .uri("/api/register")
+            .set_json(serde_json::json!({"username": "alice", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 500);
     }
 
     #[actix_web::test]
