@@ -91,14 +91,22 @@ pub async fn shorten_url(
     // Generate a unique short code
     let mut short_code = generate_short_code();
     loop {
-        let exists: bool = db
+        let exists: bool = match db
             .query_row(
                 "SELECT COUNT(*) FROM urls WHERE short_code = ?1",
                 params![&short_code],
-                |row| row.get(0),
+                |row| row.get::<_, i64>(0),
             )
-            .map(|count: i64| count > 0)
-            .unwrap_or(false);
+            .map(|count| count > 0)
+        {
+            Ok(exists) => exists,
+            Err(error) => {
+                error!(error = %error, "Failed to check short code uniqueness");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to create short URL"
+                })));
+            }
+        };
 
         if !exists {
             break;
@@ -144,17 +152,22 @@ pub async fn redirect_url(
 
     match result {
         Ok((url_id, original_url)) => {
-            // Increment click count (legacy counter)
-            let _ = db.execute(
+            // Click accounting is best-effort: a failure here must not turn
+            // a working redirect into an error for the visitor, so it logs
+            // and continues rather than failing the request.
+            if let Err(error) = db.execute(
                 "UPDATE urls SET clicks = clicks + 1 WHERE id = ?1",
                 params![url_id],
-            );
+            ) {
+                error!(url_id, error = %error, "Failed to increment click counter");
+            }
 
-            // Record click in history
-            let _ = db.execute(
+            if let Err(error) = db.execute(
                 "INSERT INTO click_history (url_id) VALUES (?1)",
                 params![url_id],
-            );
+            ) {
+                error!(url_id, error = %error, "Failed to record click history");
+            }
 
             // Cleanup old clicks periodically (1% chance)
             if rand::thread_rng().gen_range(0..100) == 0 {
@@ -166,12 +179,16 @@ pub async fn redirect_url(
                 .append_header(("Location", original_url))
                 .finish())
         }
-        Err(_) => {
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
             debug!(short_code = %code.as_str(), "Redirect failed: code not found");
             let html = include_str!("../../static/404.html");
             Ok(HttpResponse::NotFound()
                 .content_type("text/html; charset=utf-8")
                 .body(html))
+        }
+        Err(error) => {
+            error!(short_code = %code.as_str(), error = %error, "Failed to look up short code");
+            Ok(HttpResponse::InternalServerError().body("Internal server error"))
         }
     }
 }
@@ -210,9 +227,17 @@ pub async fn get_stats(
 
     match result {
         Ok(entry) => Ok(HttpResponse::Ok().json(entry)),
-        Err(_) => Ok(HttpResponse::NotFound().json(serde_json::json!({
-            "error": "Short URL not found or not owned by you"
-        }))),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            Ok(HttpResponse::NotFound().json(serde_json::json!({
+                "error": "Short URL not found or not owned by you"
+            })))
+        }
+        Err(error) => {
+            error!(user_id, short_code = %code.as_str(), error = %error, "Failed to look up URL stats");
+            Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to load statistics"
+            })))
+        }
     }
 }
 
@@ -248,8 +273,11 @@ pub async fn get_user_urls(
             })
         })
         .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<UrlEntry>>>()
+        .map_err(|error| {
+            error!(user_id, error = %error, "Failed to decode a URL row");
+            actix_web::error::ErrorInternalServerError("Database error")
+        })?;
 
     Ok(HttpResponse::Ok().json(urls))
 }
@@ -363,21 +391,33 @@ pub async fn get_click_history(
 
     let url_id = match url_id {
         Ok(id) => id,
-        Err(_) => {
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
             return Ok(HttpResponse::NotFound().json(serde_json::json!({
                 "error": "Short URL not found or not owned by you"
+            })));
+        }
+        Err(error) => {
+            error!(user_id, short_code = %code.as_str(), error = %error, "Failed to look up URL for click history");
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to load click history"
             })));
         }
     };
 
     // Get total clicks from counter
-    let total_clicks: u64 = db
-        .query_row(
-            "SELECT clicks FROM urls WHERE id = ?1",
-            params![url_id],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
+    let total_clicks: u64 = match db.query_row(
+        "SELECT clicks FROM urls WHERE id = ?1",
+        params![url_id],
+        |row| row.get(0),
+    ) {
+        Ok(clicks) => clicks,
+        Err(error) => {
+            error!(url_id, error = %error, "Failed to read click counter");
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to load click history"
+            })));
+        }
+    };
 
     // Get click history (limited to recent 1000)
     let mut stmt = db
@@ -393,8 +433,11 @@ pub async fn get_click_history(
             })
         })
         .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<ClickHistoryEntry>>>()
+        .map_err(|error| {
+            error!(url_id, error = %error, "Failed to decode a click history row");
+            actix_web::error::ErrorInternalServerError("Database error")
+        })?;
 
     Ok(HttpResponse::Ok().json(ClickStats {
         total_clicks,
@@ -422,14 +465,22 @@ pub async fn get_qr_code(
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Verify ownership
-    let exists: bool = db
+    let exists: bool = match db
         .query_row(
             "SELECT COUNT(*) FROM urls WHERE short_code = ?1 AND user_id = ?2",
             params![&code, user_id],
             |row| row.get::<_, i64>(0),
         )
         .map(|count| count > 0)
-        .unwrap_or(false);
+    {
+        Ok(exists) => exists,
+        Err(error) => {
+            error!(user_id, short_code = %code, error = %error, "Failed to check URL ownership for QR code");
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to generate QR code"
+            })));
+        }
+    };
 
     if !exists {
         return Ok(HttpResponse::NotFound().json(serde_json::json!({
@@ -647,6 +698,20 @@ mod tests {
             assert_eq!(resp.status(), 404);
         }
 
+        // RUS-41: a database error must not be read as "code not found".
+        #[actix_web::test]
+        async fn redirect_returns_500_on_database_error_not_404() {
+            let state = make_test_state();
+            {
+                let db = state.db.lock().unwrap();
+                db.execute_batch("DROP TABLE urls").unwrap();
+            }
+            let app = setup_app!(state);
+            let req = test::TestRequest::get().uri("/abc123").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 500);
+        }
+
         #[actix_web::test]
         async fn redirect_increments_click_counter() {
             let state = make_test_state();
@@ -744,6 +809,26 @@ mod tests {
                 .to_request();
             let resp = test::call_service(&app, req).await;
             assert_eq!(resp.status(), 404);
+        }
+
+        // RUS-41: a database error must not be read as "not found".
+        #[actix_web::test]
+        async fn get_stats_returns_500_on_database_error() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            {
+                let db = state.db.lock().unwrap();
+                db.execute_batch("DROP TABLE urls").unwrap();
+            }
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/stats/abc123")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 500);
         }
 
         // --- delete_url ---
@@ -907,6 +992,26 @@ mod tests {
                 .to_request();
             let resp = test::call_service(&app, req).await;
             assert_eq!(resp.status(), 404);
+        }
+
+        // RUS-41: a database error must not be read as "not found".
+        #[actix_web::test]
+        async fn click_history_returns_500_on_database_error() {
+            let state = make_test_state();
+            let uid = insert_test_user(&state, "alice", false);
+            let token = make_test_token("alice", uid, false);
+            {
+                let db = state.db.lock().unwrap();
+                db.execute_batch("DROP TABLE urls").unwrap();
+            }
+            let app = setup_app!(state);
+
+            let req = test::TestRequest::get()
+                .uri("/api/urls/abc123/clicks")
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 500);
         }
 
         // --- get_qr_code ---
