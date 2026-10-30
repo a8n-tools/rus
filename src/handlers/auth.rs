@@ -199,19 +199,34 @@ fn login_locked(
 
     // Check for account lockout BEFORE any other database operations
     // This prevents timing attacks that could reveal if a username exists
-    if is_account_locked(
+    match is_account_locked(
         &db,
         &req.username,
         data.config.account_lockout_attempts,
         data.config.account_lockout_duration_minutes,
     ) {
-        warn!(username = %req.username, "Login blocked: account locked");
-        return LoginOutcome::Response(HttpResponse::TooManyRequests().json(serde_json::json!({
-            "error": format!(
-                "Account locked due to too many failed attempts. Try again in {} minutes.",
-                data.config.account_lockout_duration_minutes
-            )
-        })));
+        Ok(true) => {
+            warn!(username = %req.username, "Login blocked: account locked");
+            return LoginOutcome::Response(HttpResponse::TooManyRequests().json(
+                serde_json::json!({
+                    "error": format!(
+                        "Account locked due to too many failed attempts. Try again in {} minutes.",
+                        data.config.account_lockout_duration_minutes
+                    )
+                }),
+            ));
+        }
+        Ok(false) => {}
+        Err(error) => {
+            // Fail closed: a lockout check that cannot run must not let a
+            // potentially-locked account through.
+            error!(username = %req.username, error = %error, "Failed to check account lockout status");
+            return LoginOutcome::Response(HttpResponse::InternalServerError().json(
+                serde_json::json!({
+                    "error": "Login temporarily unavailable"
+                }),
+            ));
+        }
     }
 
     // Get user from database. Scoped so the prepared statement stops borrowing
@@ -269,10 +284,15 @@ fn login_locked(
     // Opportunistically rehash legacy bcrypt passwords to Argon2id
     if is_legacy_bcrypt_hash(&hashed_password) {
         if let Ok(new_hash) = hash_password(&req.password) {
-            let _ = db.execute(
+            // Best-effort: the password was already verified above, so a
+            // failure to persist the upgraded hash must not fail this login;
+            // it just leaves the account on bcrypt until the next sign-in.
+            if let Err(error) = db.execute(
                 "UPDATE users SET password = ?1 WHERE userID = ?2",
                 params![&new_hash, user_id],
-            );
+            ) {
+                error!(user_id, error = %error, "Failed to persist upgraded password hash");
+            }
         }
     }
     // Record successful login attempt
@@ -323,7 +343,7 @@ pub async fn refresh_token(
     data: web::Data<AppState>,
     req: web::Json<RefreshRequest>,
 ) -> Result<HttpResponse> {
-    let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
+    let mut db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Find and validate refresh token
     let token_result: rusqlite::Result<(i64, i64, String, i32)> = db.query_row(
@@ -337,13 +357,37 @@ pub async fn refresh_token(
     match token_result {
         Ok((token_id, user_id, username, is_admin_int)) => {
             let is_admin = is_admin_int != 0;
-            // Delete old refresh token (rotation)
-            let _ = db.execute(
-                "DELETE FROM refresh_tokens WHERE id = ?1",
-                params![token_id],
-            );
 
-            // Create new JWT token
+            // Rotation (delete old, insert new) happens in one transaction:
+            // either both land or neither does, so a failure never leaves a
+            // refresh token issued with its old one still live, or deleted
+            // with no replacement stored.
+            let new_refresh_token = generate_refresh_token();
+            let expires_at = Utc::now() + Duration::days(data.config.refresh_token_expiry_days);
+            let expires_at_str = expires_at.format("%Y-%m-%d %H:%M:%S").to_string();
+
+            let rotation = (|| -> rusqlite::Result<()> {
+                let tx = db.transaction()?;
+                tx.execute(
+                    "DELETE FROM refresh_tokens WHERE id = ?1",
+                    params![token_id],
+                )?;
+                tx.execute(
+                    "INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?1, ?2, ?3)",
+                    params![user_id, &new_refresh_token, &expires_at_str],
+                )?;
+                tx.commit()
+            })();
+
+            if let Err(error) = rotation {
+                error!(user_id, error = %error, "Failed to rotate refresh token");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to refresh token"
+                })));
+            }
+
+            // Create new JWT token. The rotation above already committed, so
+            // this is the only remaining way the request can fail.
             let token = match create_jwt(
                 &username,
                 user_id,
@@ -358,16 +402,6 @@ pub async fn refresh_token(
                     })));
                 }
             };
-
-            // Create new refresh token (rotation)
-            let new_refresh_token = generate_refresh_token();
-            let expires_at = Utc::now() + Duration::days(data.config.refresh_token_expiry_days);
-            let expires_at_str = expires_at.format("%Y-%m-%d %H:%M:%S").to_string();
-
-            let _ = db.execute(
-                "INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?1, ?2, ?3)",
-                params![user_id, &new_refresh_token, &expires_at_str],
-            );
 
             debug!(user_id, "Token refreshed");
             Ok(HttpResponse::Ok().json(RefreshResponse {
@@ -428,17 +462,28 @@ pub async fn get_current_user(
     // and whether its new-location alerts are on (RUS-15). One lock, both reads.
     let (email, notify_new_location) = {
         let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
-        let email: Option<String> = db
-            .query_row(
-                "SELECT email FROM users WHERE userID = ?1",
-                params![claims.user_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(None);
-        let notify = crate::location_alert::get_notify_new_location(&db, claims.user_id)
-            .ok()
-            .flatten()
-            .unwrap_or(true);
+        let email: Option<String> = match db.query_row(
+            "SELECT email FROM users WHERE userID = ?1",
+            params![claims.user_id],
+            |row| row.get(0),
+        ) {
+            Ok(email) => email,
+            Err(error) => {
+                error!(user_id = claims.user_id, error = %error, "Failed to read account email");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to load account"
+                })));
+            }
+        };
+        let notify = match crate::location_alert::get_notify_new_location(&db, claims.user_id) {
+            Ok(value) => value.unwrap_or(true),
+            Err(error) => {
+                error!(user_id = claims.user_id, error = %error, "Failed to read notify_new_location");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to load account"
+                })));
+            }
+        };
         (email, notify)
     };
 
@@ -527,13 +572,19 @@ pub async fn update_current_user(
         );
     }
 
-    let stored_email: Option<String> = db
-        .query_row(
-            "SELECT email FROM users WHERE userID = ?1",
-            params![claims.user_id],
-            |row| row.get(0),
-        )
-        .unwrap_or(None);
+    let stored_email: Option<String> = match db.query_row(
+        "SELECT email FROM users WHERE userID = ?1",
+        params![claims.user_id],
+        |row| row.get(0),
+    ) {
+        Ok(email) => email,
+        Err(error) => {
+            error!(user_id = claims.user_id, error = %error, "Failed to read account email");
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to update account"
+            })));
+        }
+    };
 
     match crate::location_alert::get_notify_new_location(&db, claims.user_id) {
         Ok(Some(notify_new_location)) => Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -815,6 +866,27 @@ mod tests {
         assert_eq!(resp.status(), 429);
     }
 
+    // RUS-41: a lockout check that cannot run must fail closed (500), never
+    // read as "not locked".
+    #[actix_web::test]
+    async fn login_fails_closed_when_lockout_check_errors() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        do_register(&app, "alice").await;
+
+        {
+            let db = state.db.lock().unwrap();
+            db.execute("DROP TABLE login_attempts", []).unwrap();
+        }
+
+        let req = test::TestRequest::post()
+            .uri("/api/login")
+            .set_json(serde_json::json!({"username": "alice", "password": TEST_PASSWORD}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 500);
+    }
+
     // --- refresh_token ---
 
     #[actix_web::test]
@@ -877,6 +949,49 @@ mod tests {
         assert_eq!(resp.status(), 401);
     }
 
+    // RUS-41: a rotation that cannot write its new row must issue no token,
+    // and must not have deleted the old one either (atomic, not half-done).
+    #[actix_web::test]
+    async fn refresh_token_issues_nothing_when_rotation_fails() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let old_refresh = body["refresh_token"].as_str().unwrap().to_string();
+
+        {
+            let db = state.db.lock().unwrap();
+            // Fails the INSERT half of the rotation while the SELECT lookup
+            // and the DELETE still succeed, so a non-atomic implementation
+            // would delete the old token and still fail to issue a new one.
+            db.execute_batch(
+                "CREATE TRIGGER fail_refresh_insert BEFORE INSERT ON refresh_tokens
+                 BEGIN SELECT RAISE(ABORT, 'simulated failure'); END;",
+            )
+            .unwrap();
+        }
+
+        let req = test::TestRequest::post()
+            .uri("/api/refresh")
+            .set_json(serde_json::json!({"refresh_token": &old_refresh}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 500);
+
+        {
+            let db = state.db.lock().unwrap();
+            db.execute_batch("DROP TRIGGER fail_refresh_insert")
+                .unwrap();
+        }
+
+        // The rollback must have put the old token back: it still works.
+        let req = test::TestRequest::post()
+            .uri("/api/refresh")
+            .set_json(serde_json::json!({"refresh_token": old_refresh}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+    }
+
     // --- get_current_user ---
 
     #[actix_web::test]
@@ -892,6 +1007,28 @@ mod tests {
             .to_request();
         let me: Value = test::call_and_read_body_json(&app, req).await;
         assert_eq!(me["username"], "alice");
+    }
+
+    // RUS-41: a database error reading the account must answer 500, never a
+    // default profile.
+    #[actix_web::test]
+    async fn get_me_returns_500_on_database_error() {
+        let state = make_test_state();
+        let app = setup_app!(state);
+        let body = do_register(&app, "alice").await;
+        let token = body["token"].as_str().unwrap();
+
+        {
+            let db = state.db.lock().unwrap();
+            db.execute("DROP TABLE users", []).unwrap();
+        }
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 500);
     }
 
     // --- account email (RUS-11) ---

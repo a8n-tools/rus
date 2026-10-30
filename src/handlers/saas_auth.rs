@@ -38,10 +38,15 @@ pub async fn saas_me(state: web::Data<AppState>, user: AuthenticatedUser) -> Res
     // RUS-15: the account needs to see whether its new-location alerts are on.
     let notify_new_location = {
         let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
-        crate::location_alert::get_notify_new_location(&db, user.user_id)
-            .ok()
-            .flatten()
-            .unwrap_or(true)
+        match crate::location_alert::get_notify_new_location(&db, user.user_id) {
+            Ok(value) => value.unwrap_or(true),
+            Err(error) => {
+                warn!(user_id = user.user_id, error = %error, "failed to read notify_new_location");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to load account"
+                })));
+            }
+        }
     };
 
     Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -399,6 +404,35 @@ mod tests {
             .insert_header(("Cookie", format!("{RUS_SESSION_COOKIE}={token}")))
             .to_request();
         test::call_and_read_body_json(app, req).await
+    }
+
+    // RUS-41: a database error reading the preference must answer 500, never
+    // the "alerts on" default.
+    #[actix_web::test]
+    async fn saas_me_returns_500_on_database_error() {
+        let state = make_test_state();
+        let uid = insert_saas_user(&state, "alice", SUB_USER, false);
+        let token = make_saas_session(&state, uid);
+        let app = test::init_service(build_me(state.clone())).await;
+
+        {
+            let db = state.db.lock().unwrap();
+            // Corrupts only the column `get_notify_new_location` decodes, so
+            // the session lookup (which does not select it) still succeeds
+            // and the request reaches the read this test is pinning.
+            db.execute(
+                "UPDATE users SET notify_new_location = 'not-a-number' WHERE userID = ?1",
+                [uid],
+            )
+            .unwrap();
+        }
+
+        let req = test::TestRequest::get()
+            .uri("/api/me")
+            .insert_header(("Cookie", format!("{RUS_SESSION_COOKIE}={token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 500);
     }
 
     #[actix_web::test]

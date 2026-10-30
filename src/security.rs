@@ -22,33 +22,36 @@ pub fn validate_password(password: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Check if account is locked due to too many failed login attempts
+/// Check if account is locked due to too many failed login attempts. A
+/// database error is never read as "not locked": the caller fails closed.
 pub fn is_account_locked(
     db: &Connection,
     username: &str,
     max_attempts: i32,
     lockout_minutes: i64,
-) -> bool {
+) -> rusqlite::Result<bool> {
     let cutoff = Utc::now() - Duration::minutes(lockout_minutes);
     let cutoff_str = cutoff.format("%Y-%m-%d %H:%M:%S").to_string();
 
-    let failed_attempts: i32 = db
-        .query_row(
-            "SELECT COUNT(*) FROM login_attempts WHERE username = ?1 AND success = 0 AND attempted_at > ?2",
-            params![username, cutoff_str],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
+    let failed_attempts: i32 = db.query_row(
+        "SELECT COUNT(*) FROM login_attempts WHERE username = ?1 AND success = 0 AND attempted_at > ?2",
+        params![username, cutoff_str],
+        |row| row.get(0),
+    )?;
 
-    failed_attempts >= max_attempts
+    Ok(failed_attempts >= max_attempts)
 }
 
-/// Record a login attempt (success or failure) for tracking
+/// Record a login attempt (success or failure) for tracking. Best-effort: a
+/// failure here only weakens the lockout counter for this one attempt rather
+/// than failing a login that otherwise succeeded, so it logs and continues.
 pub fn record_login_attempt(db: &Connection, username: &str, success: bool) {
-    let _ = db.execute(
+    if let Err(error) = db.execute(
         "INSERT INTO login_attempts (username, success) VALUES (?1, ?2)",
         params![username, success as i32],
-    );
+    ) {
+        tracing::error!(username = %username, success, error = %error, "Failed to record login attempt");
+    }
 }
 
 #[cfg(test)]
@@ -111,7 +114,7 @@ mod tests {
     #[test]
     fn account_not_locked_with_no_attempts() {
         let conn = setup_db();
-        assert!(!is_account_locked(&conn, "alice", 5, 30));
+        assert!(!is_account_locked(&conn, "alice", 5, 30).unwrap());
     }
 
     #[test]
@@ -120,7 +123,7 @@ mod tests {
         for _ in 0..4 {
             record_login_attempt(&conn, "alice", false);
         }
-        assert!(!is_account_locked(&conn, "alice", 5, 30));
+        assert!(!is_account_locked(&conn, "alice", 5, 30).unwrap());
     }
 
     #[test]
@@ -129,7 +132,7 @@ mod tests {
         for _ in 0..5 {
             record_login_attempt(&conn, "alice", false);
         }
-        assert!(is_account_locked(&conn, "alice", 5, 30));
+        assert!(is_account_locked(&conn, "alice", 5, 30).unwrap());
     }
 
     #[test]
@@ -138,7 +141,7 @@ mod tests {
         for _ in 0..7 {
             record_login_attempt(&conn, "alice", false);
         }
-        assert!(is_account_locked(&conn, "alice", 5, 30));
+        assert!(is_account_locked(&conn, "alice", 5, 30).unwrap());
     }
 
     #[test]
@@ -148,7 +151,7 @@ mod tests {
             record_login_attempt(&conn, "alice", false);
         }
         record_login_attempt(&conn, "alice", true); // success — should not count
-        assert!(!is_account_locked(&conn, "alice", 5, 30));
+        assert!(!is_account_locked(&conn, "alice", 5, 30).unwrap());
     }
 
     #[test]
@@ -158,7 +161,7 @@ mod tests {
             record_login_attempt(&conn, "eve", false);
         }
         // alice is not locked even though eve is
-        assert!(!is_account_locked(&conn, "alice", 5, 30));
+        assert!(!is_account_locked(&conn, "alice", 5, 30).unwrap());
     }
 
     #[test]
@@ -202,7 +205,15 @@ mod tests {
             .unwrap();
         }
         // Lockout window is 30 minutes — these attempts are outside it
-        assert!(!is_account_locked(&conn, "alice", 5, 30));
+        assert!(!is_account_locked(&conn, "alice", 5, 30).unwrap());
+    }
+
+    // RUS-41: a database error must not be read as "not locked".
+    #[test]
+    fn is_account_locked_errors_on_database_failure() {
+        let conn = Connection::open_in_memory().unwrap();
+        // No login_attempts table: the query itself fails.
+        assert!(is_account_locked(&conn, "alice", 5, 30).is_err());
     }
 
     #[test]
