@@ -43,14 +43,19 @@ pub async fn submit_abuse_report(
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
     // Check if short code exists
-    let url_exists: bool = db
-        .query_row(
-            "SELECT COUNT(*) FROM urls WHERE short_code = ?1",
-            params![&req.short_code],
-            |row| row.get::<_, i64>(0),
-        )
-        .map(|count| count > 0)
-        .unwrap_or(false);
+    let url_exists: bool = match db.query_row(
+        "SELECT COUNT(*) FROM urls WHERE short_code = ?1",
+        params![&req.short_code],
+        |row| row.get::<_, i64>(0),
+    ) {
+        Ok(count) => count > 0,
+        Err(error) => {
+            tracing::error!(short_code = %req.short_code, error = %error, "Failed to check whether short code exists");
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to submit report"
+            })));
+        }
+    };
 
     if !url_exists {
         return Ok(HttpResponse::NotFound().json(serde_json::json!({
@@ -122,8 +127,11 @@ pub async fn admin_list_reports(data: web::Data<AppState>) -> Result<HttpRespons
             })
         })
         .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<AbuseReport>>>()
+        .map_err(|error| {
+            tracing::error!(error = %error, "Failed to decode an abuse report row");
+            actix_web::error::ErrorInternalServerError("Database error")
+        })?;
 
     Ok(HttpResponse::Ok().json(reports))
 }
@@ -176,10 +184,15 @@ pub async fn admin_resolve_report(
     match req.action.as_str() {
         "dismiss" => {
             // Just mark as resolved
-            let _ = db.execute(
+            if let Err(error) = db.execute(
                 "UPDATE abuse_reports SET status = 'dismissed', resolved_at = ?1, resolved_by = ?2 WHERE id = ?3",
                 params![&now, claims.user_id, *report_id],
-            );
+            ) {
+                tracing::error!(report_id = *report_id, error = %error, "Failed to dismiss abuse report");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to resolve report"
+                })));
+            }
 
             info!(
                 report_id = *report_id,
@@ -193,15 +206,25 @@ pub async fn admin_resolve_report(
         }
         "delete_url" => {
             // Delete the URL and mark report as resolved
-            let _ = db.execute(
+            if let Err(error) = db.execute(
                 "DELETE FROM urls WHERE short_code = ?1",
                 params![&short_code],
-            );
+            ) {
+                tracing::error!(report_id = *report_id, short_code = %short_code, error = %error, "Failed to delete URL for abuse report");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to resolve report"
+                })));
+            }
 
-            let _ = db.execute(
+            if let Err(error) = db.execute(
                 "UPDATE abuse_reports SET status = 'resolved', resolved_at = ?1, resolved_by = ?2 WHERE id = ?3",
                 params![&now, claims.user_id, *report_id],
-            );
+            ) {
+                tracing::error!(report_id = *report_id, error = %error, "Failed to mark abuse report resolved after deleting URL");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to resolve report"
+                })));
+            }
 
             info!(report_id = *report_id, action = "delete_url", admin_user_id = claims.user_id, short_code = %short_code, "Abuse report resolved");
             Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -216,46 +239,73 @@ pub async fn admin_resolve_report(
                 |row| row.get(0),
             );
 
-            if let Ok(user_id) = user_id_result {
-                // Don't allow banning admin users
-                let is_admin: bool = db
-                    .query_row(
-                        "SELECT is_admin FROM users WHERE userID = ?1",
-                        params![user_id],
-                        |row| row.get::<_, i32>(0),
-                    )
-                    .map(|v| v != 0)
-                    .unwrap_or(false);
-
-                if is_admin {
-                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                        "error": "Cannot ban admin users"
+            let user_id = match user_id_result {
+                Ok(user_id) => user_id,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    return Ok(HttpResponse::NotFound().json(serde_json::json!({
+                        "error": "URL or user not found"
                     })));
                 }
+                Err(error) => {
+                    tracing::error!(report_id = *report_id, short_code = %short_code, error = %error, "Failed to look up URL owner for ban_user");
+                    return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                        "error": "Failed to resolve report"
+                    })));
+                }
+            };
 
-                // Delete the user (CASCADE will delete all their URLs)
-                let _ = db.execute("DELETE FROM users WHERE userID = ?1", params![user_id]);
+            // Don't allow banning admin users. A failed read must not be
+            // treated as "not admin": that would let a database error delete
+            // an administrator.
+            let is_admin: bool = match db.query_row(
+                "SELECT is_admin FROM users WHERE userID = ?1",
+                params![user_id],
+                |row| row.get::<_, i32>(0),
+            ) {
+                Ok(v) => v != 0,
+                Err(error) => {
+                    tracing::error!(report_id = *report_id, user_id, error = %error, "Failed to read is_admin before ban_user");
+                    return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                        "error": "Failed to resolve report"
+                    })));
+                }
+            };
 
-                let _ = db.execute(
-                    "UPDATE abuse_reports SET status = 'resolved', resolved_at = ?1, resolved_by = ?2 WHERE id = ?3",
-                    params![&now, claims.user_id, *report_id],
-                );
-
-                info!(
-                    report_id = *report_id,
-                    action = "ban_user",
-                    admin_user_id = claims.user_id,
-                    banned_user_id = user_id,
-                    "Abuse report resolved"
-                );
-                Ok(HttpResponse::Ok().json(serde_json::json!({
-                    "message": "User banned, all URLs deleted, and report resolved"
-                })))
-            } else {
-                Ok(HttpResponse::NotFound().json(serde_json::json!({
-                    "error": "URL or user not found"
-                })))
+            if is_admin {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                    "error": "Cannot ban admin users"
+                })));
             }
+
+            // Delete the user (CASCADE will delete all their URLs)
+            if let Err(error) = db.execute("DELETE FROM users WHERE userID = ?1", params![user_id])
+            {
+                tracing::error!(report_id = *report_id, user_id, error = %error, "Failed to delete banned user");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to resolve report"
+                })));
+            }
+
+            if let Err(error) = db.execute(
+                "UPDATE abuse_reports SET status = 'resolved', resolved_at = ?1, resolved_by = ?2 WHERE id = ?3",
+                params![&now, claims.user_id, *report_id],
+            ) {
+                tracing::error!(report_id = *report_id, error = %error, "Failed to mark abuse report resolved after ban_user");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to resolve report"
+                })));
+            }
+
+            info!(
+                report_id = *report_id,
+                action = "ban_user",
+                admin_user_id = claims.user_id,
+                banned_user_id = user_id,
+                "Abuse report resolved"
+            );
+            Ok(HttpResponse::Ok().json(serde_json::json!({
+                "message": "User banned, all URLs deleted, and report resolved"
+            })))
         }
         _ => Ok(HttpResponse::BadRequest().json(serde_json::json!({
             "error": "Invalid action. Must be 'dismiss', 'delete_url', or 'ban_user'"
@@ -361,6 +411,29 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), 404);
+    }
+
+    // RUS-41: a database error checking whether the code exists must answer
+    // 500, never be folded into the same 404 a genuinely missing code gets.
+    #[actix_web::test]
+    async fn submit_report_returns_500_on_database_error() {
+        let state = make_test_state();
+        let app = setup_abuse_app!(state);
+
+        {
+            let db = state.db.lock().unwrap();
+            db.execute("DROP TABLE urls", []).unwrap();
+        }
+
+        let req = test::TestRequest::post()
+            .uri("/api/report-abuse")
+            .set_json(serde_json::json!({
+                "short_code": "whatever",
+                "reason": "spam"
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 500);
     }
 
     #[actix_web::test]
@@ -742,6 +815,65 @@ mod tests {
         assert_eq!(resp.status(), 400);
         let body: Value = test::read_body_json(resp).await;
         assert!(body["error"].as_str().unwrap().contains("Cannot ban admin"));
+    }
+
+    // RUS-41: a database error reading is_admin must never be read as "not
+    // admin" - that would let the ban proceed against an administrator.
+    #[cfg(feature = "standalone")]
+    #[actix_web::test]
+    async fn admin_ban_user_fails_closed_when_is_admin_read_errors() {
+        let state = make_test_state();
+        let admin_uid = insert_test_user(&state, "admin", true);
+        let bad_uid = insert_test_user(&state, "badguy", false);
+        insert_test_url(&state, bad_uid, "https://evil.com", "evil42");
+        let token = make_test_token("admin", admin_uid, true);
+        let app = setup_abuse_app!(state);
+
+        test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri("/api/report-abuse")
+                .set_json(serde_json::json!({"short_code": "evil42", "reason": "malware"}))
+                .to_request(),
+        )
+        .await;
+
+        let report_id: i64 = {
+            let db = state.db.lock().unwrap();
+            db.query_row("SELECT id FROM abuse_reports LIMIT 1", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        {
+            let db = state.db.lock().unwrap();
+            db.execute(
+                "UPDATE users SET is_admin = 'not-a-number' WHERE userID = ?1",
+                [bad_uid],
+            )
+            .unwrap();
+        }
+
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::post()
+                .uri(&format!("/api/admin/reports/{report_id}"))
+                .insert_header(("Authorization", format!("Bearer {token}")))
+                .set_json(serde_json::json!({"action": "ban_user"}))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), 500);
+
+        // The user must still exist: the read error must not have let the ban through.
+        let db = state.db.lock().unwrap();
+        let user_count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE userID=?1",
+                [bad_uid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(user_count, 1);
     }
 
     #[cfg(feature = "standalone")]

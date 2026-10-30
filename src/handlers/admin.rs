@@ -30,8 +30,11 @@ pub async fn admin_list_users(data: web::Data<AppState>) -> Result<HttpResponse>
             })
         })
         .map_err(|_| actix_web::error::ErrorInternalServerError("Database error"))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<UserInfo>>>()
+        .map_err(|error| {
+            tracing::error!(error = %error, "Failed to decode a user row");
+            actix_web::error::ErrorInternalServerError("Database error")
+        })?;
 
     Ok(HttpResponse::Ok().json(users))
 }
@@ -146,19 +149,38 @@ pub async fn admin_promote_user(
 pub async fn admin_get_stats(data: web::Data<AppState>) -> Result<HttpResponse> {
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
-    let total_users: i64 = db
-        .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
-        .unwrap_or(0);
+    let total_users: i64 = match db.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0)) {
+        Ok(count) => count,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to read total_users for admin stats");
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to load statistics"
+            })));
+        }
+    };
 
-    let total_urls: i64 = db
-        .query_row("SELECT COUNT(*) FROM urls", [], |row| row.get(0))
-        .unwrap_or(0);
+    let total_urls: i64 = match db.query_row("SELECT COUNT(*) FROM urls", [], |row| row.get(0)) {
+        Ok(count) => count,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to read total_urls for admin stats");
+            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to load statistics"
+            })));
+        }
+    };
 
-    let total_clicks: i64 = db
-        .query_row("SELECT COALESCE(SUM(clicks), 0) FROM urls", [], |row| {
+    let total_clicks: i64 =
+        match db.query_row("SELECT COALESCE(SUM(clicks), 0) FROM urls", [], |row| {
             row.get(0)
-        })
-        .unwrap_or(0);
+        }) {
+            Ok(count) => count,
+            Err(error) => {
+                tracing::error!(error = %error, "Failed to read total_clicks for admin stats");
+                return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "Failed to load statistics"
+                })));
+            }
+        };
 
     Ok(HttpResponse::Ok().json(AdminStatsResponse {
         total_users,
@@ -446,5 +468,25 @@ mod tests {
             .to_request();
         let body: Value = test::call_and_read_body_json(&app, req).await;
         assert_eq!(body["total_clicks"], 5);
+    }
+
+    // RUS-41: a database error must not be read as zero statistics.
+    #[actix_web::test]
+    async fn stats_returns_500_on_database_error() {
+        let state = make_test_state();
+        let uid = insert_test_user(&state, "admin", true);
+        {
+            let db = state.db.lock().unwrap();
+            db.execute_batch("DROP TABLE urls").unwrap();
+        }
+        let token = make_test_token("admin", uid, true);
+        let app = setup_app!(state);
+
+        let req = test::TestRequest::get()
+            .uri("/api/admin/stats")
+            .insert_header(("Authorization", format!("Bearer {token}")))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 500);
     }
 }
