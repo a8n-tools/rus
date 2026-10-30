@@ -41,13 +41,19 @@ pub async fn dashboard_page() -> Result<HttpResponse> {
 /// Dashboard page for SaaS mode - requires a valid OIDC BFF session.
 #[cfg(feature = "saas")]
 pub async fn dashboard_page(req: HttpRequest, data: web::Data<AppState>) -> Result<HttpResponse> {
-    let authed = req
-        .cookie(crate::oidc::RUS_SESSION_COOKIE)
-        .and_then(|c| {
+    let authed = match req.cookie(crate::oidc::RUS_SESSION_COOKIE) {
+        None => false,
+        Some(cookie) => {
             let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
-            lookup_session(&db, c.value()).ok().flatten()
-        })
-        .is_some();
+            match lookup_session(&db, cookie.value()) {
+                Ok(user) => user.is_some(),
+                Err(error) => {
+                    tracing::error!(error = %error, "Failed to look up dashboard session");
+                    return Ok(HttpResponse::InternalServerError().body("Internal server error"));
+                }
+            }
+        }
+    };
 
     if !authed {
         return Ok(HttpResponse::Found()
@@ -143,9 +149,13 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
 pub async fn check_setup_required(data: web::Data<AppState>) -> Result<HttpResponse> {
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
-    let user_count: i64 = db
-        .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
-        .unwrap_or(0);
+    let user_count: i64 = match db.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0)) {
+        Ok(count) => count,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to read user count for setup check");
+            return Ok(HttpResponse::InternalServerError().body("Internal server error"));
+        }
+    };
 
     Ok(HttpResponse::Ok().json(SetupCheckResponse {
         setup_required: user_count == 0,
@@ -485,6 +495,29 @@ mod tests {
             let body: Value = test::call_and_read_body_json(&app, req).await;
             assert_eq!(body["setup_required"], false);
         }
+
+        // RUS-41: a database error must not report zero users, since that
+        // would offer the setup page while an account already exists.
+        #[actix_web::test]
+        async fn check_setup_required_returns_500_on_database_error() {
+            let state = crate::testing::make_test_state();
+            {
+                let db = state.db.lock().unwrap();
+                db.execute_batch("DROP TABLE users").unwrap();
+            }
+            let app = test::init_service(
+                App::new()
+                    .app_data(state)
+                    .route("/api/setup/required", web::get().to(check_setup_required)),
+            )
+            .await;
+
+            let req = test::TestRequest::get()
+                .uri("/api/setup/required")
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 500);
+        }
     }
 
     // --- saas-only page handlers ---
@@ -571,6 +604,37 @@ mod tests {
                 body_str.contains("id=\"accountEmailManaged\""),
                 "the saas explanation for the missing address field"
             );
+        }
+
+        // RUS-41: a session lookup failure must not be read as "not signed
+        // in", since that would redirect a real database outage to login.
+        #[actix_web::test]
+        async fn dashboard_returns_500_on_session_lookup_error() {
+            let state = crate::testing::make_test_state();
+            let uid = insert_saas_user(
+                &state,
+                "alice",
+                "88888888-8888-8888-8888-888888888888",
+                false,
+            );
+            let token = make_saas_session(&state, uid);
+            {
+                let db = state.db.lock().unwrap();
+                db.execute_batch("DROP TABLE user_sessions").unwrap();
+            }
+            let app = test::init_service(
+                App::new()
+                    .app_data(state)
+                    .route("/dashboard.html", web::get().to(dashboard_page)),
+            )
+            .await;
+
+            let req = test::TestRequest::get()
+                .uri("/dashboard.html")
+                .insert_header(("Cookie", format!("{RUS_SESSION_COOKIE}={token}")))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), 500);
         }
     }
 }
