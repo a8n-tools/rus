@@ -1,5 +1,6 @@
 use chrono::{Duration, Utc};
 use rusqlite::{params, Connection};
+use tracing::error;
 
 /// Validate password complexity requirements
 pub fn validate_password(password: &str) -> Result<(), String> {
@@ -22,7 +23,10 @@ pub fn validate_password(password: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Check if account is locked due to too many failed login attempts
+/// Check if account is locked due to too many failed login attempts. A
+/// database error must not be read as "no failed attempts": that would fail
+/// the brute-force lockout gate open, so an unreadable count is treated as
+/// locked (RUS-40).
 pub fn is_account_locked(
     db: &Connection,
     username: &str,
@@ -32,13 +36,17 @@ pub fn is_account_locked(
     let cutoff = Utc::now() - Duration::minutes(lockout_minutes);
     let cutoff_str = cutoff.format("%Y-%m-%d %H:%M:%S").to_string();
 
-    let failed_attempts: i32 = db
-        .query_row(
-            "SELECT COUNT(*) FROM login_attempts WHERE username = ?1 AND success = 0 AND attempted_at > ?2",
-            params![username, cutoff_str],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
+    let failed_attempts: i32 = match db.query_row(
+        "SELECT COUNT(*) FROM login_attempts WHERE username = ?1 AND success = 0 AND attempted_at > ?2",
+        params![username, cutoff_str],
+        |row| row.get(0),
+    ) {
+        Ok(count) => count,
+        Err(error) => {
+            error!(username = %username, error = %error, "Failed to count failed login attempts; failing closed and treating the account as locked");
+            return true;
+        }
+    };
 
     failed_attempts >= max_attempts
 }
@@ -159,6 +167,15 @@ mod tests {
         }
         // alice is not locked even though eve is
         assert!(!is_account_locked(&conn, "alice", 5, 30));
+    }
+
+    // RUS-40: an unreadable failed-attempt count must fail closed (locked),
+    // not be read as zero failed attempts.
+    #[test]
+    fn account_locked_when_count_query_errors() {
+        let conn = setup_db();
+        conn.execute("DROP TABLE login_attempts", []).unwrap();
+        assert!(is_account_locked(&conn, "alice", 5, 30));
     }
 
     #[test]
