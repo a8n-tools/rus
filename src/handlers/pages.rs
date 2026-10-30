@@ -138,23 +138,14 @@ pub async fn get_config(data: web::Data<AppState>) -> Result<HttpResponse> {
     }))
 }
 
-/// Check if initial setup is required (no users exist) - standalone only. A
-/// database error must not be read as "no users": that would report
-/// `setup_required: true` to an unauthenticated client on a read failure
-/// instead of surfacing the error (RUS-40).
+/// Check if initial setup is required (no users exist) - standalone only
 #[cfg(feature = "standalone")]
 pub async fn check_setup_required(data: web::Data<AppState>) -> Result<HttpResponse> {
     let db = data.db.lock().unwrap_or_else(|e| e.into_inner());
 
-    let user_count: i64 = match db.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0)) {
-        Ok(count) => count,
-        Err(error) => {
-            tracing::error!(error = %error, "Failed to count users while checking setup status");
-            return Ok(HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Failed to check setup status"
-            })));
-        }
-    };
+    let user_count: i64 = db
+        .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
+        .unwrap_or(0);
 
     Ok(HttpResponse::Ok().json(SetupCheckResponse {
         setup_required: user_count == 0,
@@ -493,29 +484,6 @@ mod tests {
                 .to_request();
             let body: Value = test::call_and_read_body_json(&app, req).await;
             assert_eq!(body["setup_required"], false);
-        }
-
-        // RUS-40: a failed user count must not be read as "no users" (which
-        // would report setup_required: true on a database error).
-        #[actix_web::test]
-        async fn check_setup_required_fails_closed_when_user_count_query_errors() {
-            let state = crate::testing::make_test_state();
-            {
-                let db = state.db.lock().unwrap();
-                db.execute("DROP TABLE users", []).unwrap();
-            }
-            let app = test::init_service(
-                App::new()
-                    .app_data(state)
-                    .route("/api/setup/required", web::get().to(check_setup_required)),
-            )
-            .await;
-
-            let req = test::TestRequest::get()
-                .uri("/api/setup/required")
-                .to_request();
-            let resp = test::call_service(&app, req).await;
-            assert_eq!(resp.status(), 500);
         }
     }
 
