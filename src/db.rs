@@ -24,7 +24,12 @@ impl AppState {
     pub fn new(config: Config) -> rusqlite::Result<Self> {
         // Create data directory if it doesn't exist
         if let Some(parent) = std::path::Path::new(&config.db_path).parent() {
-            std::fs::create_dir_all(parent).ok();
+            std::fs::create_dir_all(parent).unwrap_or_else(|error| {
+                panic!(
+                    "Failed to create data directory {}: {error}",
+                    parent.display()
+                )
+            });
         }
 
         let conn = Connection::open(&config.db_path)?;
@@ -274,15 +279,19 @@ impl AppState {
     }
 }
 
-/// Cleanup old click history records
+/// Cleanup old click history records. Best-effort: this runs opportunistically
+/// off a redirect, so a failure here must not fail that redirect; it logs and
+/// is retried on a later request instead.
 pub fn cleanup_old_clicks(db: &Connection, retention_days: i64) {
     let cutoff = Utc::now() - Duration::days(retention_days);
     let cutoff_str = cutoff.format("%Y-%m-%d %H:%M:%S").to_string();
 
-    let _ = db.execute(
+    if let Err(error) = db.execute(
         "DELETE FROM click_history WHERE clicked_at < ?1",
         params![cutoff_str],
-    );
+    ) {
+        tracing::error!(error = %error, "Failed to clean up old click history");
+    }
 }
 
 #[cfg(test)]
@@ -302,8 +311,8 @@ mod tests {
                 .unwrap();
             stmt.query_map([], |row| row.get(0))
                 .unwrap()
-                .filter_map(|r| r.ok())
-                .collect()
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .unwrap()
         };
 
         assert!(tables.contains(&"users".to_string()));
@@ -325,8 +334,8 @@ mod tests {
                 .unwrap();
             stmt.query_map([], |row| row.get(1))
                 .unwrap()
-                .filter_map(|r| r.ok())
-                .collect()
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .unwrap()
         };
 
         for expected in [
@@ -383,8 +392,8 @@ mod tests {
                 .unwrap();
             stmt.query_map([], |row| row.get(0))
                 .unwrap()
-                .filter_map(|r| r.ok())
-                .collect()
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .unwrap()
         };
 
         assert!(tables.contains(&"refresh_tokens".to_string()));
@@ -402,8 +411,8 @@ mod tests {
             let mut stmt = db.prepare("PRAGMA table_info(users)").unwrap();
             stmt.query_map([], |row| row.get(1))
                 .unwrap()
-                .filter_map(|r| r.ok())
-                .collect()
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .unwrap()
         };
 
         assert!(columns.contains(&"email".to_string()), "got {columns:?}");
@@ -435,8 +444,8 @@ mod tests {
                 .unwrap();
             stmt.query_map([], |row| row.get(0))
                 .unwrap()
-                .filter_map(|r| r.ok())
-                .collect()
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .unwrap()
         };
 
         assert!(indexes.contains(&"idx_short_code".to_string()));
@@ -555,6 +564,16 @@ mod tests {
     fn cleanup_old_clicks_noop_on_empty_table() {
         let state = crate::testing::make_test_state();
         let db = state.db.lock().unwrap();
+        cleanup_old_clicks(&db, 30); // should not panic
+    }
+
+    // RUS-41: best-effort means a failure is logged and swallowed, not that
+    // it panics the caller.
+    #[test]
+    fn cleanup_old_clicks_does_not_panic_on_database_error() {
+        let state = crate::testing::make_test_state();
+        let db = state.db.lock().unwrap();
+        db.execute_batch("DROP TABLE click_history").unwrap();
         cleanup_old_clicks(&db, 30); // should not panic
     }
 
