@@ -9,7 +9,7 @@ on:
       - main
 jobs:
   secrets:
-    uses: psa-systems/common/.forgejo/workflows/check-secrets.yml@main
+    uses: https://dev.a8n.run/psa-systems/common/.forgejo/workflows/check-secrets.yml@main
     runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_MEDIUM }}
     secrets: inherit
   check:
