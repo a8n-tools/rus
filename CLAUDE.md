@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+This repo consumes `common` as a git submodule (`common/`) and imports `common/common.just` from the root `justfile`; `common/docs/standards.md` (@common/docs/standards.md) governs it.
+
 ## Project Overview
 
 Rust URL Shortener (RUS) - A URL shortening service with JWT authentication, SQLite persistence, and click tracking. Built with Actix-web.

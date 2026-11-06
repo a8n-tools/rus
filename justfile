@@ -1,17 +1,26 @@
 # Rust URL Shortener (RUS) - Task Runner
 
-# List available recipes
-default:
-    @just --list
+# SPEC-3.2, SPEC-3.5: required because the default recipe below redefines one common.just also defines.
+set allow-duplicate-recipes := true
 
-# Use the per-developer Traefik-routed dev compose file
-compose := "docker compose -f compose.dev.yml "
+# SPEC-3.1: set before the import line below, per SPEC-1.5.
+app := "rus"
 
 # Image used by the pre-commit hook. Matches the `builder` stage in
 # oci-build/Dockerfile so `just pre-commit` runs the same toolchain rus is
 # built against. The compose `app` service builds the production runtime
 # image (alpine + server ENTRYPOINT, no cargo), so pre-commit must not use it.
+# Set before the import line (SPEC-3.1, SPEC-3.4) since common.just also defines `dev_image`.
 dev_image := "ghcr.io/niceguyit/rust-builder-musl:v1.1.0-rust1.98.1-alpine"
+
+import 'common/common.just'
+
+# List available recipes. Keep FIRST: just picks the default recipe by source order (SPEC-1.6, SPEC-3.2).
+default:
+    @just --list
+
+# Use the per-developer Traefik-routed dev compose file
+compose := "docker compose -f compose.dev.yml "
 
 # Image for the static/ page tests. The rust-builder image ships no Node, so the
 # JS step gets its own pinned image; docker is already required by pre-commit, so

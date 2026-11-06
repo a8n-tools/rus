@@ -258,7 +258,8 @@ rus/
 ├── examples/
 │   └── compose.yml          # Parent-app deployment example, routed by Traefik
 ├── .forgejo/
-│   └── workflows/           # CI: check, build-oci-image, create-release
+│   └── workflows/           # CI: check, build-oci-image, create-release, renovate
+├── common/                  # Shared common.just task runner and CI scaffolding (git submodule)
 ├── data/
 │   └── rus.db               # SQLite database, created at runtime and gitignored
 ├── build.rs                 # Stamps GIT_TAG, GIT_HASH and BUILD_DATE into the binary
@@ -267,6 +268,8 @@ rus/
 ├── compose.yml              # Local dev stack on localhost:4001
 ├── compose.dev.yml          # Per-developer Traefik compose
 ├── justfile                 # Task runner recipes
+├── renovate.json            # Extends the shared common Renovate preset
+├── .gitmodules              # Declares the common submodule
 ├── .env.standalone          # Env template for standalone mode
 └── .env.saas                # Env template for saas mode
 ```
