@@ -17,14 +17,11 @@ jobs:
       # Postgres placeholder URL that Kingfisher flags as POSTGRES.1 and that
       # common's own CI already suppresses via `noseyparker_findings_exclude`.
       # The placeholder is scanned on every change to common itself; re-scanning
-      # it from every consumer is noise.
+      # it from every consumer is noise. Noseyparker's scan runs after
+      # `git for-each-ref` drops every non-HEAD ref so the submodule's own
+      # history is unreachable from the scan's git-history mode; no companion
+      # `noseyparker_findings_exclude` is needed for this placeholder.
       kingfisher_excludes: "common"
-      # Noseyparker finds the same `common` self-check placeholder with its
-      # own finding id; suppress it here with the same id common's own CI
-      # uses (see common/.forgejo/workflows/self-check.yml). Any remaining
-      # noseyparker findings in this repo pre-date this PR (main's secrets
-      # job has been red on them) and are followed up separately.
-      noseyparker_findings_exclude: "4f0a7a1ef43f1de9c661b5b13362576f356d4d77"
   check:
     name: fmt + clippy + build + tests
     # Heavy: compiles Rust natively, which needs cc/ld and the OpenSSL headers of the dev image.
