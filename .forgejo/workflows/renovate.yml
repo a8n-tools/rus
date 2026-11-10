@@ -1,0 +1,28 @@
+---
+
+# Weekly Renovate scan of this repository, calling the shared reusable
+# workflow in psa-systems/common. The schedule and workflow_dispatch
+# triggers live here; the job itself lives in renovate-reusable.yml (RUS-46).
+
+name: Renovate
+
+on:
+  schedule:
+    # Saturday 02:00 UTC, the instant the shared preset's run window opens.
+    - cron: "0 2 * * 6"
+  workflow_dispatch:
+
+jobs:
+  renovate:
+    name: Renovate (caller)
+    uses: https://dev.a8n.run/psa-systems/common/.forgejo/workflows/renovate-reusable.yml@37fdc0b527551e1f74b1b79072b46c302ec8985f # main
+    # Medium: the job runs the renovate/renovate image, nothing compiles.
+    runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_MEDIUM }}
+    with:
+      target_repository: ${{ github.repository }}
+    secrets:
+      RENOVATE_CI_TOKEN: ${{ secrets.RENOVATE_CI_TOKEN }}
+      PUBLIC_GITHUB_REPO_TOKEN: ${{ secrets.PUBLIC_GITHUB_REPO_TOKEN }}
+      PSA_SYSTEMS_PRIVATE_PACKAGE_PAT: ${{ secrets.PSA_SYSTEMS_PRIVATE_PACKAGE_PAT }}
+      A8N_TOOLS_PRIVATE_PACKAGE_PAT: ${{ secrets.A8N_TOOLS_PRIVATE_PACKAGE_PAT }}
+      FORGEJO_PAT: ${{ secrets.FORGEJO_PAT }}

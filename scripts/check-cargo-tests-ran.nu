@@ -4,9 +4,12 @@
 #
 # Why this exists: cargo exits 0 when a leg collects no tests, when a name
 # filter matches nothing, and when every case is #[ignore]d. The test steps in
-# `just pre-commit` and .forgejo/workflows/check.yml could therefore report
+# `just check-ci` and .forgejo/workflows/check.yml could therefore report
 # green having asserted nothing (RUS-23). RUS-20 closed the same hole on the
-# JavaScript side in static/tests/run.mjs.
+# JavaScript side in static/tests/run.mjs. (RUS-47 renamed the guarded recipe
+# from `pre-commit` to `check-ci` when common.just's `pre-commit` moved to a
+# fmt-only hook; the local recipe where every test-step lives is now
+# `check-ci`.)
 #
 # Nothing here is hand-listed. The legs come from the [[bin]] required-features
 # in Cargo.toml, so a new build mode is covered the moment its binary lands,
@@ -31,13 +34,13 @@
 
 # Every recipe in the justfile and every step in this workflow must reach the
 # test harness through this guard. The named recipe must also still exist.
-const GUARDED_RECIPE = "pre-commit"
+const GUARDED_RECIPE = "check-ci"
 const GUARDED_WORKFLOW = ".forgejo/workflows/check.yml"
 
 # Floors, not targets: measured on main for RUS-23 and rounded down by roughly
 # seven percent, so retiring a stale case does not fail the build while an
 # empty, filtered or all-ignored run cannot clear them. Raise as the legs grow.
-# --lib scope, what `just pre-commit` runs: 304 standalone, 230 saas.
+# --lib scope, what `just check-ci` runs: 304 standalone, 230 saas.
 const MIN_LIB_PASSED = {standalone: 282, saas: 213}
 # All targets, what CI and `just test` / `just test-saas` run: 324 standalone
 # (lib 304 + tests/ 20), 230 saas (lib 230). RUS-24 dropped the duplicate
@@ -391,7 +394,7 @@ def run-self-test [floors: record] {
 
 export def main [
     --runner: string = "" # command that fronts cargo, e.g. a docker run wrapper
-    --lib # restrict each leg to the library target, as `just pre-commit` does
+    --lib # restrict each leg to the library target, as `just check-ci` does
     --leg: string = "" # run only this feature leg, as `just test` does (default: all)
     --self-test # prove the guard still rejects a vacuous run, then exit
 ] {
