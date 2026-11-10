@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+This repo consumes `common` as a git submodule (`common/`) and imports `common/common.just` from the root `justfile`; `common/docs/standards.md` (@common/docs/standards.md) governs it.
+
 ## Project Overview
 
 Rust URL Shortener (RUS) - A URL shortening service with JWT authentication, SQLite persistence, and click tracking. Built with Actix-web.
@@ -58,7 +60,8 @@ just test-saas                         # Guarded cargo tests, saas leg only
 just test-js                           # Static page tests (static/tests, Node container)
 just lint                              # Clippy (standalone)
 just fmt                               # Format code
-just pre-commit                        # Every CI check: the source-tree guard, fmt, clippy and build per leg, the guarded cargo tests, the static page tests
+just pre-push                          # Lightweight pre-push guards from common.just: fmt + em-dash + dprint. The heavy matrix lives in `just check-ci` and runs on demand or in CI (STD-4.2 forbids compiling in a hook).
+just check-ci                          # Every CI check: source-tree guard, clippy and build per leg, the guarded cargo tests, and the static page tests (RUS-47). Run before a push when local confidence beats waiting for CI; CI runs the same steps in .forgejo/workflows/check.yml.
 ```
 
 ## Architecture
@@ -122,7 +125,7 @@ src/
 - Assets: styles.css (global styles), theme.js (theme and contrast toggles), and auth.js, which handles token management and is served as k9f3x2m7.js
 - dashboard.html carries an Account section over `GET`/`PATCH /api/me`: the security alert address (standalone only, RUS-17) and the new-location alert opt-out (both modes, RUS-18). Its `apiFetch` helper picks the bearer token or the cookie from the `auth_mode` that `/api/config` reports, so one page serves both legs
 - `static/tests/` covers that page logic (RUS-20). `dom.mjs` extracts a page's real `<script>` tags, resolving `k9f3x2m7.js` back to `auth.js` the way `serve_auth_js` does, and evaluates them in a `node:vm` context wired to a stub DOM, `fetch` and `localStorage`, so the tests drive the shipped page rather than a copy of its logic. Covered: the Account section painting and its changed-fields-only PATCH in both auth modes, the bearer-versus-cookie split, the 400 path, and signup's optional address
-- Run them with `just test-js`, or as the last step of `just pre-commit`; CI runs the same entry point in `.forgejo/workflows/check.yml`. `static/tests/run.mjs` is that entry point: it discovers the `*.test.mjs` files itself and exits non-zero when fewer than the expected number of tests report, because `node --test` exits 0 when its arguments match no file. The cargo legs are held to the same kind of floor by `scripts/check-cargo-tests-ran.nu`; see "Test floors" under CI
+- Run them with `just test-js`, or as the last step of `just check-ci` (RUS-47); CI runs the same entry point in `.forgejo/workflows/check.yml`. `just pre-push` does NOT run them, since STD-4.2 forbids compiling in a hook. `static/tests/run.mjs` is that entry point: it discovers the `*.test.mjs` files itself and exits non-zero when fewer than the expected number of tests report, because `node --test` exits 0 when its arguments match no file. The cargo legs are held to the same kind of floor by `scripts/check-cargo-tests-ran.nu`; see "Test floors" under CI
 
 ### API Structure
 - **Public**: `/api/register`, `/api/login`, `/api/login-approval` (GET, POST), `/{short_code}` (redirect)
@@ -306,7 +309,7 @@ A single `Dockerfile` builds both modes via `BUILD_MODE` ARG (`standalone` defau
 ### Test floors
 Both test harnesses exit 0 on an empty run, so both are held to a minimum pass count rather than to their exit code alone.
 
-- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 282 / `saas` 213 for the `--lib` scope `just pre-commit` uses, and `standalone` 310 / `saas` 213 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 304 / 230 and 324 / 230. An all-targets floor has to sit above its own leg's `--lib` count, because the guard sums the pass counts of every target in the leg: standalone was 285 until RUS-31, so the whole `tests/` suite could have stopped running and the library tests left would still have cleared it. Raise them as the legs grow; never lower one to make a red run green.
+- Rust: `scripts/check-cargo-tests-ran.nu` runs each feature leg and fails on a missing `test result:` line, zero passed, any `ignored`, any `filtered out`, or a total under the leg's floor. Floors are `standalone` 282 / `saas` 213 for the `--lib` scope `just check-ci` uses (RUS-47), and `standalone` 310 / `saas` 213 for the all-targets scope CI and the single-leg `just test` / `just test-saas` recipes use, against counts measured on this branch of 304 / 230 and 324 / 230. An all-targets floor has to sit above its own leg's `--lib` count, because the guard sums the pass counts of every target in the leg: standalone was 285 until RUS-31, so the whole `tests/` suite could have stopped running and the library tests left would still have cleared it. Raise them as the legs grow; never lower one to make a red run green.
 - `--leg <name>` narrows a run to one leg, for the single-leg developer recipes (RUS-26). An unknown name is an error listing the known legs rather than an empty selection, because a run with no leg has no row left to violate anything, and the selected leg is still held to its own floor. The guard prints that floor beside the pass count on every run.
 - Excluded targets: the same guard reads every target table in `Cargo.toml` (`lib`, `bin`, `example`, `test`, `bench`), and fails when an entry that sets `test = false` has a source carrying `#[cfg(test)]`, `#[cfg_attr(test, ...)]` or a `#[test]`-shaped attribute (RUS-27). Such a block compiles under `cargo clippy --all-targets` and is then never run, which is the same vacuous green the pass floors exist to catch. A source the guard cannot read is a failure too, so it never passes a target it did not look at.
 - JavaScript: `static/tests/run.mjs` fails below 3 test files or 14 passing tests (RUS-20).

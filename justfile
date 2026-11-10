@@ -1,17 +1,43 @@
 # Rust URL Shortener (RUS) - Task Runner
 
-# List available recipes
+# SPEC-3.2, SPEC-3.5: required because the default recipe below redefines one common.just also defines.
+set allow-duplicate-recipes := true
+
+# SPEC-3.1: set before the import line below, per SPEC-1.5.
+app := "rus"
+
+# RUS-47: route the fmt-only pre-commit/pre-push leg through a `docker run`
+# of the builder image rather than `docker compose run`, because the
+# compose `app` service builds the production runtime image (alpine +
+# server ENTRYPOINT, no cargo) and cannot run `cargo fmt`.
+pre_commit_mode := "docker"
+
+# Image used by the fmt leg (common.just's `pre-commit-docker`) and inherited
+# by this repo's own `check-ci` for every feature leg. Matches the `builder`
+# stage in oci-build/Dockerfile so local checks use the same toolchain rus
+# is built against.
+# Set before the import line (SPEC-3.1, SPEC-3.4) since common.just also defines `dev_image`.
+dev_image := "ghcr.io/niceguyit/rust-builder-musl:v1.1.0-rust1.98.1-alpine"
+
+# RUS-47: `check-ci` carries the heavy per-leg matrix (source-tree guard,
+# clippy and build for both feature legs, guarded cargo tests, static page
+# tests). It is NOT wired into `pre_push_checks`: STD-4.2 and STD-4.3 forbid
+# compiling code in a git hook, and the CI job in `.forgejo/workflows/check.yml`
+# is the authoritative run of that matrix. Run `just check-ci` on demand
+# before a push when local confidence beats waiting for CI.
+
+# RUS-47: single-crate layout for common's `create-release` dispatcher.
+# `release_crate` defaults to `app` ("rus"), so it is not set.
+release_layout := "generic"
+
+import 'common/common.just'
+
+# List available recipes. Keep FIRST: just picks the default recipe by source order (SPEC-1.6, SPEC-3.2).
 default:
     @just --list
 
 # Use the per-developer Traefik-routed dev compose file
 compose := "docker compose -f compose.dev.yml "
-
-# Image used by the pre-commit hook. Matches the `builder` stage in
-# oci-build/Dockerfile so `just pre-commit` runs the same toolchain rus is
-# built against. The compose `app` service builds the production runtime
-# image (alpine + server ENTRYPOINT, no cargo), so pre-commit must not use it.
-dev_image := "ghcr.io/niceguyit/rust-builder-musl:v1.1.0-rust1.98.1-alpine"
 
 # Image for the static/ page tests. The rust-builder image ships no Node, so the
 # JS step gets its own pinned image; docker is already required by pre-commit, so
@@ -185,117 +211,28 @@ dev-clean-all: dev-clean
 
 # ── Release ──────────────────────────────────────────────────────────────────
 
-# Create a release: bump major (vx.0.0), minor (v0.x.0), or hotfix (v0.0.x) version, commit, tag, and push
-# After the PR is merged, the create-release workflow creates the tag and release automatically
-[group: 'release']
-create-release bump:
-    #!/usr/bin/env nu
-    let bump = "{{ bump }}"
-
-    # Abort if there are uncommitted changes
-    let status = git status --porcelain | str trim
-    if ($status | is-not-empty) {
-        print $"(ansi red)Working tree is dirty. Please stash or commit your changes first.(ansi reset)"
-        exit 1
-    }
-
-    # Switch to main if not already there
-    let branch = git branch --show-current | str trim
-    if $branch != "main" {
-        print $"Switching from ($branch) to main..."
-        git checkout main
-    }
-
-    # Pull latest changes
-    git pull --rebase origin main
-
-    # Calculate next version
-    let current = (open Cargo.toml | get package.version | split row "." | each { into int })
-    let next = match $bump {
-        "major" => [$"($current.0 + 1)" "0" "0"],
-        "minor" => [$"($current.0)" $"($current.1 + 1)" "0"],
-        "hotfix" => [$"($current.0)" $"($current.1)" $"($current.2 + 1)"],
-        _ => { print $"(ansi red)Usage: just create-release <major|minor|hotfix>(ansi reset)"; exit 1 }
-    }
-    let bare = ($next | str join ".")
-    let tag = $"v($bare)"
-    let release_branch = $"release/($tag)"
-
-    # Create release branch, bump version, and commit
-    git checkout -b $release_branch
-    open Cargo.toml | update package.version $bare | to toml | collect | save --force Cargo.toml
-    git add Cargo.toml
-    git commit --signoff --message $"Release ($tag)"
-
-    # Push release branch
-    git push --set-upstream origin $release_branch
-
-    # Open the release PR via fj. Body lives in a tempfile so the
-    # changelog can grow later without inline escaping pain.
-    let body_file = (mktemp --tmpdir --suffix .md)
-    [
-        $"Automated release PR for ($tag)."
-        ""
-        $"After merge, `.forgejo/workflows/create-release.yml` tags and publishes ($tag) to the Generic Packages registry."
-    ] | str join "\n" | save --force $body_file
-    let fj_result = (^fj --host dev.a8n.run pr create $"Release ($tag)" --body-file $body_file | complete)
-    rm $body_file
-    if $fj_result.exit_code != 0 {
-        print $"(ansi red)fj pr create failed(ansi reset)"
-        print $fj_result.stderr
-        exit 1
-    }
-
-    # `fj pr create` prints `created pull request #N: <title>` on success.
-    # Parse the number out and build the PR URL from `origin`.
-    let pr_num = (
-        $fj_result.stdout
-        | str trim
-        | parse --regex 'created pull request #(?P<num>\d+)'
-        | get num.0?
-    )
-    let remote = (git remote get-url origin | str trim)
-    let base_url = if ($remote | str starts-with "ssh://") {
-        $remote | str replace "ssh://git@" "https://" | str replace "git.a8n.run" "dev.a8n.run" | str replace ".git" ""
-    } else {
-        $remote | str replace --regex "git@([^:]+):" "https://$1/" | str replace "git.a8n.run" "dev.a8n.run" | str replace ".git" ""
-    }
-    print $"(ansi green)Pushed ($release_branch)(ansi reset)"
-    if ($pr_num | is-not-empty) {
-        print $"PR: ($base_url)/pulls/($pr_num)"
-    } else {
-        # fj output format drifted; fall back to whatever it said.
-        print $"fj output: ($fj_result.stdout | str trim)"
-    }
-    print $"After merging, the create-release workflow will tag and release ($tag) automatically."
+# RUS-47: `create-release` now comes from common.just via `release_layout
+# := "generic"` (set above). Common bumps `[package] version` in Cargo.toml,
+# opens the release PR via `fj --host dev.a8n.run pr create`, and runs the
+# same preflight checks the old local recipe did. The automatic tag + image
+# publish still runs through .forgejo/workflows/create-release.yml on merge.
 
 # ── Hooks ──────────────────────────────────────────────────────────────────
 
-# Install the git pre-commit hook (run once per fresh clone). Writes a stub at .git/hooks/pre-commit that execs `just pre-commit`. Bypass with `git commit --no-verify`.
-[group: 'hooks']
-install-hooks:
-    #!/usr/bin/env nu
-    let hook = ".git/hooks/pre-commit"
-    # Remove first so a leftover symlink from an older install does not get
-    # written through to its target file. `try` swallows the not-found case.
-    try { rm $hook }
-    "#!/usr/bin/env sh\nexec just pre-commit\n" | save $hook
-    ^chmod +x $hook
-    print $"Wrote ($hook) -> just pre-commit"
+# RUS-47: `install-hooks`, `pre-commit` and the fmt-only leg of `pre-push` now
+# come from common.just. The heavy per-leg check matrix (source-tree guard,
+# clippy and build per feature leg, guarded cargo tests, static page tests)
+# lives in `check-ci` below. It is NOT in `pre_push_checks`: STD-4.2 forbids
+# compiling in a git hook and STD-4.3 forbids a compile step reachable
+# through `pre_push_checks`; CI runs this matrix in `.forgejo/workflows/check.yml`
+# instead. Run `just check-ci` on demand when a local full-suite run is wanted.
 
-# Run the same checks as .forgejo/workflows/check.yml inside the rust-builder-musl
-# image so the toolchain matches CI. Runs cargo against the builder image, NOT the
-# production `app` runtime image (whose ENTRYPOINT boots the server), so a fresh
-# clone passes without booting any service. The first step is
-# scripts/check-source-tree.nu, which compiles nothing and fails a README / CLAUDE
-# source tree that drifted from src/ (RUS-29). The test step goes through
-# scripts/check-cargo-tests-ran.nu, which derives the feature legs from Cargo.toml,
-# fails a run that tested nothing (RUS-23) and fails a `test = false` target whose
-# source carries test code cargo test never runs (RUS-27). The final step drives the static/
-# pages in a Node container, which the builder image does not carry. Test secrets
-# are injected via --env; no .env / ensure-env is required.
-[group: 'hooks']
-pre-commit:
+# Run every CI check: source-tree guard, clippy and build for standalone and
+# saas, the guarded library tests (lib leg only), and the static/ page tests.
+# Not reachable from any git hook; run on demand before pushing when local
+# confidence beats waiting for CI.
+[group: 'check']
+check-ci:
     #!/usr/bin/env nu
     let img = "{{ dev_image }}"
     let user_name = (^whoami | str trim)
@@ -304,20 +241,18 @@ pre-commit:
     let vols = ["--volume" $"($env.PWD):/build" "--workdir" "/build" "--volume" $"($target_vol):/build/target" "--volume" $"($reg_vol):/usr/local/cargo/registry"]
     # Static and instant, so a source tree that drifted from src/ fails before
     # anything is compiled. --self-test first, same reason as the cargo guard.
-    print "\n[pre-commit] source tree vs src/"
+    print "\n[check-ci] source tree vs src/"
     ^nu scripts/check-source-tree.nu --self-test
     ^nu scripts/check-source-tree.nu
-    print "\n[pre-commit] cargo fmt --check"
-    ^docker run --rm ...$vols $img cargo fmt --check
-    print "\n[pre-commit] cargo clippy --all-targets --features standalone -- -D warnings"
+    print "\n[check-ci] cargo clippy --all-targets --features standalone -- -D warnings"
     ^docker run --rm ...$vols $img cargo clippy --all-targets --features standalone -- -D warnings
-    print "\n[pre-commit] cargo clippy --all-targets --no-default-features --features saas -- -D warnings"
+    print "\n[check-ci] cargo clippy --all-targets --no-default-features --features saas -- -D warnings"
     ^docker run --rm ...$vols $img cargo clippy --all-targets --no-default-features --features saas -- -D warnings
-    print "\n[pre-commit] cargo build --all-targets --features standalone"
+    print "\n[check-ci] cargo build --all-targets --features standalone"
     ^docker run --rm ...$vols $img cargo build --all-targets --features standalone
-    print "\n[pre-commit] cargo build --all-targets --no-default-features --features saas"
+    print "\n[check-ci] cargo build --all-targets --no-default-features --features saas"
     ^docker run --rm ...$vols $img cargo build --all-targets --no-default-features --features saas
-    print "\n[pre-commit] guarded library tests (every feature leg)"
+    print "\n[check-ci] guarded library tests (every feature leg)"
     # --self-test first: a guard that stopped detecting a vacuous run, or a
     # `test = false` target carrying test code, must fail here rather than wave
     # every later leg through (RUS-23, RUS-27).
@@ -325,7 +260,7 @@ pre-commit:
     let secrets = ["--env" "JWT_SECRET=test-secret-at-least-32-chars-ok!"]
     let runner = (["docker" "run" "--rm"] | append $vols | append $secrets | append $img | str join " ")
     ^nu scripts/check-cargo-tests-ran.nu --lib --runner $runner
-    print "\n[pre-commit] node static/tests/run.mjs"
+    print "\n[check-ci] node static/tests/run.mjs"
     ^docker run --rm --volume $"($env.PWD):/build:ro" --workdir /build "{{ node_image }}" node static/tests/run.mjs
-    print "\n[pre-commit] all checks passed"
+    print "\n[check-ci] all checks passed"
 

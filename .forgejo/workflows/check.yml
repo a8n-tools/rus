@@ -9,9 +9,41 @@ on:
       - main
 jobs:
   secrets:
-    uses: psa-systems/common/.forgejo/workflows/check-secrets.yml@main
+    uses: https://dev.a8n.run/psa-systems/common/.forgejo/workflows/check-secrets.yml@main
     runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_MEDIUM }}
     secrets: inherit
+    with:
+      # Skip the `common` submodule: it carries a documented `self-check.yml`
+      # Postgres placeholder URL that Kingfisher flags as POSTGRES.1 and that
+      # common's own CI already suppresses via `noseyparker_findings_exclude`.
+      # The placeholder is scanned on every change to common itself; re-scanning
+      # it from every consumer is noise. Noseyparker's scan runs after
+      # `git for-each-ref` drops every non-HEAD ref so the submodule's own
+      # history is unreachable from the scan's git-history mode; no companion
+      # `noseyparker_findings_exclude` is needed for this placeholder.
+      kingfisher_excludes: "common"
+      # Noseyparker finding ids for this repo's intentional test fixtures and
+      # dev-only credentials. Each id is derived from the rule + matched text,
+      # so it suppresses exactly these secret-shapes wherever they appear
+      # (including in git history) and leaves every other match live. A real
+      # production credential elsewhere in the repo is a different id and
+      # still fails the scan (common's PC-64 rule).
+      #
+      # - `57e9...`, `38c1...`: the `Admin1234!` dev seed password in
+      #   `src/setup_admin.rs` (SETUP_DEFAULT_ADMIN) and its integration test.
+      # - `4f8e...`: `WrongPass1!` in `src/handlers/auth.rs` login-failure
+      #   test cases.
+      # - `80a0...`: dev password example in `docs/prompts/chunk-41-integration-testing.md`.
+      # - `b4f4...`: password examples in `README.md` and `CLAUDE.md`
+      #   test snippets.
+      # - `abd0...`: fixed password in `static/tests/signup-email.test.mjs`.
+      #
+      # The `OIDC_CLIENT_SECRET=a5fa8b74...` in `.env.saas` (finding id
+      # `32dbd80...`) is deliberately left live: it is a 64-hex-char value
+      # that looks like a real credential, and leaving the scan red on it
+      # keeps it visible as a rotate-me marker. Follow-up after rotation is
+      # to replace the value, bump the ids above, and add the new id here.
+      noseyparker_findings_exclude: "57e9cedb4b10ba082b962e2013e30f73d0bfdcb1,38c10134d1e530ce34e613620738583a3e06f1ce,4f8e09928795e7473c66af3cfcd40e3a97ab2eb8,80a09f38e18046a5df959804d1329e1b8c582d2b,b4f41ea35f7fcd55877280c00bcbeceb7508f1f9,abd0114be9da0223dee49c05e33b3e16e5b6be24"
   check:
     name: fmt + clippy + build + tests
     # Heavy: compiles Rust natively, which needs cc/ld and the OpenSSL headers of the dev image.
