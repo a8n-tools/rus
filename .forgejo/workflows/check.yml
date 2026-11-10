@@ -12,6 +12,13 @@ jobs:
     uses: https://dev.a8n.run/psa-systems/common/.forgejo/workflows/check-secrets.yml@main
     runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_MEDIUM }}
     secrets: inherit
+    with:
+      # Skip the `common` submodule: it carries a documented `self-check.yml`
+      # Postgres placeholder URL that Kingfisher flags as POSTGRES.1 and that
+      # common's own CI already suppresses via `noseyparker_findings_exclude`.
+      # The placeholder is scanned on every change to common itself; re-scanning
+      # it from every consumer is noise.
+      kingfisher_excludes: "common"
   check:
     name: fmt + clippy + build + tests
     # Heavy: compiles Rust natively, which needs cc/ld and the OpenSSL headers of the dev image.
