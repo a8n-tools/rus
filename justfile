@@ -19,11 +19,12 @@ pre_commit_mode := "docker"
 # Set before the import line (SPEC-3.1, SPEC-3.4) since common.just also defines `dev_image`.
 dev_image := "ghcr.io/niceguyit/rust-builder-musl:v1.1.0-rust1.98.1-alpine"
 
-# RUS-47: common's `pre-push` only runs fmt + em-dash + dprint. The heavy
-# per-leg matrix (source-tree guard, clippy and build for both feature
-# legs, guarded cargo tests, static page tests) lives in `check-ci`
-# below and runs on every push through this hook.
-pre_push_checks := "check-ci"
+# RUS-47: `check-ci` carries the heavy per-leg matrix (source-tree guard,
+# clippy and build for both feature legs, guarded cargo tests, static page
+# tests). It is NOT wired into `pre_push_checks`: STD-4.2 and STD-4.3 forbid
+# compiling code in a git hook, and the CI job in `.forgejo/workflows/check.yml`
+# is the authoritative run of that matrix. Run `just check-ci` on demand
+# before a push when local confidence beats waiting for CI.
 
 # RUS-47: single-crate layout for common's `create-release` dispatcher.
 # `release_crate` defaults to `app` ("rus"), so it is not set.
@@ -221,13 +222,15 @@ dev-clean-all: dev-clean
 # RUS-47: `install-hooks`, `pre-commit` and the fmt-only leg of `pre-push` now
 # come from common.just. The heavy per-leg check matrix (source-tree guard,
 # clippy and build per feature leg, guarded cargo tests, static page tests)
-# lives in `check-ci` below, which `pre_push_checks := "check-ci"` chains
-# into common's `pre-push` after fmt / em-dash / dprint.
+# lives in `check-ci` below. It is NOT in `pre_push_checks`: STD-4.2 forbids
+# compiling in a git hook and STD-4.3 forbids a compile step reachable
+# through `pre_push_checks`; CI runs this matrix in `.forgejo/workflows/check.yml`
+# instead. Run `just check-ci` on demand when a local full-suite run is wanted.
 
 # Run every CI check: source-tree guard, clippy and build for standalone and
 # saas, the guarded library tests (lib leg only), and the static/ page tests.
-# `pre_push_checks := "check-ci"` (above) wires this into common's `pre-push`
-# so it fires on every push. Also runnable on its own locally.
+# Not reachable from any git hook; run on demand before pushing when local
+# confidence beats waiting for CI.
 [group: 'check']
 check-ci:
     #!/usr/bin/env nu
