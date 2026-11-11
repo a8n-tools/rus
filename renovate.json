@@ -1,0 +1,6 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["local>psa-systems/common:renovate-default"],
+  "gitAuthor": "renovate-bot <renovate-bot@users.noreply.dev.a8n.run>",
+  "osvVulnerabilityAlerts": true
+}
