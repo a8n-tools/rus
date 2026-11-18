@@ -33,7 +33,7 @@ jobs:
   build-and-push:
     name: Build and push ${{ matrix.image }}
     # Heavy: `docker buildx build` compiles the release binary for each image.
-    runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_HEAVY }}
+    runs-on: ${{ vars.RUNS_ON_OPENSUSE_HEAVY }}
     permissions:
       contents: read
       packages: write

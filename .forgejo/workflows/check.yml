@@ -10,7 +10,7 @@ on:
 jobs:
   secrets:
     uses: https://dev.a8n.run/psa-systems/common/.forgejo/workflows/check-secrets.yml@main
-    runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_MEDIUM }}
+    runs-on: ${{ vars.RUNS_ON_OPENSUSE_MEDIUM }}
     secrets: inherit
     with:
       # Skip the `common` submodule: it carries a documented `self-check.yml`
@@ -47,7 +47,7 @@ jobs:
   check:
     name: fmt + clippy + build + tests
     # Heavy: compiles Rust natively, which needs cc/ld and the OpenSSL headers of the dev image.
-    runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_HEAVY }}
+    runs-on: ${{ vars.RUNS_ON_OPENSUSE_HEAVY }}
     env:
       # Only the standalone leg reads a JWT secret; the saas leg has none.
       JWT_SECRET: test-secret-at-least-32-chars-ok!
