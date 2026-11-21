@@ -15,7 +15,7 @@ on:
 jobs:
   renovate:
     name: Renovate (caller)
-    uses: https://dev.a8n.run/psa-systems/common/.forgejo/workflows/renovate-reusable.yml@37fdc0b527551e1f74b1b79072b46c302ec8985f # main
+    uses: https://dev.a8n.run/psa-systems/common/.forgejo/workflows/renovate-reusable.yml@85947e70a7d38f02e60d77bc04d5179c9f800da4 # main
     # Medium: the job runs the renovate/renovate image, nothing compiles.
     runs-on: ${{ vars.RUNS_ON_OPENSUSE_BASE_MEDIUM }}
     with:
